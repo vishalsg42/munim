@@ -49,7 +49,7 @@ Requires Python 3.10+.
 ```bash
 git clone https://github.com/vishalsg42/munim && cd munim
 uv venv && uv pip install -e .
-claude mcp add munim -- "$(pwd)/.venv/bin/munim"
+claude mcp add munim -- "$(pwd)/.venv/bin/munim-mcp"
 ```
 
 Set a model host in `.env` (see `.env.example`). Any Strands-supported provider works —
@@ -57,6 +57,16 @@ Amazon Bedrock, Gemini, Anthropic, OpenAI, Ollama:
 
 ```
 GEMINI_API_KEY=...
+```
+
+Connect a client. Where a provider publishes an OAuth flow this opens a browser
+and no secret ever passes through your coding agent; where it does not, you paste
+a key once and it goes straight to your keychain:
+
+```bash
+munim connect "Balaji Roofings" vercel      # browser login
+munim connect "Balaji Roofings" resend      # Resend has no OAuth; key only
+munim clients                                # what is connected
 ```
 
 Then, in your coding agent:
