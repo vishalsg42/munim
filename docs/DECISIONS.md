@@ -182,3 +182,41 @@ Demo exclusively against a tenant the operator owns, clearly labelled as a demo 
 **Why.** The repository is public and the video is public; the accounts belong to clients who
 have not consented to appear in either. Same discipline Passbook applied to the real bank
 statements.
+
+---
+
+## D13 — AgentCore is justified by hosting, not by the rules *(revises D4)*
+
+**Context.** D4 chose local-first, which left AgentCore barely used. The obvious fix was to move
+the agents onto AgentCore Runtime. Challenged on 2026-09-03: *does it really need AgentCore, and
+how would we justify it?*
+
+**Finding.** For the local mode it is not needed, and forcing it would be visible. Twelve AWS
+judges know their own product. Shipping a client's API keys to a cloud vault when the OS keychain
+would keep them on the operator's own machine is not a stronger design — for this use case it is
+arguably a weaker one. Also worth stating precisely: **Strands is required, AgentCore is only
+recommended.** The criterion's subject is Strands.
+
+**Decision.** One `Container` interface, two backends.
+
+| Backend | Isolation | Credentials | When |
+|---|---|---|---|
+| `LocalBackend` | subprocess per container | OS keychain | One operator, own machine. **Built first** |
+| `AgentCoreBackend` | Runtime per-session isolation | AgentCore Identity | Multiple clients' keys on shared infrastructure |
+
+Strands sits above both and is identical either way; the backend only decides where the walls
+come from.
+
+**Why this is the honest justification.** AgentCore appears **because hosting other people's
+credentials changes the threat model** — not because the rules suggested it. "We wrote our own
+sandbox" is the wrong answer once twelve clients' keys share a host; per-session isolation is
+the right one. And OAuth flows cannot be completed interactively on a headless box, which is
+what Identity handles.
+
+**Cost, stated.** If `AgentCoreBackend` never ships, we forfeit the live-demo-link boost on
+Technical and an easy differentiator in a field where few use AgentCore. The README then states
+why local is correct for a single operator, which is an answer rather than a gap.
+
+**Not a reason to change concept.** The challenge that produced this entry was about where keys
+live. The concept was never in question: verified-empty lane, real workflow, a demo with a
+finish line, and genuine work for a Strands agent to do.
