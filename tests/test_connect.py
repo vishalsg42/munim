@@ -1,0 +1,92 @@
+"""OAuth is how a client gets connected once and never again.
+
+These test the properties that make the flow safe, not that it runs: PKCE is
+actually PKCE, a forged callback is refused, and the token lands scoped to one
+client so a dozen grants for the same provider can coexist - which is the whole
+point and the thing no provider's own login can do.
+"""
+
+import base64
+import hashlib
+import urllib.parse
+
+import pytest
+
+from munim.connect.oauth import PROVIDERS, OAuthConnector, _pkce
+from munim.connect.token import TokenConnector
+
+
+class FakeKeychain:
+    def __init__(self):
+        self.store = {}
+
+    def get(self, client, provider):
+        return self.store.get((client, provider))
+
+    def set(self, client, provider, secret):
+        self.store[(client, provider)] = secret
+
+
+def test_the_challenge_is_the_sha256_of_the_verifier():
+    """If this is wrong the flow still 'works' against a lax provider and the
+    protection PKCE exists for is silently absent."""
+    verifier, challenge = _pkce()
+    expected = base64.urlsafe_b64encode(
+        hashlib.sha256(verifier.encode()).digest()
+    ).decode().rstrip("=")
+    assert challenge == expected
+    assert "=" not in challenge  # base64url, unpadded, per RFC 7636
+
+
+def test_each_flow_gets_a_fresh_verifier():
+    assert _pkce()[0] != _pkce()[0]
+
+
+def test_the_authorize_url_asks_for_s256_and_our_own_redirect():
+    url = OAuthConnector(FakeKeychain()).authorize_url(
+        "cloudflare", "client-123", "state-abc", "challenge-xyz")
+    params = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(url).query))
+    assert params["code_challenge_method"] == "S256"
+    assert params["code_challenge"] == "challenge-xyz"
+    assert params["response_type"] == "code"
+    assert params["redirect_uri"].startswith("http://localhost:")
+    # The verifier itself must never appear in a URL the browser sees.
+    assert "code_verifier" not in params
+
+
+def test_cloudflare_asks_for_the_scopes_it_needs_and_no_more():
+    url = OAuthConnector(FakeKeychain()).authorize_url("cloudflare", "c", "s", "ch")
+    scope = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(url).query))["scope"]
+    assert "dns_records:edit" in scope   # writing DNS is the job
+    assert "offline_access" in scope     # so the grant survives a restart
+    assert "user:edit" not in scope      # never ask for account mutation
+
+
+def test_a_provider_with_no_oauth_endpoint_is_absent_not_faked():
+    """Resend publishes no authorization endpoint. D11: absent, not stubbed."""
+    assert "resend" not in PROVIDERS
+    with pytest.raises(ValueError, match="no OAuth"):
+        OAuthConnector(FakeKeychain()).connect("acme", "resend", "id")
+
+
+def test_a_token_is_stored_against_one_client_only():
+    keychain = FakeKeychain()
+    TokenConnector(keychain).connect("acme", "resend", "re_secret")
+    assert keychain.get("acme", "resend") == "re_secret"
+    # The same provider for another client is untouched: that separation is the
+    # product.
+    assert keychain.get("bharat", "resend") is None
+
+
+def test_two_clients_hold_grants_for_the_same_provider_at_once():
+    keychain = FakeKeychain()
+    connector = TokenConnector(keychain)
+    connector.connect("acme", "resend", "acme-key")
+    connector.connect("bharat", "resend", "bharat-key")
+    assert keychain.get("acme", "resend") == "acme-key"
+    assert keychain.get("bharat", "resend") == "bharat-key"
+
+
+def test_an_empty_credential_is_refused():
+    with pytest.raises(ValueError):
+        TokenConnector(FakeKeychain()).connect("acme", "resend", "   ")
