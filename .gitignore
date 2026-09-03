@@ -7,3 +7,7 @@ __pycache__/
 fixtures/real/
 .pytest_cache/
 .DS_Store
+
+# Control room build
+room/node_modules/
+room/dist/
