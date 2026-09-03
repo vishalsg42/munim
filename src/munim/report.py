@@ -49,6 +49,9 @@ code { font:12px/1.5 "SF Mono",ui-monospace,monospace; color:#5f6368;
 """
 
 
+REPORTS_DIR = Path.home() / ".munim" / "reports"
+
+
 def _e(text: str) -> str:
     return html.escape(str(text))
 
@@ -111,7 +114,7 @@ def render(log: RunLog, *, domain: str, business: str) -> str:
 
 
 def write(log: RunLog, *, domain: str, business: str, out_dir: Path | None = None) -> Path:
-    directory = Path(out_dir or (Path.home() / ".munim" / "reports"))
+    directory = Path(out_dir or REPORTS_DIR)
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{log.run_id}.html"
     path.write_text(render(log, domain=domain, business=business), encoding="utf-8")
