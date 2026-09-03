@@ -195,3 +195,47 @@ def test_platform_detection_is_suffix_anchored():
     assert checks.is_platform_domain("BALAJI.VERCEL.APP")
     assert not checks.is_platform_domain("vercel.app.acme.example")
     assert not checks.is_platform_domain("myvercel.app-store.example")
+
+
+async def test_prefetch_deduplicates_the_records_several_checks_share():
+    """spf_single and spf_lookups both want the apex TXT; dmarc_present and
+    dmarc_policy both want _dmarc. Fetching each once is where the win is."""
+    from munim.checks import dns as d
+
+    seen = []
+
+    def counting_query(name, rdtype, nameserver="1.1.1.1"):
+        seen.append((name, rdtype))
+        return []
+
+    original = d.query
+    d.query = counting_query
+    try:
+        cache = await d.prefetch("acme.example", "resend")
+    finally:
+        d.query = original
+
+    assert len(seen) == len(set(seen)), "the same record was fetched twice"
+    assert ("acme.example", "TXT") in cache
+    assert ("_dmarc.acme.example", "TXT") in cache
+    assert ("resend._domainkey.acme.example", "TXT") in cache
+
+
+async def test_a_failing_lookup_does_not_lose_the_others():
+    """One unreachable record must not take the whole scan down."""
+    from munim.checks import dns as d
+
+    def flaky(name, rdtype, nameserver="1.1.1.1"):
+        if rdtype == "CAA":
+            raise OSError("resolver unreachable")
+        return ["ok"]
+
+    original = d.query
+    d.query = flaky
+    try:
+        cache = await d.prefetch("acme.example")
+    finally:
+        d.query = original
+
+    assert cache[("acme.example", "CAA")] == []
+    assert cache[("acme.example", "TXT")] == ["ok"]

@@ -14,6 +14,7 @@ after the record exists. Asking the authoritative nameserver and a public
 resolver separately turns that into the diagnosis rather than a wrong answer.
 """
 
+import asyncio
 import re
 import socket
 import ssl
@@ -362,6 +363,50 @@ def cert_valid(domain: str, days: int = 14, timeout: float = 8.0) -> CheckResult
                        f"in {left} days unless it renews.",
                        evidence=f"notAfter={cert['notAfter']}", resolver="tls",
                        detail={"days_left": left})
+
+
+async def prefetch(domain: str, dkim_selector: str = "resend",
+                   ns: str = "1.1.1.1") -> dict[tuple[str, str], list[str]]:
+    """Fetch every record the catalogue needs, concurrently, once.
+
+    The checks are sequential and several read the same record - spf_single and
+    spf_lookups both want the apex TXT, dmarc_present and dmarc_policy both want
+    _dmarc. Fetching serially made a "parallel" scan slower than a serial one,
+    because the concurrency was at the wrong level: threads per client, each
+    still doing thirteen round trips in a row.
+
+    This fans out at the level that actually costs time - the lookups - and
+    deduplicates them.
+    """
+    wanted = [
+        (domain, "TXT"), (domain, "MX"), (domain, "NS"),
+        (domain, "A"), (domain, "AAAA"), (domain, "CAA"),
+        (f"_dmarc.{domain}", "TXT"),
+        (f"{dkim_selector}._domainkey.{domain}", "TXT"),
+    ]
+    answers = await asyncio.gather(
+        *(asyncio.to_thread(query, name, rdtype, ns) for name, rdtype in wanted),
+        return_exceptions=True,
+    )
+    cache: dict[tuple[str, str], list[str]] = {}
+    for key, value in zip(wanted, answers):
+        cache[key] = [] if isinstance(value, BaseException) else value
+    return cache
+
+
+async def run_all_async(domain: str, *, dkim_selector: str = "resend",
+                        expect_ns: str = "", ns: str = "1.1.1.1") -> list[CheckResult]:
+    """run_all, with the lookups fanned out and deduplicated first."""
+    global query
+    cache = await prefetch(domain, dkim_selector, ns)
+    original = query
+    try:
+        query = lambda name, rdtype, nameserver="1.1.1.1": cache.get(  # noqa: E731
+            (name, rdtype), original(name, rdtype, nameserver))
+        return run_all(domain, dkim_selector=dkim_selector,
+                       expect_ns=expect_ns, ns=ns)
+    finally:
+        query = original
 
 
 def run_all(domain: str, *, dkim_selector: str = "resend",
