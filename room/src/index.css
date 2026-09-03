@@ -1,9 +1,14 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: "SF Mono", ui-monospace, "JetBrains Mono", monospace;
 }
 
 html, body, #root { height: 100%; }
-body { background: #0b0d10; color: #e8eaed; }
+body {
+  /* Warm off-white rather than pure white: paper, not a blank canvas. */
+  background: #fbfaf8;
+  color: #17191c;
+  -webkit-font-smoothing: antialiased;
+}
