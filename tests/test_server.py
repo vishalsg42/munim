@@ -79,3 +79,58 @@ async def test_client_status_reports_presence_not_values(tmp_path):
     result = str(await server.call_tool("client_status", {"client": "acme"}))
     assert "resend" in result
     assert "re_x" not in result
+
+
+async def test_naming_a_new_domain_registers_it_and_checks_it(tmp_path, monkeypatch):
+    """No setup step. The first mention of a domain is enough, because a DNS
+    lookup is public and there is nothing to protect on a read."""
+    from munim.checks import dns as checks
+    monkeypatch.setattr(checks, "query", lambda *a, **k: [])
+    monkeypatch.setattr(checks, "run_reachability", lambda d: [])
+
+    server, registry = _server(tmp_path)
+    assert [c.name for c in registry.clients()] == ["acme"]
+
+    await server.call_tool("check", {"target": "newclient.example"})
+    assert "newclient.example" in [c.name for c in registry.clients()]
+
+
+async def test_naming_the_same_domain_twice_does_not_duplicate_it(tmp_path, monkeypatch):
+    from munim.checks import dns as checks
+    monkeypatch.setattr(checks, "query", lambda *a, **k: [])
+    monkeypatch.setattr(checks, "run_reachability", lambda d: [])
+
+    server, registry = _server(tmp_path)
+    await server.call_tool("check", {"target": "newclient.example"})
+    await server.call_tool("check", {"target": "newclient.example"})
+    assert sum(1 for c in registry.clients() if c.name == "newclient.example") == 1
+
+
+async def test_an_existing_client_is_found_by_its_domain(tmp_path, monkeypatch):
+    """Saying the domain of a client you already added must reach that client,
+    not create a second one under a different name."""
+    from munim.checks import dns as checks
+    monkeypatch.setattr(checks, "query", lambda *a, **k: [])
+    monkeypatch.setattr(checks, "run_reachability", lambda d: [])
+
+    server, registry = _server(tmp_path)   # acme, domain acme.example
+    await server.call_tool("check", {"target": "acme.example"})
+    assert len(registry.clients()) == 1
+
+
+async def test_an_unknown_name_that_is_not_a_domain_is_refused(tmp_path):
+    """Auto-registering a typo'd client name would be how a wrong-tenant write
+    starts. A bare name has to already exist."""
+    server, _ = _server(tmp_path)
+    with pytest.raises(Exception, match="not a domain"):
+        await server.call_tool("check", {"target": "Acme Corp"})
+
+
+async def test_reads_may_register_but_writes_may_not(tmp_path):
+    """The safety property: connect_provider still refuses an unknown client
+    even though check would have registered one (D5)."""
+    server, registry = _server(tmp_path)
+    with pytest.raises(Exception):
+        await server.call_tool("connect_provider", {
+            "client": "brand-new.example", "provider": "resend", "credential": "x"})
+    assert "brand-new.example" not in [c.name for c in registry.clients()]
