@@ -390,3 +390,124 @@ it. The README should say so plainly.
 appears ~40 characters into a message that was being cut at 95 — visible, and not looked at. Same
 shape as `google-agentic-cinema` D28: the answer was in the output and nobody read it. **Never
 truncate an error message in a diagnostic.**
+
+---
+
+## D18 — The control room is a window, not a dashboard *(reconciles D3)*
+
+**The contradiction.** D3 is titled "It is an MCP server, not a CLI and **not a
+dashboard**", and records that the design drifted to a dashboard three times and
+was corrected each time. Then a control room was built and made a never-cut
+component. The repository is public: a judge reading this log next to the video
+finds the decision log arguing against the hero artefact.
+
+**The distinction that resolves it.** A dashboard is a place you go to do work.
+The control room is not: it has exactly one interactive element in the whole
+application, the confirmation button, and it appears only when the agent has
+stopped and needs a person. Everything else is read-only.
+
+The operator works in their coding agent, which is what D3 settled and has not
+changed. The room exists because a process that takes four minutes and touches
+three companies is otherwise invisible — and the organisers confirmed judges will
+not install anything (D16), so a component that cannot be seen earns nothing.
+
+**The test of it.** If the room were removed, nothing about how the product is
+used would change. If the coding agent were removed, there would be no product.
+That is the difference between a window and an interface.
+
+---
+
+## D19 — Reads may register a client; writes may not
+
+**Context.** Naming a client, then connecting it, then checking it, is three
+steps before anything useful happens. Nobody wants a setup wizard.
+
+**Decision.** The first mention of a domain registers it. Saying the domain of a
+client already registered reaches that client rather than creating a second.
+A bare name that is not a domain and is not known is refused.
+
+**Why the asymmetry is safe.** A DNS lookup is public: checking a domain reveals
+nothing a stranger could not already look up, so there is nothing to protect on a
+read. A write is different, and auto-registering a mistyped name on a write is
+precisely how a change lands in the wrong account (F5). `connect_provider` still
+refuses a client that was not named deliberately, and a test asserts it.
+
+---
+
+## D20 — A check that fires on a platform domain is worth less than no check
+
+**Found by running the catalogue against a real client's Vercel URL.** It
+reported six failures — no SPF, no DKIM, no DMARC, no MX, no nameservers, no www
+— and every one was correct behaviour. Nobody sends mail from a `vercel.app`
+address, and it has no nameservers of its own because it is a subdomain of the
+platform.
+
+**Decision.** Mail and delegation checks report "not applicable" on
+platform-owned suffixes and say why.
+
+**Why it matters more than it looks.** A tool that cries wolf on a preview URL is
+one people stop opening, and then the checks that do matter go unread too. The
+value of the catalogue is not how much it reports; it is that everything it
+reports is worth a person's attention.
+
+**Fixtures would not have found this.** Real client infrastructure did, in one
+run. That is the argument for D12's "real data for building" in a sentence.
+
+---
+
+## D21 — The fan-out claim, measured twice and corrected once
+
+**The claim.** That answering one question across a dozen clients concurrently is
+a differentiator, and that it is "parallel fan-out, not a for-loop."
+
+**First measurement: 0.9x. Slower than serial.** One thread per client, each
+still doing thirteen sequential DNS lookups inside it. The concurrency was at the
+wrong level, and the claim was not earned.
+
+**After fanning out at the level of the lookups** and deduplicating the records
+several checks share:
+
+```
+6 clients, cold cache : 5.33s serial → 2.61s concurrent   (2.0x)
+4 clients, warm cache : 1.23s serial → 2.26s concurrent   (0.5x)
+```
+
+**Both numbers stay in the code.** Against a warm resolver a lookup costs
+microseconds and thread overhead dominates, so concurrency loses. The case that
+happens — an operator asking about a dozen clients they have not touched today —
+is the cold one, and there it halves the wait. Quoting only the 2.0x would be the
+kind of unearned number `web-mcp-2026/docs/PROJECT-RULES.md` exists to prevent.
+
+**Also decided: no Strands `Graph` here.** `Graph` genuinely runs nodes
+concurrently, and one agent node per client would photograph well in an
+architecture diagram. It would also make twelve model calls to do work that needs
+zero, because the per-client work is deterministic DNS. That is feature-counting,
+and the criterion says *skilfully*, not *thoroughly*.
+
+---
+
+## D22 — OAuth stays, because the project outlives the contest *(revises the review consensus)*
+
+**Context.** Three independent reviewers said cut OAuth. Their reasoning was
+sound *for the contest*: judges will not install anything (D16), so a browser
+login and a pasted token are indistinguishable on video. It earns nothing
+visible and is the only work item gated on a provider approving a developer app.
+
+**Decision.** Build it anyway, on the operator's call: the tool is open source
+first and a submission second.
+
+**Why that changes the answer.** `mcpwarden` solves the same credential problem,
+asks you to paste a token per account, and has no adopters (D15). For a tool
+strangers are meant to install, browser login is not polish — it is whether
+anyone gets past step one. There is also a judge-shaped upside the reviewers
+missed: Lahari Chowtoori sits on the panel as Open Source TPM, AI/ML.
+
+**What it cost, stated.** Roughly a day and a half, paid for by cutting the
+Vercel write path and the intervention handler.
+
+**Where it is honest.** Resend is absent from the provider table because it
+publishes no authorization endpoint — that is Resend offering nothing, not a
+preference. Cloudflare's endpoints are recorded but unused until a client id
+exists; their own MCP server reads one they were issued, and whether registration
+is self-serve is unconfirmed. `TokenConnector` ships regardless, so a provider
+approval that never arrives cannot block the submission.
