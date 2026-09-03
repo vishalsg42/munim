@@ -11,6 +11,7 @@ dependencies = [
     "httpx>=0.28.1",
     "dnspython>=2.7.0",
     "pydantic>=2.4.0",
+    "python-dotenv>=1.0.0",
 ]
 
 [project.optional-dependencies]

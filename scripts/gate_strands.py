@@ -9,7 +9,10 @@ Strands Agents and a different model host". See docs/DECISIONS.md D16.
 import os
 import sys
 
+from mcpc.env import load as load_env
 from strands import Agent, tool
+
+load_env()
 
 
 @tool
