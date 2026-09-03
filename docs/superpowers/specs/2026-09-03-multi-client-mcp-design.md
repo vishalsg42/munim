@@ -108,6 +108,44 @@ interpretation and judgement are model work.** Provider adapters enumerate. Rule
 findings with real dates. The model diagnoses, decides when to escalate, and writes for the
 client. It cannot invent a DNS record or alter an expiry date.
 
+## 4a. The tool surface
+
+What the coding agent actually sees. Every tool that touches a provider takes `client` as its
+first argument — there is no ambient "current client", because an implicit selection is exactly
+how the wrong account gets written to.
+
+**Containers**
+
+| Tool | Purpose |
+|---|---|
+| `list_clients` | Which containers exist, and which providers each has connected |
+| `add_client` | Register a client |
+| `connect_provider` | Store a credential for one client and one provider. Runs once per pair |
+
+**Read across** — may span every container, never mutates
+
+| Tool | Purpose |
+|---|---|
+| `find_across_clients` | One question over every container: domains, renewals, versions, env keys present |
+| `client_status` | Everything known about one client's estate |
+
+**Write within** — names a client, loads only that client's credentials, confirms before acting
+
+| Tool | Purpose |
+|---|---|
+| `launch` | The Strands workflow: deploy, domain, DNS, mail, backend, verify. §3 end to end |
+| `deploy` | Deploy or redeploy one client's project |
+| `set_env` | Set environment variables |
+| `dns` | Read or write DNS records |
+| `logs` | Fetch logs |
+| `verify` | Re-run the launch checks: resolution, certificate, SPF/DKIM/DMARC |
+
+`launch` is the only tool backed by a full Strands agent; the rest are direct adapter calls.
+That keeps the agent where judgement is needed and out of the way where it is not.
+
+**Deliberately absent:** any tool that returns a credential, and any tool that mutates without
+naming a client.
+
 ## 5. Architecture
 
 ```
