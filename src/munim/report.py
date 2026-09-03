@@ -67,7 +67,9 @@ def render(log: RunLog, *, domain: str, business: str) -> str:
     checked = len({e.detail.get("check") for e in passed} | {e.detail.get("check") for e in findings})
 
     if outstanding:
-        headline = f"{len(outstanding)} thing{'s' if len(outstanding) > 1 else ''} needs your attention"
+        many = len(outstanding) > 1
+        headline = (f"{len(outstanding)} things need your attention" if many
+                    else "One thing needs your attention")
         sub = (f"We checked {checked} things about {domain}. Most were fine. "
                f"These were not, and they are the kind that break quietly.")
     else:
