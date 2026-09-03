@@ -84,7 +84,21 @@ uv run munim-room     # http://127.0.0.1:8977
 | Control room, live over SSE | ✅ |
 | Launch report for the business owner | ✅ |
 | OAuth connect (PKCE) | ✅ built; needs a provider client ID |
-| Cloudflare / Vercel / Resend write operations | ⬜ not yet |
+| Cloudflare DNS writes — idempotent upsert, SPF merge | ✅ tested against documented shapes; not yet probed live |
+| Vercel / Resend write operations | ⬜ not yet |
+
+### Why there is no AgentCore deployment
+
+Worth stating rather than leaving as a gap. Bedrock is unreachable on the
+development account: AWS Marketplace cannot complete a model subscription for
+AISPL (India) customers, because RBI rules prevent it storing card details, and
+Bedrock model access is provisioned as a Marketplace subscription. Separately,
+AgentCore Runtime quota defaults to zero and increases take several days.
+
+Strands is model-portable, so the agent runs on a different host with one
+environment variable changed and no code change. That is the property AWS
+advertises; this exercised it under duress. Restoring Bedrock is
+`MUNIM_BEDROCK_MODEL` and nothing else.
 
 **Nothing here is stubbed.** A capability that is not implemented is absent from the tool
 list rather than present and inert. Resend, for example, has no OAuth flow anywhere in this
