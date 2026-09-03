@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.env.*
+*.token
+fixtures/real/
+.pytest_cache/
+.DS_Store
