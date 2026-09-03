@@ -177,7 +177,7 @@ so adding GoDaddy or Hostinger later adds assets, not logic.
 | Vercel | yes | Deploy, domains, env vars — start of the chain |
 | Cloudflare | yes | Destination of two of the three handoffs |
 | Resend | yes | The silent-failure handoff; the reason this matters |
-| Supabase | v1 if time | Fourth handoff, into Vercel env vars |
+| Supabase | yes | Fourth handoff, into Vercel env vars. Confirmed in v1, 2026-09-03 |
 | GoDaddy, Gmail/Zoho Mail, Hostinger | later | Same contract; additive |
 
 ### Later, not now
@@ -192,7 +192,7 @@ once setup has settled, which is why it is phase two.
 **In, v1**
 - Local stdio MCP server, installable in Claude Code / Codex / Antigravity with one config line
 - Container model with per-client credential isolation; read across, write within
-- Adapters: Vercel, Cloudflare, Resend (Supabase if time)
+- Adapters: Vercel, Cloudflare, Resend, Supabase
 - Strands agent running the launch workflow end to end, with verification and escalation
 - Cross-container read queries
 - Human confirmation on every mutation, showing the client name and the exact change
@@ -203,13 +203,54 @@ once setup has settled, which is why it is phase two.
 - Access auditing across clients
 - Any provider not listed above
 
-## 7. Definition of done for a launch
+## 7. Verification — the heart of it
 
-To be confirmed with the operator. Working assumption:
+Confirmed with the operator, 2026-09-03. Every check below is a failure he has actually hit.
+**None of them are run today**, because running twenty checks by hand on every launch for every
+client is not realistic; problems are found reactively, once something has already broken.
 
-- Site resolves on the custom domain over HTTPS with a valid certificate
+That is the product in one line: **the checks are not hard, there are just too many to do by
+hand every time.** An agent does not get bored on check eleven.
+
+### Verify after each stage, not once at the end
+
+If nameservers are not delegated, the certificate check, the DKIM check and the test send all
+fail in misleading ways. Each stage is gated on its own verification so a failure is reported
+where it happened.
+
+### The catalogue
+
+**Mail — the invisible failures.** These break nothing observable; the client's mail simply
+stops arriving and nobody notices for weeks. This family is the demo's centre.
+
+- Two `v=spf1` records present — both are then ignored; Resend's record must be *merged*, not added
+- SPF exceeds the 10 DNS-lookup limit — returns `permerror`, treated as a hard fail everywhere
+- DKIM record proxied through Cloudflare (orange cloud) — Cloudflare rewrites it and DKIM breaks
+- DKIM TXT value chunked incorrectly — long records must be split into strings, not pasted as one
+- No DMARC record — Gmail and Outlook deprioritise unauthenticated bulk mail
+- Resend domain verified but the `from` address is not on the verified domain
+
+**Domain and certificates**
+
+- Nameservers not fully delegated — certificate issues for the apex but not `www`
+- Cloudflare SSL mode set to Flexible behind Vercel — intermittent redirect loop
+- No `www` → apex redirect
+- A CAA record blocking the issuing authority, so the certificate silently never renews
+
+**Deploy and backend**
+
+- Environment variable set without a redeploy — Vercel bakes build-time vars in; setting alone
+  does nothing
+- Variable set on the wrong environment — works in preview, broken in production
+- Supabase connection string using the direct port rather than the pooler — works locally,
+  exhausts connections under serverless
+
+### Definition of done
+
+- Site resolves on the custom domain over HTTPS with a valid certificate, apex **and** `www`
 - A test message passes SPF, DKIM and DMARC
-- If a backend was requested, the app builds and connects to it
+- If a backend was requested, the app builds and connects to it through the pooler
+- Every check above has run and reported
 - A note to the client is drafted
 
 ## 8. Risks
@@ -234,10 +275,9 @@ To be confirmed with the operator. Working assumption:
 
 ## 10. Open questions
 
-1. **Track.** Professional is the natural fit and the most crowded. Everyday and Good Neighbor
-   are weaker fits. Unresolved.
-2. **Name.** None chosen.
-3. **Definition of done** (§7) needs the operator's confirmation.
-4. **Where the operator has been burned** — the real failure cases are worth more than invented
-   checks, and have not yet been captured.
-5. **Supabase in or out of v1.**
+1. **Name.** None chosen. The only genuinely open question.
+
+Resolved 2026-09-03: track is **Professional** — Good Neighbor serves groups, Everyday serves
+home and family; "makes someone dramatically better at the work they already do" is a precise
+description of this. Definition of done and the verification catalogue are confirmed (§7).
+Supabase is in v1.
