@@ -352,7 +352,7 @@ Only Strands is mandatory.
 
 ## D17 — Bedrock is unreachable on this account; Gemini is the working host
 
-**Context.** Account an AISPL account is an **AISPL** (AWS India) account. Every Anthropic model on
+**Context.** The AWS account is an **AISPL** (AWS India) account. Every Anthropic model on
 `bedrock-runtime` fails:
 
 > `AccessDeniedException: Model access is denied due to INVALID_PAYMENT_INSTRUMENT: A valid
