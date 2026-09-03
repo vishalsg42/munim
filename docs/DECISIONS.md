@@ -220,3 +220,92 @@ why local is correct for a single operator, which is an answer rather than a gap
 **Not a reason to change concept.** The challenge that produced this entry was about where keys
 live. The concept was never in question: verified-empty lane, real workflow, a demo with a
 finish line, and genuine work for a Strands agent to do.
+
+---
+
+## D14 — Keychain locally, Identity only when hosted *(revises D13)*
+
+**Context.** D13 concluded AgentCore Identity should be used in both modes, on the grounds that
+it vends short-lived scoped credentials and gives an audit trail. Challenged immediately: *the
+credentials still travel over the network.*
+
+**Finding — the challenge is correct.** The data flow differs by one hop:
+
+```
+Keychain    at rest: this machine        in flight: machine → provider
+Identity    at rest: AWS vault           in flight: AWS → machine → provider
+```
+
+TLS both ways, tokens short-lived, but the extra hop is real and the earlier entry glossed
+over it.
+
+**The counter-argument, kept because neither option dominates.** The two protect against
+different threats. Against the network, keychain wins. Against device compromise, Identity
+wins: a stolen laptop yields 48 long-lived provider tokens from a keychain, versus one scoped,
+expiring workload token — and recovery is one central revocation rather than rotating 48
+credentials across 4 providers for 12 clients by hand. Identity also logs every credential use,
+which a password manager cannot.
+
+**Decision.** `KeychainBackend` for local, which is the mode that gets used daily.
+`AgentCoreBackend` (Identity + Runtime) only when hosted, where the credentials are in the cloud
+regardless and hand-rolling a vault would be strictly worse.
+
+**Result.** AgentCore appears exactly once, for a reason that survives being asked about. Both
+backends sit behind the same `Container` interface, so this is reversible.
+
+**Also settled:** AgentCore **Gateway is rejected.** It would expose provider APIs as generic
+MCP tools, but the adapters carry the verification logic from §7 of the spec, which is the
+product. Genericising them would remove the point.
+
+---
+
+## D15 — Prior art: the switching problem is solved; the work is not
+
+**Searched 2026-09-03**, GitHub-wide and not limited to the hackathon.
+
+**`ibhugeloo/mcpwarden`** — TypeScript, created 2026-06-25, last pushed 2026-07-29, **0 stars**.
+States this exact problem in the same words:
+
+> *"Most MCP clients (Claude, Cursor…) bind one account per connector via OAuth. The moment you
+> have two Supabase accounts, a personal + a client Vercel, or several Sentry orgs, you hit a
+> wall."*
+
+Its answer: replace the single connector with **N namespaced MCP servers, one per account**, a
+local registry holding secret *references*, and a launcher that resolves each secret from
+Vaultwarden at spawn so it exists only in the child process env. Read-only/scope policy per
+server. It is a good design and it is honestly built.
+
+**What it does not do, and these are the gaps this project occupies:**
+
+1. **`mcpwarden profile use` selects one active context.** It removes the *re-login*, not the
+   *switching* — you are still on one client at a time, so cross-client questions remain
+   impossible.
+2. **N servers, not N containers.** Twelve clients across four providers is 48 registered MCP
+   servers and 48 namespaces in the client's tool list.
+3. **It is a config manager and launcher, not an agent.** No workflow, no verification.
+4. **No cross-account work at all** — which is the actual job here, because the output of one
+   account is the input of another (Resend DKIM → Cloudflare DNS).
+
+**`sagemcp` (44★) and `Super-I-Tech/mcp_plexus` (30★)** solve the *inverse* problem: hosting one
+MCP server for many customers, SaaS-style. Many users, one operator. Not one operator, many
+accounts. Different problem, despite the shared phrase "multi-tenant".
+
+**Official provider MCP servers** — `cloudflare/mcp-server-cloudflare` (4.1k★), `supabase/mcp`
+(2.9k★), `resend/resend-mcp` (566★) — all bind a single account. The wall mcpwarden describes
+is real and current.
+
+**Nothing found at all** for agency/MSP multi-client cloud management, or for cross-provider
+launch automation (DNS + DKIM/SPF + deploy verification). Three independent searches, no results.
+
+**The most useful data point.** mcpwarden built the credential layer *as the product* and has
+**0 stars after two months**. That is evidence for what was argued from taste earlier: the
+plumbing alone does not attract users. The value is in the work done across accounts, not in
+holding the keys.
+
+**Consequence for the claims.** "Nobody has done multi-account MCP" is now false and must never
+be said. The defensible claims are narrower and stronger:
+
+- Existing work removes the re-login but keeps you on **one account at a time**.
+- **No prior work performs a task that spans two client accounts**, which is what a launch is.
+- **No prior work verifies the result** — the silent-failure catalogue in spec §7 has no
+  equivalent anywhere found.
