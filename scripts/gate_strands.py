@@ -18,11 +18,24 @@ def add_two_numbers(a: int, b: int) -> int:
     return a + b
 
 
+# Probed against account an AISPL account on 2026-09-03:
+#   anthropic.claude-sonnet-5 / opus-5 -> AccessDeniedException, "not available
+#     for this account". An account-tier gate; the use case form does not lift it.
+#   anthropic.claude-sonnet-4-5-... (bare) -> needs an inference profile.
+#   us.anthropic.claude-sonnet-4-5-... -> gated only by the Anthropic use case form.
+# So the US cross-region inference profile for Sonnet 4.5 is the target.
+BEDROCK_MODEL = os.environ.get(
+    "MCPC_BEDROCK_MODEL", "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+)
+
+
 def try_bedrock():
     from strands.models.bedrock import BedrockModel
 
-    region = os.environ.get("AWS_REGION", "us-west-2")
-    return BedrockModel(region_name=region), f"Bedrock ({region})"
+    region = os.environ.get("AWS_REGION", "us-east-1")
+    return BedrockModel(model_id=BEDROCK_MODEL, region_name=region), (
+        f"Bedrock {BEDROCK_MODEL} ({region})"
+    )
 
 
 def try_anthropic():
