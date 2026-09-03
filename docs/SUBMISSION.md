@@ -119,5 +119,9 @@ Cloudflare API · Resend · dnspython · Amazon Bedrock *(model host, when reach
 
 ## What is left
 
-The verification catalogue covers nine checks today. Thirteen are specified;
-the remainder are listed in the design document rather than claimed as built.
+Vercel and Resend write operations. They are absent from the tool list rather
+than present and inert.
+
+The check catalogue is complete at thirteen, all of which need no provider
+account: they read public DNS and make a public HTTPS request. Anyone can run
+them against any domain, including yours, without an account or a key.

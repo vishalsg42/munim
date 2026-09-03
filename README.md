@@ -78,13 +78,14 @@ uv run munim-room     # http://127.0.0.1:8977
 |---|---|
 | Per-client credential containers, OS keychain | ✅ |
 | Read across / write within | ✅ |
-| DNS and mail checks (9) | ✅ |
+| Check catalogue — 13 checks, no credentials needed | ✅ |
 | Strands launch agent — diagnosis and owner-facing explanation | ✅ |
 | Run log with replay and resume | ✅ |
 | Control room, live over SSE | ✅ |
 | Launch report for the business owner | ✅ |
 | OAuth connect (PKCE) | ✅ built; needs a provider client ID |
 | Cloudflare DNS writes — idempotent upsert, SPF merge | ✅ tested against documented shapes; not yet probed live |
+| Vercel reads — deploys, env scope, env applied | ✅ |
 | Vercel / Resend write operations | ⬜ not yet |
 
 ### Why there is no AgentCore deployment
