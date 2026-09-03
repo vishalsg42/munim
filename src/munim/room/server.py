@@ -98,6 +98,18 @@ async def run_events(request: Request) -> Response:
     )
 
 
+async def report(request: Request) -> Response:
+    """Serve a launch report. The owner-facing page lives next to the run it
+    came from, so a link in an email and a link in the room are the same page."""
+    from munim.report import REPORTS_DIR
+
+    run_id = request.path_params["run_id"]
+    page = REPORTS_DIR / f"{run_id}.html"
+    if page.exists():
+        return FileResponse(page)
+    return JSONResponse({"error": "no report for that run"}, status_code=404)
+
+
 async def index(request: Request) -> Response:
     page = BUILD_DIR / "index.html"
     if page.exists():
@@ -112,6 +124,7 @@ def build_app(runs_dir: Path | None = None) -> Starlette:
     routes = [
         Route("/api/runs", list_runs),
         Route("/api/runs/{run_id}/events", run_events),
+        Route("/reports/{run_id}", report),
     ]
     assets = BUILD_DIR / "assets"
     if assets.exists():
