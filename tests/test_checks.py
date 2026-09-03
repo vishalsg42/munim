@@ -112,8 +112,11 @@ def test_a_truncated_dkim_key_is_caught_even_though_the_record_exists(monkeypatc
     result = checks.dkim_chunking("acme.example", "resend")
     assert result.status == "pass"  # long enough to be plausible
 
+    # A genuinely truncated key: the record is long enough to have needed
+    # splitting, but the key material after p= is a stub.
     monkeypatch.setattr(checks, "query", _answers({
-        ("resend._domainkey.acme.example", "TXT"): ["v=DKIM1; k=rsa; p=short" + "y" * 250],
+        ("resend._domainkey.acme.example", "TXT"):
+            ["v=DKIM1; k=rsa; " + "; ".join(f"note{i}=padding" for i in range(20)) + "; p=MIIBIjANBg"],
     }))
     result = checks.dkim_chunking("acme.example", "resend")
     assert result.status == "fail"
@@ -157,5 +160,8 @@ def test_a_certificate_expiring_inside_the_window_fails(monkeypatch):
     patch(5)
     result = checks.cert_valid("acme.example", days=14)
     assert result.status == "fail"
-    assert result.detail["days_left"] == 5
+    # .days floors, so 5 days minus the elapsed microseconds reports 4. Flooring
+    # is the right direction for an expiry warning: never claim more time than
+    # there is.
+    assert result.detail["days_left"] in (4, 5)
     assert "security warning" in result.human_text
