@@ -21,7 +21,7 @@ def add_two_numbers(a: int, b: int) -> int:
     return a + b
 
 
-# Probed against account an AISPL account on 2026-09-03:
+# Probed against a real AISPL account on 2026-09-03:
 #   anthropic.claude-sonnet-5 / opus-5 -> AccessDeniedException, "not available
 #     for this account". An account-tier gate; the use case form does not lift it.
 #   anthropic.claude-sonnet-4-5-... (bare) -> needs an inference profile.
