@@ -165,3 +165,33 @@ def test_a_certificate_expiring_inside_the_window_fails(monkeypatch):
     # there is.
     assert result.detail["days_left"] in (4, 5)
     assert "security warning" in result.human_text
+
+
+def test_mail_checks_do_not_fire_on_a_platform_domain(monkeypatch):
+    """Found by running the catalogue against a real client's Vercel URL: it
+    reported six failures, every one of them correct behaviour. Nobody sends
+    mail from a vercel.app address, and a check that cries wolf on a preview URL
+    is one people learn to ignore."""
+    monkeypatch.setattr(checks, "query", _answers({}))
+    results = checks.run_all("balajiroofings-quote.vercel.app")
+    mail = {"spf_single", "spf_lookups", "dkim_present", "dkim_chunking",
+            "dmarc_present", "dmarc_policy", "mx_present", "ns_delegated"}
+    for result in results:
+        if result.check in mail:
+            assert result.status == "skip", f"{result.check} fired on a platform domain"
+            assert result.detail.get("reason") == "platform_domain"
+
+
+def test_the_same_checks_still_fire_on_a_real_domain(monkeypatch):
+    """The guard must not have turned the catalogue off."""
+    monkeypatch.setattr(checks, "query", _answers({}))
+    failures = {r.check for r in checks.run_all("acme.example") if r.status == "fail"}
+    assert {"spf_single", "dmarc_present", "mx_present"} <= failures
+
+
+def test_platform_detection_is_suffix_anchored():
+    """A domain merely containing a platform name is still the business's own."""
+    assert checks.is_platform_domain("shop.vercel.app")
+    assert checks.is_platform_domain("BALAJI.VERCEL.APP")
+    assert not checks.is_platform_domain("vercel.app.acme.example")
+    assert not checks.is_platform_domain("myvercel.app-store.example")

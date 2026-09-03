@@ -29,6 +29,19 @@ import dns.resolver
 
 Status = Literal["pass", "fail", "skip"]
 
+# Domains owned by a hosting platform, not by the business. A project deployed
+# to one of these has no mail of its own and never will, so reporting missing
+# SPF, DKIM, DMARC or MX on it is noise - and a check that cries wolf on a
+# preview URL is a check people learn to ignore.
+#
+# Found by running the catalogue against a real client's Vercel URL, which
+# reported six failures that were all correct behaviour.
+PLATFORM_SUFFIXES = (
+    ".vercel.app", ".netlify.app", ".pages.dev", ".github.io", ".herokuapp.com",
+    ".azurewebsites.net", ".onrender.com", ".fly.dev", ".workers.dev",
+    ".surge.sh", ".web.app", ".firebaseapp.com", ".repl.co",
+)
+
 # Mechanisms that cost a DNS lookup against SPF's hard limit of 10 (RFC 7208 §4.6.4).
 _SPF_LOOKUP_MECHANISMS = ("include:", "a:", "mx:", "ptr", "exists:", "redirect=")
 
@@ -42,6 +55,21 @@ class CheckResult:
     evidence: str = ""          # verbatim, so a claim can be checked
     resolver: str = ""
     detail: dict = field(default_factory=dict)
+
+
+def is_platform_domain(domain: str) -> bool:
+    """Whether this name belongs to a hosting platform rather than the business."""
+    lowered = domain.lower().rstrip(".")
+    return any(lowered.endswith(suffix) for suffix in PLATFORM_SUFFIXES)
+
+
+def _not_their_domain(check: str, domain: str) -> CheckResult:
+    platform = next(s for s in PLATFORM_SUFFIXES if domain.lower().endswith(s))
+    return CheckResult(
+        check, "skip",
+        f"{domain} is a {platform.lstrip('.')} address, so mail settings belong to "
+        "the platform, not to this business.",
+        "", detail={"reason": "platform_domain"})
 
 
 def _resolver(nameserver: str | None = None) -> dns.resolver.Resolver:
@@ -75,6 +103,8 @@ def query(name: str, rdtype: str, nameserver: str = "1.1.1.1") -> list[str]:
 
 def spf_single(domain: str, ns: str = "1.1.1.1") -> CheckResult:
     """More than one SPF record means every one of them is ignored."""
+    if is_platform_domain(domain):
+        return _not_their_domain("spf_single", domain)
     txts = query(domain, "TXT", ns)
     spf = [t for t in txts if t.lower().startswith("v=spf1")]
     if len(spf) == 1:
@@ -102,6 +132,8 @@ def spf_single(domain: str, ns: str = "1.1.1.1") -> CheckResult:
 
 def spf_lookups(domain: str, ns: str = "1.1.1.1") -> CheckResult:
     """Over 10 DNS lookups is a permerror, which receivers treat as a hard fail."""
+    if is_platform_domain(domain):
+        return _not_their_domain("spf_lookups", domain)
     txts = [t for t in query(domain, "TXT", ns) if t.lower().startswith("v=spf1")]
     if not txts:
         return CheckResult("spf_lookups", "skip", "No SPF record to count.", "", resolver=ns)
@@ -121,6 +153,8 @@ def spf_lookups(domain: str, ns: str = "1.1.1.1") -> CheckResult:
 
 
 def dmarc_present(domain: str, ns: str = "1.1.1.1") -> CheckResult:
+    if is_platform_domain(domain):
+        return _not_their_domain("dmarc_present", domain)
     txts = query(f"_dmarc.{domain}", "TXT", ns)
     dmarc = [t for t in txts if t.lower().startswith("v=dmarc1")]
     if dmarc:
@@ -135,6 +169,8 @@ def dmarc_present(domain: str, ns: str = "1.1.1.1") -> CheckResult:
 
 
 def dmarc_policy(domain: str, ns: str = "1.1.1.1") -> CheckResult:
+    if is_platform_domain(domain):
+        return _not_their_domain("dmarc_policy", domain)
     txts = [t for t in query(f"_dmarc.{domain}", "TXT", ns) if t.lower().startswith("v=dmarc1")]
     if not txts:
         return CheckResult("dmarc_policy", "skip", "No DMARC record to inspect.", "", resolver=ns)
@@ -151,6 +187,8 @@ def dmarc_policy(domain: str, ns: str = "1.1.1.1") -> CheckResult:
 
 
 def dkim_present(domain: str, selector: str, ns: str = "1.1.1.1") -> CheckResult:
+    if is_platform_domain(domain):
+        return _not_their_domain("dkim_present", domain)
     name = f"{selector}._domainkey.{domain}"
     txts = query(name, "TXT", ns)
     if any("p=" in t for t in txts):
@@ -164,6 +202,8 @@ def dkim_present(domain: str, selector: str, ns: str = "1.1.1.1") -> CheckResult
 
 
 def ns_delegated(domain: str, expect: str = "", ns: str = "1.1.1.1") -> CheckResult:
+    if is_platform_domain(domain):
+        return _not_their_domain("ns_delegated", domain)
     records = [r.rstrip(".").lower() for r in query(domain, "NS", ns)]
     if not records:
         return CheckResult("ns_delegated", "fail", "No nameservers found.",
@@ -191,6 +231,8 @@ def apex_resolves(domain: str, ns: str = "1.1.1.1") -> CheckResult:
 
 
 def mx_present(domain: str, ns: str = "1.1.1.1") -> CheckResult:
+    if is_platform_domain(domain):
+        return _not_their_domain("mx_present", domain)
     records = query(domain, "MX", ns)
     if records:
         return CheckResult("mx_present", "pass", "MX records present.",
@@ -224,6 +266,14 @@ def dkim_chunking(domain: str, selector: str, ns: str = "1.1.1.1") -> CheckResul
     Pasted as one long string it is silently invalid: the record exists, looks
     right in a dashboard, and no receiver can verify a signature with it.
     """
+    if is_platform_domain(domain):
+        return _not_their_domain("mx_present", domain)
+    if is_platform_domain(domain):
+        return _not_their_domain("dmarc_policy", domain)
+    if is_platform_domain(domain):
+        return _not_their_domain("dmarc_present", domain)
+    if is_platform_domain(domain):
+        return _not_their_domain("dkim_chunking", domain)
     name = f"{selector}._domainkey.{domain}"
     txts = query(name, "TXT", ns)
     if not txts:
@@ -247,6 +297,8 @@ def dkim_chunking(domain: str, selector: str, ns: str = "1.1.1.1") -> CheckResul
 def www_redirect(domain: str, timeout: float = 8.0) -> CheckResult:
     """Half of everyone types www. If it does not reach the site, half of the
     business's customers see an error."""
+    if is_platform_domain(domain):
+        return _not_their_domain("www_redirect", domain)
     try:
         response = httpx.get(f"https://www.{domain}", follow_redirects=True,
                              timeout=timeout)
