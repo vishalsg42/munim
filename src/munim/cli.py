@@ -98,7 +98,13 @@ def main(argv: list[str] | None = None) -> int:
     ls = sub.add_parser("clients", help="list registered clients")
     ls.add_argument("--verbose", action="store_true")
 
+    sub.add_parser("doctor", help="what is set up, what is not, and the next step")
+
     args = parser.parse_args(argv)
+
+    if args.command == "doctor":
+        from munim.doctor import run as doctor_run
+        return doctor_run(_registry())
 
     if args.command == "clients":
         backend = KeychainBackend()

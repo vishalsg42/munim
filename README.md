@@ -67,6 +67,7 @@ a key once and it goes straight to your keychain:
 munim connect "Balaji Roofings" vercel      # browser login
 munim connect "Balaji Roofings" resend      # Resend has no OAuth; key only
 munim clients                                # what is connected
+munim doctor                                 # what is missing, and the fix
 ```
 
 Then, in your coding agent:
