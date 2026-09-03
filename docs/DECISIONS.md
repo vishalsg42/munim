@@ -309,3 +309,84 @@ be said. The defensible claims are narrower and stronger:
 - **No prior work performs a task that spans two client accounts**, which is what a launch is.
 - **No prior work verifies the result** — the silent-failure catalogue in spec §7 has no
   equivalent anywhere found.
+
+---
+
+## D16 — What the rules actually require, confirmed by the organisers
+
+Three official answers from a Devpost manager, on the hackathon forum, 2026-09-03/04.
+
+**Local-only is compliant.** Asked directly whether a locally-installed tool satisfies the
+"available for testing" rule:
+
+> *"A public repo with clear install instructions can serve as your 'test build.' **No hosted
+> endpoint is required.**"*
+
+This vindicates D4 and removes the AgentCore Runtime quota from the critical path entirely.
+
+**Judges will not run the project.**
+
+> *"**Judges will not install anything locally**"*, and *"Judges are not required to test the
+> Project and may choose to judge based solely on the text description, images, and video."*
+
+**This is the most consequential finding in the whole analysis.** Every criterion — including
+Technological Implementation — is scored from the video, the description, the architecture
+diagram, and a repo skim. `docs/HACKATHON.md` treated the video as one criterion worth 20%.
+It is in fact the entire evaluation surface. Consequences:
+
+- The video is the deliverable; the code is what makes it truthful. It is not a last-week task.
+- The architecture diagram is promoted: it is how a judge understands a system they will never run.
+- Install-experience polish drops down the list. Correctness does not — a judge reading the repo
+  can still catch a lie.
+- **A check nobody sees run may as well not exist.** The verification catalogue must be visible
+  on screen, not merely implemented.
+
+**AgentCore is not required.** Quoted from Official Rules §4 in two separate threads:
+
+> *"Deploying with Amazon Bedrock AgentCore is a smart architectural choice and will strengthen
+> your Technical Implementation score, but it's not required."*
+
+Only Strands is mandatory.
+
+---
+
+## D17 — Bedrock is unreachable on this account; Gemini is the working host
+
+**Context.** Account an AISPL account is an **AISPL** (AWS India) account. Every Anthropic model on
+`bedrock-runtime` fails:
+
+> `AccessDeniedException: Model access is denied due to INVALID_PAYMENT_INSTRUMENT: A valid
+> payment instrument must be provided. Your AWS Marketplace subscription for this model cannot
+> be completed at this time.`
+
+**Cause, established rather than guessed.** Bedrock model access is provisioned as an AWS
+Marketplace subscription with contract pricing. AWS Marketplace has not supported stored card
+payments for AISPL customers since March 2022, because of RBI payment-aggregator regulation.
+UPI AutoPay (PhonePe) is enabled, Default, and green in Payment Preferences — it covers regular
+AWS invoices but not the Marketplace subscription. IAM is `AdministratorAccess`, so it is not a
+permissions problem. A 20-minute poll confirmed it is not propagation either.
+
+**Also established along the way:**
+- `anthropic.claude-sonnet-5` / `opus-5` return `AccessDenied: not available for this account`
+  on **both** `us.` and `global.` inference profiles. An account-tier gate; unrelated to the
+  above, and the use case form does not lift it.
+- Bare model ids fail: `anthropic.claude-sonnet-4-5-...` needs an inference profile, hence the
+  `us.` / `global.` prefix.
+- The Anthropic **use case details form was submitted successfully** and that gate did clear —
+  the error changed from `ResourceNotFoundException` to `AccessDeniedException`, which is how
+  the real cause was found.
+
+**Decision.** Raise an AWS support case (drafted; Basic support covers Account & Billing), and
+**do not wait for it.** Run on **Gemini** via `strands-agents[gemini]`, key supplied through
+`GEMINI_API_KEY` in the environment. `MCPC_BEDROCK_MODEL` and the provider fallback chain remain,
+so restoring Bedrock is a config change with no code change.
+
+**Why this is not a compromise.** Strands is the requirement; the model host is not (D16). And
+Strands advertises model portability — this exercises it under real duress rather than claiming
+it. The README should say so plainly.
+
+**The process lesson.** The cause sat in the API response for an hour while the probes printed
+`e.response['Error']['Code']` and truncated messages to 95 characters. `INVALID_PAYMENT_INSTRUMENT`
+appears ~40 characters into a message that was being cut at 95 — visible, and not looked at. Same
+shape as `google-agentic-cinema` D28: the answer was in the output and nobody read it. **Never
+truncate an error message in a diagnostic.**

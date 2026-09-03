@@ -38,6 +38,17 @@ def try_bedrock():
     )
 
 
+def try_gemini():
+    if not (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")):
+        raise RuntimeError("GEMINI_API_KEY not set")
+    from strands.models.gemini import GeminiModel
+
+    model_id = os.environ.get("MCPC_GEMINI_MODEL", "gemini-2.5-flash")
+    # google-genai reads GEMINI_API_KEY / GOOGLE_API_KEY from the environment,
+    # so the key is never passed through argv or written to disk.
+    return GeminiModel(model_id=model_id), f"Gemini {model_id}"
+
+
 def try_anthropic():
     if not os.environ.get("ANTHROPIC_API_KEY"):
         raise RuntimeError("ANTHROPIC_API_KEY not set")
@@ -48,7 +59,7 @@ def try_anthropic():
 
 def main() -> int:
     failures = []
-    for build in (try_bedrock, try_anthropic):
+    for build in (try_bedrock, try_gemini, try_anthropic):
         try:
             model, label = build()
         except Exception as exc:
