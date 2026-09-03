@@ -16,7 +16,12 @@ from pathlib import Path
 import uvicorn
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import FileResponse, JSONResponse, Response
+from starlette.responses import (
+    FileResponse,
+    JSONResponse,
+    Response,
+    StreamingResponse,
+)
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
@@ -43,15 +48,24 @@ async def run_events(request: Request) -> Response:
     """
     directory = _runs_dir(request)
     run_id = request.path_params["run_id"]
-    if run_id == "latest":
-        run_id = latest_run(directory)
-        if run_id is None:
-            return JSONResponse({"error": "no runs yet"}, status_code=404)
+    follow_latest = run_id == "latest"
 
     resume_from = int(request.headers.get("last-event-id") or request.query_params.get("from") or 0)
 
     async def stream():
-        log = RunLog(run_id, directory)
+        # Wait for a run rather than 404ing. The room is normally opened before
+        # the launch starts, and an EventSource that gets a 404 does not recover
+        # when a run appears - which would mean opening the window, starting a
+        # launch, and watching nothing happen.
+        resolved = run_id
+        if follow_latest:
+            while (resolved := latest_run(directory)) is None:
+                if await request.is_disconnected():
+                    return
+                yield ": waiting-for-run\n\n"
+                await asyncio.sleep(POLL_SECONDS)
+
+        log = RunLog(resolved, directory)
         seen = resume_from
         idle = 0
         while True:
@@ -73,7 +87,7 @@ async def run_events(request: Request) -> Response:
                     idle = 0
             await asyncio.sleep(POLL_SECONDS)
 
-    return Response(
+    return StreamingResponse(
         stream(),
         media_type="text/event-stream",
         headers={
