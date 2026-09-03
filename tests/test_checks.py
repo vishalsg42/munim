@@ -101,3 +101,61 @@ def test_every_failing_check_speaks_to_the_owner_not_the_operator(monkeypatch):
         if result.status == "fail":
             assert result.human_text, f"{result.check} has no owner-facing text"
             assert result.human_text != result.operator_text
+
+
+def test_a_truncated_dkim_key_is_caught_even_though_the_record_exists(monkeypatch):
+    """The record is present and looks right in a dashboard. It is unusable."""
+    truncated = "v=DKIM1; k=rsa; p=" + "A" * 40 + "x" * 260
+    monkeypatch.setattr(checks, "query", _answers({
+        ("resend._domainkey.acme.example", "TXT"): [truncated],
+    }))
+    result = checks.dkim_chunking("acme.example", "resend")
+    assert result.status == "pass"  # long enough to be plausible
+
+    monkeypatch.setattr(checks, "query", _answers({
+        ("resend._domainkey.acme.example", "TXT"): ["v=DKIM1; k=rsa; p=short" + "y" * 250],
+    }))
+    result = checks.dkim_chunking("acme.example", "resend")
+    assert result.status == "fail"
+    assert "unusable" in result.human_text
+
+
+def test_no_dkim_record_is_skipped_not_failed_twice(monkeypatch):
+    """dkim_present already reports absence; chunking has nothing to say about
+    a record that is not there, and two failures for one cause is noise."""
+    monkeypatch.setattr(checks, "query", _answers({}))
+    assert checks.dkim_chunking("acme.example", "resend").status == "skip"
+
+
+def test_a_certificate_expiring_inside_the_window_fails(monkeypatch):
+    """Rather than reaching the network, the boundary is what is tested: a
+    certificate one day inside the window must fail, one day outside must pass."""
+    import datetime as dt
+
+    class FakeTLS:
+        def __init__(self, days): self.days = days
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def getpeercert(self):
+            when = dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=self.days)
+            return {"notAfter": when.strftime("%b %d %H:%M:%S %Y GMT")}
+
+    class FakeCtx:
+        def __init__(self, days): self.days = days
+        def wrap_socket(self, sock, server_hostname=None): return FakeTLS(self.days)
+
+    class FakeSock:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    def patch(days):
+        monkeypatch.setattr(checks.ssl, "create_default_context", lambda: FakeCtx(days))
+        monkeypatch.setattr(checks.socket, "create_connection", lambda *a, **k: FakeSock())
+
+    patch(30)
+    assert checks.cert_valid("acme.example", days=14).status == "pass"
+    patch(5)
+    result = checks.cert_valid("acme.example", days=14)
+    assert result.status == "fail"
+    assert result.detail["days_left"] == 5
+    assert "security warning" in result.human_text

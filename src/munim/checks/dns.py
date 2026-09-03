@@ -15,8 +15,13 @@ resolver separately turns that into the diagnosis rather than a wrong answer.
 """
 
 import re
+import socket
+import ssl
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Literal
+
+import httpx
 
 import dns.exception
 import dns.rdatatype
@@ -213,13 +218,114 @@ def caa_allows(domain: str, issuer: str = "letsencrypt.org", ns: str = "1.1.1.1"
                        evidence="\n".join(records), resolver=ns)
 
 
+def dkim_chunking(domain: str, selector: str, ns: str = "1.1.1.1") -> CheckResult:
+    """A DKIM key longer than 255 bytes must be split into several strings.
+
+    Pasted as one long string it is silently invalid: the record exists, looks
+    right in a dashboard, and no receiver can verify a signature with it.
+    """
+    name = f"{selector}._domainkey.{domain}"
+    txts = query(name, "TXT", ns)
+    if not txts:
+        return CheckResult("dkim_chunking", "skip", "No DKIM record to inspect.", "", resolver=ns)
+    joined = txts[0]
+    if len(joined) <= 255:
+        return CheckResult("dkim_chunking", "pass", "DKIM key is short enough not to need splitting.",
+                           "Your email signature is published correctly.", resolver=ns)
+    # dnspython joins the strings for us, so a correctly chunked record arrives
+    # whole. What we can still catch is a key that is present but unparseable.
+    if "p=" not in joined or len(joined.split("p=")[1].strip().strip('"')) < 100:
+        return CheckResult("dkim_chunking", "fail",
+                           "DKIM record is present but the key is truncated or malformed.",
+                           "Your email signature is published but unusable, so receivers "
+                           "cannot verify your mail even though it looks set up.",
+                           evidence=joined[:120] + "…", resolver=ns)
+    return CheckResult("dkim_chunking", "pass", "DKIM key parses and is a plausible length.",
+                       "Your email signature is published correctly.", resolver=ns)
+
+
+def www_redirect(domain: str, timeout: float = 8.0) -> CheckResult:
+    """Half of everyone types www. If it does not reach the site, half of the
+    business's customers see an error."""
+    try:
+        response = httpx.get(f"https://www.{domain}", follow_redirects=True,
+                             timeout=timeout)
+    except httpx.HTTPError as exc:
+        return CheckResult("www_redirect", "fail",
+                           f"www.{domain} did not respond: {type(exc).__name__}.",
+                           "Customers who type www before your address will not reach "
+                           "your site.", resolver="https")
+    if response.status_code < 400:
+        return CheckResult("www_redirect", "pass",
+                           f"www.{domain} reaches the site ({response.status_code}).",
+                           "Your address works with or without www.",
+                           evidence=str(response.url), resolver="https")
+    return CheckResult("www_redirect", "fail",
+                       f"www.{domain} returns {response.status_code}.",
+                       "Customers who type www before your address see an error.",
+                       resolver="https")
+
+
+def https_enforced(domain: str, timeout: float = 8.0) -> CheckResult:
+    """Plain http must end up on https, or a browser shows 'Not secure'."""
+    try:
+        response = httpx.get(f"http://{domain}", follow_redirects=True, timeout=timeout)
+    except httpx.HTTPError as exc:
+        return CheckResult("https_enforced", "fail",
+                           f"http://{domain} did not respond: {type(exc).__name__}.",
+                           "Your site may not load for visitors who arrive without https.",
+                           resolver="http")
+    if str(response.url).startswith("https://"):
+        return CheckResult("https_enforced", "pass", "Plain http redirects to https.",
+                           "Visitors always arrive on the secure version of your site.",
+                           evidence=str(response.url), resolver="http")
+    return CheckResult("https_enforced", "fail", "Plain http is served without redirecting.",
+                       "Some visitors see a 'Not secure' warning in their browser instead "
+                       "of your site.", evidence=str(response.url), resolver="http")
+
+
+def cert_valid(domain: str, days: int = 14, timeout: float = 8.0) -> CheckResult:
+    """A certificate that expires unnoticed replaces the site with a warning."""
+    context = ssl.create_default_context()
+    try:
+        with socket.create_connection((domain, 443), timeout=timeout) as sock:
+            with context.wrap_socket(sock, server_hostname=domain) as tls:
+                cert = tls.getpeercert()
+    except (OSError, ssl.SSLError) as exc:
+        return CheckResult("cert_valid", "fail",
+                           f"Could not complete a TLS handshake with {domain}: {exc}.",
+                           "Visitors may see a security warning instead of your site.",
+                           resolver="tls")
+    expires = datetime.strptime(cert["notAfter"], "%b %d %H:%M:%S %Y %Z").replace(
+        tzinfo=timezone.utc)
+    left = (expires - datetime.now(timezone.utc)).days
+    if left > days:
+        return CheckResult("cert_valid", "pass",
+                           f"Certificate valid for another {left} days.",
+                           "Your site is secure and the certificate is not close to expiring.",
+                           evidence=f"notAfter={cert['notAfter']}", resolver="tls")
+    return CheckResult("cert_valid", "fail",
+                       f"Certificate expires in {left} days.",
+                       "Visitors will start seeing a security warning instead of your site "
+                       f"in {left} days unless it renews.",
+                       evidence=f"notAfter={cert['notAfter']}", resolver="tls",
+                       detail={"days_left": left})
+
+
 def run_all(domain: str, *, dkim_selector: str = "resend",
             expect_ns: str = "", ns: str = "1.1.1.1") -> list[CheckResult]:
     """Every credential-free check, against one domain."""
     return [
         spf_single(domain, ns), spf_lookups(domain, ns),
         dkim_present(domain, dkim_selector, ns),
+        dkim_chunking(domain, dkim_selector, ns),
         dmarc_present(domain, ns), dmarc_policy(domain, ns),
         mx_present(domain, ns), ns_delegated(domain, expect_ns, ns),
         apex_resolves(domain, ns), caa_allows(domain, ns=ns),
     ]
+
+
+def run_reachability(domain: str) -> list[CheckResult]:
+    """Checks that need a live connection rather than a DNS answer. Separate
+    because they are slower and can be skipped when a domain is not up yet."""
+    return [www_redirect(domain), https_enforced(domain), cert_valid(domain)]
