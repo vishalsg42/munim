@@ -9,7 +9,7 @@ once against a facet, not once per provider (spec section 5).
 from datetime import datetime, timezone
 from typing import Protocol, runtime_checkable
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
 class _Strict(BaseModel):
@@ -24,6 +24,17 @@ class Expiry(_Strict):
 
     expires_at: datetime
     auto_renew: bool | None = None
+
+    @field_validator("expires_at")
+    @classmethod
+    def _assume_utc(cls, value: datetime) -> datetime:
+        """Providers are inconsistent: Vercel returns epoch ms, Resend returns
+        unsuffixed stamps. A naive value reaching expiring_within() raises
+        TypeError inside the one function the "one rule, every provider" claim
+        rests on, so it is coerced here rather than guarded at every caller."""
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
 
 
 class Reachability(_Strict):
@@ -77,11 +88,15 @@ class Adapter(Protocol):
 
     Enumeration is deterministic and does no interpretation. Only judgement is
     model work (docs/DECISIONS.md D7).
+
+    Async because everything above it is: FastMCP tools, the Strands agent loop,
+    the run-log writer, and Graph's fan-out all run on the event loop. A sync
+    adapter blocks all of them, and turns "parallel fan-out" into a for-loop.
     """
 
     name: str
 
-    def enumerate(self, container) -> list[Asset]: ...
+    async def enumerate(self, container) -> list[Asset]: ...
 
 
 def expiring_within(assets: list[Asset], days: int) -> list[Asset]:

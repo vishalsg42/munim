@@ -1,4 +1,4 @@
-from mcpc.server import build_server
+from munim.server import build_server
 
 
 async def test_server_exposes_list_clients():

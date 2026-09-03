@@ -6,6 +6,8 @@ keychain, reached through a Container (docs/DECISIONS.md D14, D15).
 """
 
 import json
+import os
+import tempfile
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
@@ -39,8 +41,21 @@ class Registry:
         return json.loads(self._path.read_text())
 
     def _save(self, records: dict[str, dict]) -> None:
+        """Atomic. The agent, the room and interactive tools all write here;
+        an interrupted write_text leaves truncated JSON that takes every client
+        down at once."""
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._path.write_text(json.dumps(records, indent=2, sort_keys=True))
+        payload = json.dumps(records, indent=2, sort_keys=True)
+        fd, tmp = tempfile.mkstemp(dir=self._path.parent, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w") as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(tmp, self._path)
+        except BaseException:
+            Path(tmp).unlink(missing_ok=True)
+            raise
 
     def clients(self) -> list[ClientRecord]:
         return [ClientRecord(**r) for r in self._load().values()]
@@ -55,6 +70,15 @@ class Registry:
         records = self._load()
         if record.name in records:
             raise ValueError(f"client {record.name!r} is already registered")
+        records[record.name] = record.model_dump()
+        self._save(records)
+
+    def update(self, record: ClientRecord) -> None:
+        """Replace an existing client. `add` refuses to overwrite, so
+        connect_provider needs this to append to `providers`."""
+        records = self._load()
+        if record.name not in records:
+            raise UnknownClient(f"no client registered as {record.name!r}")
         records[record.name] = record.model_dump()
         self._save(records)
 

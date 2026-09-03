@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from mcpc.assets import Asset, Expiry, Exposure, Freshness, expiring_within
+from munim.assets import Asset, Expiry, Exposure, Freshness, expiring_within
 
 
 def _at(days: int) -> datetime:
@@ -77,3 +77,26 @@ def test_facets_are_independent():
     )
     assert asset.exposure.public is True
     assert asset.expiry is None
+
+
+def test_a_naive_expiry_does_not_crash_the_one_rule():
+    """Providers are inconsistent: Vercel returns epoch ms, Resend returns
+    unsuffixed stamps. Before the validator this raised
+    `TypeError: can't subtract offset-naive and offset-aware datetimes`
+    inside expiring_within — the one function the "one rule, every provider"
+    claim rests on. Every other test here uses the aware _at() helper, so the
+    suite structurally could not catch it."""
+    asset = Asset(
+        client="acme", provider="vercel", kind="certificate", identifier="x",
+        expiry=Expiry(expires_at="2027-03-01T00:00:00"),  # no timezone
+    )
+    assert asset.expiry.expires_at.tzinfo is not None
+    expiring_within([asset], days=30)  # must not raise
+
+
+def test_an_offset_expiry_is_normalised_to_utc():
+    asset = Asset(
+        client="acme", provider="cloudflare", kind="domain", identifier="x",
+        expiry=Expiry(expires_at="2027-03-01T05:30:00+05:30"),
+    )
+    assert asset.expiry.expires_at.utcoffset().total_seconds() == 0

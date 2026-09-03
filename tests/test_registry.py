@@ -8,7 +8,7 @@ import json
 
 import pytest
 
-from mcpc.registry import ClientRecord, Registry, UnknownClient
+from munim.registry import ClientRecord, Registry, UnknownClient
 
 
 def test_a_new_registry_has_no_clients(tmp_path):
@@ -65,3 +65,50 @@ def test_a_client_can_be_looked_up_by_one_of_its_domains(tmp_path):
     assert registry.find_by_domain("checkout.acme.example").name == "acme"
     assert registry.find_by_domain("acme.example").name == "acme"
     assert registry.find_by_domain("unrelated.example") is None
+
+
+def test_update_replaces_an_existing_client(tmp_path):
+    """connect_provider must append to `providers`, and `add` refuses to
+    overwrite, so there has to be an update path."""
+    path = tmp_path / "registry.json"
+    registry = Registry(path)
+    registry.add(ClientRecord(name="acme"))
+
+    record = registry.get("acme")
+    record.providers.append("cloudflare")
+    registry.update(record)
+
+    assert Registry(path).get("acme").providers == ["cloudflare"]
+
+
+def test_update_refuses_an_unregistered_client(tmp_path):
+    from munim.registry import UnknownClient
+
+    with pytest.raises(UnknownClient):
+        Registry(tmp_path / "registry.json").update(ClientRecord(name="ghost"))
+
+
+def test_a_failed_write_leaves_the_previous_file_intact(tmp_path):
+    """Atomic write: the agent, the room and interactive tools all write here.
+    A truncated file fails json.loads and takes every client down at once."""
+    path = tmp_path / "registry.json"
+    registry = Registry(path)
+    registry.add(ClientRecord(name="acme", domain="acme.example"))
+    before = path.read_text()
+
+    import json as _json
+    original = _json.dumps
+
+    def explode(*args, **kwargs):
+        raise RuntimeError("disk full")
+
+    _json.dumps = explode
+    try:
+        with pytest.raises(RuntimeError):
+            registry.add(ClientRecord(name="bharat"))
+    finally:
+        _json.dumps = original
+
+    assert path.read_text() == before
+    assert Registry(path).get("acme").domain == "acme.example"
+    assert list(path.parent.glob("*.tmp")) == []

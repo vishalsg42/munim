@@ -378,7 +378,7 @@ permissions problem. A 20-minute poll confirmed it is not propagation either.
 
 **Decision.** Raise an AWS support case (drafted; Basic support covers Account & Billing), and
 **do not wait for it.** Run on **Gemini** via `strands-agents[gemini]`, key supplied through
-`GEMINI_API_KEY` in the environment. `MCPC_BEDROCK_MODEL` and the provider fallback chain remain,
+`GEMINI_API_KEY` in the environment. `MUNIM_BEDROCK_MODEL` and the provider fallback chain remain,
 so restoring Bedrock is a config change with no code change.
 
 **Why this is not a compromise.** Strands is the requirement; the model host is not (D16). And

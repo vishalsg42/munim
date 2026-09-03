@@ -9,7 +9,7 @@ Strands Agents and a different model host". See docs/DECISIONS.md D16.
 import os
 import sys
 
-from mcpc.env import load as load_env
+from munim.env import load as load_env
 from strands import Agent, tool
 
 load_env()
@@ -28,7 +28,7 @@ def add_two_numbers(a: int, b: int) -> int:
 #   us.anthropic.claude-sonnet-4-5-... -> gated only by the Anthropic use case form.
 # So the US cross-region inference profile for Sonnet 4.5 is the target.
 BEDROCK_MODEL = os.environ.get(
-    "MCPC_BEDROCK_MODEL", "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+    "MUNIM_BEDROCK_MODEL", "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
 )
 
 
@@ -46,7 +46,7 @@ def try_gemini():
         raise RuntimeError("GEMINI_API_KEY not set")
     from strands.models.gemini import GeminiModel
 
-    model_id = os.environ.get("MCPC_GEMINI_MODEL", "gemini-2.5-flash")
+    model_id = os.environ.get("MUNIM_GEMINI_MODEL", "gemini-2.5-flash")
     # google-genai reads GEMINI_API_KEY / GOOGLE_API_KEY from the environment,
     # so the key is never passed through argv or written to disk.
     return GeminiModel(model_id=model_id), f"Gemini {model_id}"
