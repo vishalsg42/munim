@@ -53,6 +53,19 @@ class KeychainTokenStorage(TokenStorage):
         data = self._read("client")
         return OAuthClientInformationFull(**data) if data else None
 
+    def remember_account(self, account: str) -> None:
+        """Record which provider account this session turned out to be.
+
+        Cached beside the token rather than in the registry, because it is the
+        provider's answer about this session, not something the operator
+        maintains. Two copies of a fact one of them can never update is how
+        `ClientRecord.providers` came to be wrong about everything.
+        """
+        self._backend.set_password(self._service("account"), self._client, account)
+
+    def account(self) -> str | None:
+        return self._backend.get_password(self._service("account"), self._client)
+
     def move_to(self, client: str) -> "KeychainTokenStorage":
         """Re-file this session under another client name.
 
@@ -63,11 +76,11 @@ class KeychainTokenStorage(TokenStorage):
         that fails before costs the session.
         """
         moved = KeychainTokenStorage(client, self._provider, self._backend)
-        for kind in ("client", "tokens"):
+        for kind in ("client", "tokens", "account"):
             raw = self._backend.get_password(self._service(kind), self._client)
             if raw is not None:
                 self._backend.set_password(moved._service(kind), client, raw)
-        for kind in ("client", "tokens"):
+        for kind in ("client", "tokens", "account"):
             try:
                 self._backend.delete_password(self._service(kind), self._client)
             except Exception:

@@ -66,20 +66,33 @@ class Container:
 
     @classmethod
     def for_client(cls, registry, client: str, backend: CredentialBackend) -> "Container":
-        """Construct only for a client the registry knows.
+        """Construct only for a client the registry knows, and bind to their id.
+
+        Callers pass whatever they were given, usually a name. What gets bound
+        is the id, because credentials are filed by identity and a name is a
+        label: binding to the label meant renaming a client orphaned their
+        credentials, and two labels for one account made two containers.
 
         Fails at construction with the name in hand, rather than later at use
         with a credential lookup miss that looks like a config problem.
         """
-        known = {r.name: r.name for r in registry.clients()}
-        resolved = known.get(client) or known.get(client.strip().lower())
-        if resolved is None:
-            raise UnknownClient(f"no client registered as {client!r}")
-        return cls(resolved, backend)
+        wanted = client.strip()
+        for record in registry.clients():
+            if wanted in (record.id, record.name) or wanted.lower() == record.name.lower():
+                box = cls(record.id, backend)
+                box._label = record.name
+                return box
+        raise UnknownClient(f"no client registered as {client!r}")
 
     @property
     def client(self) -> str:
+        """The identity. Use `label` for anything a person reads."""
         return self._client
+
+    @property
+    def label(self) -> str:
+        """What this client is called, falling back to the id when unknown."""
+        return getattr(self, "_label", None) or self._client
 
     def _credential(self, provider: str) -> str:
         """Private. Adapters use .http(); nothing else should reach a secret."""

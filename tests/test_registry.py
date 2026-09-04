@@ -48,10 +48,15 @@ def test_the_registry_file_never_contains_a_secret(tmp_path):
 
     registry.add(ClientRecord(name="acme"))
     assert "sk-secret-value" not in path.read_text()
-    # A stored record carries a name and a domain and nothing else. Whether a
-    # provider is connected is the keychain's to answer, not this file's.
+    # A stored record carries an id, a name and a domain and nothing else.
+    # Whether a provider is connected is the keychain's to answer, not this
+    # file's, and the file is keyed by id: the name is a label and a label that
+    # is also a primary key cannot be changed without moving credentials.
     stored = json.loads(path.read_text())
-    assert set(stored["acme"]) == {"name", "domain"}
+    (key, record), = stored.items()
+    assert key.startswith("c_")
+    assert set(record) == {"id", "name", "domain"}
+    assert record["id"] == key
 
 
 def test_a_client_can_be_looked_up_by_one_of_its_domains(tmp_path):
@@ -128,3 +133,41 @@ def test_a_registry_written_before_the_keychain_was_the_only_truth_still_loads(t
     record = Registry(path).get("acme")
     assert record.domain == "acme.example"
     assert not hasattr(record, "providers")
+
+
+def test_an_id_survives_being_read_twice(tmp_path):
+    """The bug this exists for cost live credentials.
+
+    Migrating a name-keyed registry minted an id on every read and never wrote
+    it back, so no two reads agreed. Anything filed under an id could never be
+    found again: every client read as disconnected while its tokens sat in the
+    keychain under an id nothing would ever generate a second time.
+    """
+    path = tmp_path / "registry.json"
+    path.write_text(json.dumps({"acme": {"name": "acme", "domain": "acme.example"}}))
+
+    first = Registry(path).get("acme").id
+    second = Registry(path).get("acme").id
+    assert first == second, "a fresh id on every read is not an identity"
+    assert first.startswith("c_")
+
+    # And it is on disk, not just consistent in memory.
+    stored = json.loads(path.read_text())
+    assert first in stored
+    assert "acme" not in stored, "still keyed by the label"
+
+
+def test_migrating_keeps_the_name_as_a_label(tmp_path):
+    path = tmp_path / "registry.json"
+    path.write_text(json.dumps({"Ivy & Fern": {"domain": "ivyandfern.co.uk"}}))
+    record = Registry(path).get("Ivy & Fern")
+    assert record.name == "Ivy & Fern"
+    assert record.domain == "ivyandfern.co.uk"
+
+
+def test_a_client_is_reachable_by_id_or_by_name(tmp_path):
+    registry = Registry(tmp_path / "r.json")
+    registry.add(ClientRecord(name="Acme"))
+    record = registry.get("Acme")
+    assert registry.get(record.id).id == record.id
+    assert registry.get("Acme").id == record.id

@@ -81,7 +81,11 @@ def test_an_unregistered_client_fails_at_construction_not_at_use():
     registry._path = None
     registry.clients = lambda: [ClientRecord(name="acme")]
 
-    assert Container.for_client(registry, "acme", backend).client == "acme"
+    # Bound to the identity, labelled with the name. Binding to the name meant
+    # renaming a client orphaned their credentials.
+    box = Container.for_client(registry, "acme", backend)
+    assert box.client.startswith("c_")
+    assert box.label == "acme"
     with pytest.raises(UnknownClient):
         Container.for_client(registry, "acme-uk", backend)
 

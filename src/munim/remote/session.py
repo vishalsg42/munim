@@ -78,7 +78,11 @@ def auth_for(client: str, provider: str, *, backend=None,
             await on_url(url)
         else:
             import webbrowser
-            print(f"Sign in as {client}'s {provider} account:\n{url}", flush=True)
+            # The caller may not have a name yet: connecting without one uses a
+            # provisional key until the provider says which account it was, and
+            # printing that key reads as gibberish.
+            whose = f"{client}'s " if not client.startswith("…") else ""
+            print(f"Sign in to the {whose}{provider} account:\n{url}", flush=True)
             webbrowser.open(url)
 
     async def callback() -> tuple[str, str | None]:

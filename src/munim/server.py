@@ -90,7 +90,7 @@ def build_server(backend=None, registry=None, runs_dir=None,
         """List every client container and which providers each has connected."""
         out = []
         for record in registry.clients():
-            container = Container(record.name, backend)
+            container = Container(record.id, backend)
             out.append({
                 "client": record.name,
                 "domain": record.domain,
@@ -186,10 +186,13 @@ def build_server(backend=None, registry=None, runs_dir=None,
         opens a browser, and no secret passes through the coding agent at all.
         This exists for providers that offer nothing else - Resend, for one.
         """
-        registry.get(client)  # unregistered client fails before a secret is stored
-        TokenConnector(backend).connect(client, provider, credential)
+        # Unregistered fails before a secret is stored. Filed under the id, not
+        # the name the caller used: reads go by id, and storing under a label
+        # means the credential is invisible the moment the label changes.
+        record = registry.get(client)
+        TokenConnector(backend).connect(record.id, provider, credential)
         # The credential is deliberately not echoed.
-        return {"client": client, "provider": provider, "connected": True,
+        return {"client": record.name, "provider": provider, "connected": True,
                 "oauth_available": provider in OAUTH_PROVIDERS}
 
     @server.tool()

@@ -6,19 +6,34 @@ keychain, reached through a Container (docs/DECISIONS.md D14, D15).
 """
 
 import json
+import secrets
 import os
 import tempfile
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class UnknownClient(Exception):
     """No client is registered under this name."""
 
 
+def new_client_id() -> str:
+    """A stable handle for a client, unrelated to what they are called."""
+    return "c_" + secrets.token_hex(8)
+
+
 class ClientRecord(BaseModel):
     """One client. Deliberately has nowhere to put a secret.
+
+    `id` is the identity; `name` is a label.
+
+    They used to be the same thing, and everything keyed on the label:
+    credentials in the keychain, sessions, registry rows. Two consequences,
+    both bad. Renaming a client had to physically move their credentials, and
+    a half-done rename left a client that looked connected and was not.
+    Connecting one real account under two labels made two clients, so a call
+    could go to either, which is the split identity D5 exists to prevent.
 
     `extra="forbid"` is load-bearing: it makes storing a token here a
     construction-time error rather than a code review question.
@@ -26,6 +41,7 @@ class ClientRecord(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    id: str = Field(default_factory=new_client_id)
     name: str
     domain: str | None = None
 
@@ -45,10 +61,28 @@ class Registry:
         if not self._path.exists():
             return {}
         records = json.loads(self._path.read_text())
-        for record in records.values():
-            for key in self._LEGACY_KEYS:
-                record.pop(key, None)
-        return records
+        migrated: dict[str, dict] = {}
+        changed = False
+        for key, record in records.items():
+            for legacy in self._LEGACY_KEYS:
+                if record.pop(legacy, None) is not None:
+                    changed = True
+            # Registries written while the name was the identity are keyed by
+            # it and carry no id. Give them one, keeping the name as the label
+            # it should always have been.
+            record.setdefault("name", key)
+            if "id" not in record:
+                record["id"] = new_client_id()
+                changed = True
+            migrated[record["id"]] = record
+
+        if changed:
+            # Written back immediately, and this is the whole point. An id
+            # minted on every read is not an identity: nothing filed under one
+            # can ever be found again, and every client reads as disconnected
+            # while its credentials sit there untouched.
+            self._save(migrated)
+        return migrated
 
     def _save(self, records: dict[str, dict]) -> None:
         """Atomic. The agent, the room and interactive tools all write here;
@@ -70,44 +104,49 @@ class Registry:
     def clients(self) -> list[ClientRecord]:
         return [ClientRecord(**r) for r in self._load().values()]
 
-    def get(self, name: str) -> ClientRecord:
+    def get(self, key: str) -> ClientRecord:
+        """By id or by name. Callers hold whichever they were given, and the
+        distinction matters to storage, not to whoever is asking."""
         records = self._load()
-        if name not in records:
-            raise UnknownClient(f"no client registered as {name!r}")
-        return ClientRecord(**records[name])
+        if key in records:
+            return ClientRecord(**records[key])
+        for record in records.values():
+            if record.get("name") == key:
+                return ClientRecord(**record)
+        raise UnknownClient(f"no client registered as {key!r}")
 
     def add(self, record: ClientRecord) -> None:
         records = self._load()
-        if record.name in records:
+        if any(r.get("name") == record.name for r in records.values()):
             raise ValueError(f"client {record.name!r} is already registered")
-        records[record.name] = record.model_dump()
+        records[record.id] = record.model_dump()
         self._save(records)
 
     def update(self, record: ClientRecord) -> None:
-        """Replace an existing client. `add` refuses to overwrite, so
-        connect_provider needs this to append to `providers`."""
-        records = self._load()
-        if record.name not in records:
-            raise UnknownClient(f"no client registered as {record.name!r}")
-        records[record.name] = record.model_dump()
-        self._save(records)
+        """Replace an existing client, matched by id.
 
-    def rename(self, old: str, new: str) -> ClientRecord:
-        """Move a client to another name, keeping its domain.
-
-        Needed because a client can now be named by the account it was
-        authorised as, and `Tech.example@gmail.com's Account` is not what the
-        operator calls them. Refuses to overwrite: two clients merged into one
-        is a mutation on the wrong account waiting to happen (D5).
+        By id, so this is also how a client is renamed: the label changes and
+        the identity does not, which is the whole point of having both.
         """
         records = self._load()
-        if old not in records:
-            raise UnknownClient(f"no client registered as {old!r}")
-        if new in records:
-            raise ValueError(f"{new!r} is already registered; pick another name")
-        record = ClientRecord(**{**records.pop(old), "name": new})
-        records[new] = record.model_dump()
+        if record.id not in records:
+            raise UnknownClient(f"no client with id {record.id!r}")
+        records[record.id] = record.model_dump()
         self._save(records)
+
+    def rename(self, key: str, new_name: str) -> ClientRecord:
+        """Change what a client is called. Nothing else moves.
+
+        This used to relocate the registry row and every credential filed under
+        the old name, and a failure part-way left a client that looked
+        connected and was not. Now the identity never changes, so a rename is
+        one field.
+        """
+        record = self.get(key)
+        if any(r.name == new_name and r.id != record.id for r in self.clients()):
+            raise ValueError(f"{new_name!r} is already registered; pick another name")
+        record.name = new_name
+        self.update(record)
         return record
 
     def find_by_domain(self, hostname: str) -> ClientRecord | None:

@@ -80,8 +80,12 @@ async def test_connect_provider_does_not_echo_the_secret(tmp_path):
     rendered = str(result)
     assert "re_super_secret" not in rendered, "the credential came back out"
     # The keychain is the only record that a provider is connected; the registry
-    # deliberately has nowhere to say so.
-    assert keychain.get("acme", "resend") == "re_super_secret"
+    # deliberately has nowhere to say so. Filed under the client's id, not the
+    # name the call used: a credential filed under a label disappears the moment
+    # the label changes.
+    acme = registry.get("acme")
+    assert keychain.get(acme.id, "resend") == "re_super_secret"
+    assert keychain.get("acme", "resend") is None, "filed under the label"
 
 
 async def test_an_unregistered_client_is_refused_before_a_secret_is_stored(tmp_path):

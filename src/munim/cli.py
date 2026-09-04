@@ -238,6 +238,16 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
 
+    # Credentials used to be filed under the client's name. Move anything still
+    # there before anything tries to read it, or a client connected yesterday
+    # looks disconnected today. Idempotent and cheap: it checks the id first.
+    try:
+        from munim.migrate import migrate
+        for line in migrate(_registry()):
+            print(f"moved {line}", file=sys.stderr)
+    except Exception:
+        pass  # never block a command on a migration
+
     # `munim connect cloudflare` reads as one positional, and argparse fills the
     # first one. Shift it: a lone argument that names a provider is a provider.
     if args.command == "connect" and args.provider is None:
@@ -258,7 +268,7 @@ def main(argv: list[str] | None = None) -> int:
         backend = KeychainBackend()
         for record in _registry().clients():
             from munim.container import Container
-            container = Container(record.name, backend)
+            container = Container(record.id, backend)
             connected = [p for p in ("cloudflare", "vercel", "resend")
                          if container.has(p)]
             print(f"{record.name:32} {record.domain or '-':32} "
