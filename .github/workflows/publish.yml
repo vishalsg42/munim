@@ -1,0 +1,80 @@
+name: publish
+
+# Trusted publishing: PyPI verifies this workflow's identity through GitHub, so
+# no token exists to leak. It does nothing until a pending publisher is added on
+# PyPI for this repository, this filename and the `pypi` environment.
+#
+# Fires on a tag, not on every push. A version on PyPI can never be reused or
+# withdrawn, so publishing has to be a thing somebody decided rather than a
+# thing that happened.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  # The tests run again here rather than trusting the run on the commit. A tag
+  # can point anywhere, including at something that never passed.
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --extra dev
+      - run: uv run pytest -q
+
+      - name: The tag matches the version being published
+        run: |
+          tagged="${GITHUB_REF_NAME#v}"
+          declared=$(uv run python -c "
+          import tomli, pathlib
+          print(tomli.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])
+          " 2>/dev/null || uv run python -c "
+          import re, pathlib
+          text = pathlib.Path('pyproject.toml').read_text()
+          print(re.search(r'^version = \"([^\"]+)\"', text, re.M).group(1))
+          ")
+          echo "tag=$tagged pyproject=$declared"
+          test "$tagged" = "$declared" || {
+            echo "::error::tag v$tagged does not match pyproject version $declared"
+            exit 1
+          }
+
+  build:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv build
+
+      # The control room ships inside the wheel so an install needs no npm. A
+      # wheel without it installs and then fails at the first `munim-room`,
+      # which is a bad way to find out.
+      - name: The wheel carries the built control room
+        run: |
+          uv run python -c "
+          import glob, zipfile, sys
+          names = zipfile.ZipFile(glob.glob('dist/*.whl')[0]).namelist()
+          static = [n for n in names if 'room/static' in n]
+          print(f'{len(static)} control room files in the wheel')
+          sys.exit(0 if static else 'the wheel has no control room')
+          "
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write   # what trusted publishing uses instead of a token
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

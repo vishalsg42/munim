@@ -341,11 +341,14 @@ without setup because the client, not the operator, holds the Google
 registration. Munim is a client too, so it needs its own, and that is a decision
 about carrying a Google credential rather than a thing to slip in.
 
-**Published to PyPI.** The package builds, and a wheel installed into an empty
-environment runs and carries the control room. It is not published, so installing
-still means cloning, and every other MCP server is one line in a config. That
-gap is plausibly why a credential tool with a good design ends up with no
-adopters, which this project already recorded about somebody else's (D15).
+**Published to PyPI.** The package builds, a wheel installed into an empty
+environment runs and carries the control room, the name is free, and
+`.github/workflows/publish.yml` publishes on a tag through PyPI's trusted
+publishing, so no token has to exist. What is missing is the pending publisher
+on PyPI, which is an account decision rather than a code one. Until then
+installing means cloning, while every other MCP server is one line in a config,
+and that gap is plausibly why a credential tool with a good design ends up with
+no adopters (D15).
 
 **Watch mode.** `audit_all_clients` is the shape of it and runs on demand.
 Running on a schedule and telling somebody only when the answer changes is the
