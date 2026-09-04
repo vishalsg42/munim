@@ -111,14 +111,24 @@ the video.*
 
 ### 3:18–3:48  Judgement, then a person.
 
-*On screen:* the agent **merges** the two records rather than adding a third. Then pauses:
-confirmation, **"Ivy & Fern Studio"** named on it. One click.
+*On screen:* the agent returns a **plan**, not a change. Each record with what would happen
+to it: three to create, one to **merge**. The merge line names both policies and the senders
+it keeps. Then it stops, because a plan is all it can do on its own.
 
-> "It does not add a record. It merges them.
-> Then it stops and asks, because this is someone else's live DNS."
+The operator approves. The chip turns.
+
+> "It does not add a record. It works out the merge, and then it stops.
+> Applying it is a second instruction, because this is someone else's live DNS."
 
 *This is the Strands beat, placed at peak attention. Approval appears as a consequence, never
 as the headline.*
+
+**Film the two calls, not a dialog box.** `plan_mail_setup` returns the plan;
+`apply_mail_setup` refuses without `approved=true` and says which records it would have
+touched. That refusal is worth a beat of its own: it is the product declining to act, on
+screen, rather than a claim that it would. An earlier version of this script showed a
+confirmation the exposed product could not produce, which is the kind of thing that gets
+found by whoever watches it most carefully.
 
 ### 3:48–4:16  Proof.
 
