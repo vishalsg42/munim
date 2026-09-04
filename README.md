@@ -168,6 +168,30 @@ Built in: Cloudflare, Vercel, Resend, Netlify, Linear, Notion, Sentry, Supabase
 (all zero setup, via dynamic client registration), Gmail and Stitch (need a
 registered application), Zoho (the endpoint URL is the credential).
 
+### What you are actually granting
+
+**The provider decides, not Munim.** The MCP specification defines a scope
+selection strategy, and it takes the scope from the server's own advertised
+list. A client cannot ask for less: setting one is overwritten before the
+authorize request is built. So connecting a provider grants what that provider
+publishes, and it is worth reading the consent screen rather than clicking it.
+
+Two that are worth knowing before you connect them:
+
+| | |
+|---|---|
+| **Gmail** | Grants `https://mail.google.com/` among others: read, send and delete across the whole mailbox. Munim reads mail *configuration* and never sends, but the grant does not know that. |
+| **Supabase** | Grants `database:write`, `storage:write`, `edge_functions:write`, `environment:write` and `secrets:read`. |
+
+For a project whose subject is credential isolation this is the least
+comfortable thing in it, and pretending otherwise would be worse. It is a
+property of the specification rather than of this implementation, and it is
+recorded in [`docs/ROADMAP.md`](docs/ROADMAP.md) with what would have to change.
+
+Vercel has the opposite problem from the same cause: its resource advertises
+only `openid`, so `offline_access` is never requested and **its session expires
+after an hour with no refresh token.** Reconnecting means signing in again.
+
 ---
 
 ## Every command
