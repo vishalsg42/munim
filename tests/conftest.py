@@ -17,24 +17,62 @@ def _never_write_to_the_real_home(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _no_live_model_calls(monkeypatch):
-    """No test may call a model host over the network.
+def _agents_are_off_and_no_host_is_real(tmp_path, monkeypatch):
+    """No test may reach a model host, and none may read the operator's config.
 
-    `check` runs the agent now, so without this the suite reaches for Bedrock
-    on every check test: slow, flaky, and dependent on whoever runs it having
-    credentials. Clearing the keys drives `explain` down its documented
-    degradation path instead, which is the behaviour a fresh clone gets and is
-    therefore worth exercising by default.
+    This replaces a fixture that monkeypatched `munim.agent.launch.build_model`
+    to raise. That covered one of three call sites: `across` and `within` were
+    unprotected, and every `check` test was forced down the `except Exception`
+    branch, so no test could ever observe the path a real install takes.
+
+    Two layers now. Settings point at tmp_path with every model variable
+    cleared, so agents are off by default exactly as a fresh install is, which
+    is the state worth exercising. And `_construct` refuses, so a test that
+    turns agents on still cannot talk to Bedrock: those tests inject a fake
+    model through `build_model` instead.
+
+    Clearing the environment matters as much as the file. A developer with a
+    Gemini key exported would otherwise have their machine decide what the
+    suite asserts, which is the bug already found once for `.env`.
     """
-    # Clearing the environment is not enough: build_model calls load_env(),
-    # which reads .env back in and hands the tests a live key. The suite went
-    # from 3s to 41s that way, talking to Gemini on every check test.
-    import munim.agent.launch
+    import munim.agent.model
 
-    def refuse():
-        raise RuntimeError("no model host available: disabled for tests")
+    monkeypatch.setenv("MUNIM_SETTINGS", str(tmp_path / "settings.json"))
+    for name in ("MUNIM_AI", "MUNIM_AI_HOST", "MUNIM_PREFER",
+                 "MUNIM_BEDROCK_MODEL", "MUNIM_GEMINI_MODEL",
+                 "MUNIM_ANTHROPIC_MODEL", "GEMINI_API_KEY", "GOOGLE_API_KEY",
+                 "ANTHROPIC_API_KEY", "AWS_PROFILE", "AWS_ACCESS_KEY_ID",
+                 "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
 
-    monkeypatch.setattr(munim.agent.launch, "build_model", refuse)
+    import importlib.util
+
+    from munim import settings
+
+    real = munim.agent.model._construct
+
+    def really_importable(host: str) -> bool:
+        # Asked of the filesystem, not of settings.installed, which a test is
+        # allowed to monkeypatch. A test that fakes "this host is installed"
+        # must not thereby unlock a real network client.
+        spec = settings.HOSTS.get(host)
+        try:
+            return bool(spec) and importlib.util.find_spec(spec.needs) is not None
+        except (ImportError, ValueError):
+            return False
+
+    def guarded(host, key):
+        # Only hosts that could actually build a client are refused. One whose
+        # backend is absent cannot reach anything, and letting the real code run
+        # for it is what lets a test assert that a missing extra comes back as
+        # NoModelHost rather than as ModuleNotFoundError.
+        if really_importable(host):
+            raise AssertionError(
+                f"a test tried to build a real {host} model. Inject a fake "
+                f"through build_model instead.")
+        return real(host, key)
+
+    monkeypatch.setattr(munim.agent.model, "_construct", guarded)
 
 
 @pytest.fixture(autouse=True)

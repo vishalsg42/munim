@@ -41,7 +41,8 @@ export const STAGES = ["deploy", "domain", "dns", "mail", "verify", "diagnose"];
 export const CHECK_ONLY = ["verify", "diagnose"];
 
 export const initialState = {
-  client: null, stage: null, stagesDone: [], stagesSeen: [], checks: {},
+  client: null, stage: null, stagesDone: [], stagesSeen: [], stagesOff: [],
+  checks: {},
   finding: null, awaitingConfirm: null, escalated: null,
   events: [], done: false, connected: false,
 };
@@ -74,6 +75,12 @@ export function reduce(state, action) {
       break;
     case "observation":
       if (check) next.checks = { ...state.checks, [check]: "pass" };
+      // A stage that was deliberately not run, rather than one still pending.
+      // Agents are off by default now, so `diagnose` would otherwise sit grey
+      // for the whole run and read as a step that hung: exactly the confusion
+      // the comment above STAGES was written about.
+      else if (e.detail && e.detail.agents === "off" && e.stage)
+        next.stagesOff = [...new Set([...state.stagesOff, e.stage])];
       break;
     case "finding":
       if (check) next.checks = { ...state.checks, [check]: "fail" };

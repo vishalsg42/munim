@@ -56,12 +56,26 @@ which of my clients has a domain expiring this quarter?
 check ivyandfern.co.uk for Ivy & Fern Studio
 ```
 
-**A model is only needed for the tools that reason** (`check`, `work_on_client`,
-`ask_across_clients`). Any Strands-supported host works:
+**Munim is local by default.** The checks, the audit and the mail plan are
+deterministic: they never needed a model and never call one. Three tools can
+also reason about what they find (`check`, `work_on_client`,
+`ask_across_clients`), and that is switched off until you ask for it, so having
+a key lying around is not the same as consenting to use it.
 
 ```bash
-mkdir -p ~/.munim && echo "GEMINI_API_KEY=..." >> ~/.munim/.env
+munim config ai key gemini   # prompts, stored in your keychain
+munim config ai on           # takes effect on the next call, no reconnect
+munim config ai              # what is on, on what, and where each came from
 ```
+
+Hosts are Amazon Bedrock, which works out of the box, plus Google Gemini and
+Anthropic, which Strands ships as extras: `pip install 'munim[gemini]'`.
+
+One thing this does not change: Munim runs as an MCP server, so whatever its
+tools return goes into your coding agent's context and therefore to whichever
+model that agent runs on. Turning agents off stops Munim calling a model of its
+own; it cannot change how MCP works. The [privacy policy](site/privacy.html)
+says so plainly.
 
 **`munim doctor`** says what is set up, what is not, and the exact command to fix
 each gap. Start there whenever something is unclear.

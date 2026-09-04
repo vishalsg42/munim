@@ -798,3 +798,56 @@ and only discovers the problem when the call fails.
 Credits would fund a host the account cannot reach. The Strands requirement is
 satisfied by the SDK, not by which model answers, which is the point D17 made
 and this confirms.
+
+## D27: Reasoning is opt-in, and the gate is where the data would leave
+
+**Decided 2026-09-04.**
+
+Munim reached a model host whenever one happened to be configured. A
+`GEMINI_API_KEY` in `~/.munim/.env` was enough for `check`, `work_on_client` and
+`ask_across_clients` to send a client's provider data to Google, and nobody had
+decided that. Having a key was treated as consent. For a tool whose subject is
+credential isolation that is the wrong default, so agents are off until asked
+for.
+
+**The gate is inside `build_model`, not in each tool.** That is the boundary
+where data would actually leave, and across all of `src/` it is the only place a
+Strands model is constructed. One check there covers the three call sites that
+exist and any written later, which a check per tool would not.
+`tests/test_model_hosts.py` holds that as a rule rather than a list.
+
+**The tools stay registered.** Omitting them from the MCP tool list when agents
+are off was the alternative, and it is the move `across.py` makes for write
+tools. It does not transfer. There, the model might ignore an instruction, so
+absence is a security boundary; here a tool called with agents off returns early,
+so absence buys no safety and costs discoverability, because an agent that cannot
+see a tool cannot say how to turn it on. The stronger objection is that
+`build_server()` runs once: conditional registration would make the tool list a
+cached derivation of mutable state, and the two would drift the moment somebody
+ran `munim config ai on`. Reading the setting at the point of use leaves one
+source of truth, and the switch takes effect with no reconnect.
+
+**The switch is never read from a file.** `load_dotenv` writes into the process
+environment permanently and the MCP server loads once at startup, so a `MUNIM_AI`
+in a `.env` would go sticky for the life of that process and silently beat every
+later write. `munim config ai on` would report success while the running server
+stayed off, which is the two-commands-disagree failure this project has hit
+before. `doctor` reports a file that carries one.
+
+**Two things were found while doing it, and both were older than this change.**
+
+The privacy policy said "Nowhere else" after listing the providers and Munim's
+own model host, and never mentioned that Munim is an MCP server whose every tool
+result reaches the coding agent's model provider. The first draft of this work
+would have made that page claim "nothing leaves the machine", which is worse than
+what it said before. The disclosure is now on the page, and it is the more
+important half of this change.
+
+`pyproject.toml` pinned bare `strands-agents`, and Strands ships Gemini and
+Anthropic as extras. Two of the three documented hosts raised
+ModuleNotFoundError out of `build_model` while `doctor` reported them as fine,
+because it only checked whether a key was set. An opt-in switch is worth nothing
+if turning it on crashes, so the extras are declared, every branch catches
+`ImportError`, `doctor` checks the backend imports, and `auto` skips a host it
+cannot build instead of picking Bedrock and failing at the first call.
+

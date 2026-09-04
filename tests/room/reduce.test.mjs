@@ -50,3 +50,25 @@ test("a run that diagnoses a failure is still a check, not a launch", () => {
   s = reduce(s, { type: "event", event: ev(4, "stage_done", {}, "diagnose") });
   assert.deepEqual(s.stagesSeen, ["verify", "diagnose"]);
 });
+
+test("a stage nobody asked for is off, not pending", () => {
+  // The diagnose chip renders grey while a stage has not happened yet. Agents
+  // are off by default now, so without a separate state that chip sits grey for
+  // every run a fresh install makes and reads as a step that hung.
+  let s = reduce(initialState, { type: "event", event: ev(1, "stage_start", {}, "verify") });
+  s = reduce(s, {
+    type: "event",
+    event: ev(2, "observation", { agents: "off" }, "diagnose"),
+  });
+  assert.deepEqual(s.stagesOff, ["diagnose"]);
+  assert.ok(!s.stagesDone.includes("diagnose"), "off is not done");
+});
+
+test("an ordinary observation does not mark a stage off", () => {
+  const s = reduce(initialState, {
+    type: "event",
+    event: ev(1, "observation", { check: "mx_present" }, "verify"),
+  });
+  assert.deepEqual(s.stagesOff, []);
+  assert.equal(s.checks.mx_present, "pass");
+});

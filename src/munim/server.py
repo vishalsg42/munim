@@ -152,7 +152,12 @@ def build_server(backend=None, registry=None, runs_dir=None,
         present to be called. Naming one client is what unlocks writes (D5).
         """
         from munim.agent.across import ask, connected_clients
+        from munim.agent.model import agents_off
         from munim.remote.servers import SERVERS
+
+        off = agents_off()
+        if off is not None:
+            return {"question": question, **off}
 
         records = registry.clients()
         reachable = sorted({c.name for p in SERVERS
@@ -247,7 +252,12 @@ def build_server(backend=None, registry=None, runs_dir=None,
         a rule telling it not to. Every change is written to the run log as it
         happens: open the control room to watch, or read it back afterwards.
         """
+        from munim.agent.model import agents_off
         from munim.agent.within import work_on
+
+        off = agents_off()
+        if off is not None:
+            return {"client": client, **off}
 
         record = registry.get(client)
         log = RunLog(new_run_id(), runs)
@@ -370,7 +380,16 @@ def build_server(backend=None, registry=None, runs_dir=None,
         failures = [r for r in results if r.status == "fail"]
         report = write_report(log, domain=target_domain, business=client,
                               out_dir=reports)
+        # The checks are the valuable half and they ran. Saying agents are off
+        # here matters because the coding agent is where people look: doctor is
+        # a terminal command, and somebody upgrading from 0.2.1 would otherwise
+        # just notice the prose had quietly stopped appearing.
+        from munim import settings
+        agents = "on" if settings.ai().enabled else "off"
         return {
+            "agents": agents,
+            **({"fix": "munim config ai on for plain-English explanations"}
+               if agents == "off" else {}),
             "client": client,
             "domain": target_domain,
             "run_id": log.run_id,
