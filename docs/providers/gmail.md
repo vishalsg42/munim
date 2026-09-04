@@ -139,10 +139,18 @@ address, and user profile."*
 Gmail's scopes are far beyond that subset. Every other provider here holds a
 session that refreshes, so this is Gmail's alone.
 
-**Publishing the app removes it.** The seven days are a property of Testing
-status, not of verification, and Google's own documentation never conditions the
-expiry on being verified. Press **Publish app** on the Audience page and the
-limit lifts.
+**Publishing the app removes it, and this project has done that.** The seven
+days are a property of Testing status, not of verification, and Google's own
+documentation never conditions the expiry on being verified. Press **Publish
+app** on the Audience page and the limit lifts. Publishing is reversible: the
+button becomes "Back to testing".
+
+Publishing needs three things filled in on the Branding page first, and the
+button stays disabled until they are: an application home page, a privacy policy
+link and a terms of service link, plus the domain listed under Authorized
+domains. Those pages have to be publicly reachable, so a host that puts a login
+in front of them does not count. `site/` in this repository is the three pages
+Munim uses, ready to deploy anywhere static.
 
 `https://console.cloud.google.com/auth/audience?project=YOUR_PROJECT`
 
@@ -153,7 +161,11 @@ What you accept in exchange, and the third one is permanent:
   verification has not been done.
 - A **hard cap of 100 users over the lifetime of the project**. Google: it
   "applies over the entire lifetime of the project, and it cannot be reset or
-  changed."
+  changed." Worth reading precisely: the cap "limits the number of users that
+  can grant permission to your app when requesting **unapproved** sensitive or
+  restricted scopes", and "does not apply if you are requesting only approved
+  sensitive or restricted scopes". So verification lifts the cap rather than
+  merely removing the warning.
 
 Google explicitly sanctions running this way: *"If the app is for your personal
 use (fewer than 100 users), you and your limited number of users can continue

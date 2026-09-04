@@ -74,15 +74,16 @@ application route, which builds its own authorize URL. The one exception is
 is credential isolation this is the least comfortable thing in the project, and
 it is a property of the spec rather than of this implementation.
 
-**Gmail is capped at 100 users, permanently.** The seven day session expiry
-that Testing status imposes is removed by publishing the app, which needs no
-verification. What publishing cannot remove is a hard cap of 100 users over the
-lifetime of the project, which Google says "cannot be reset or changed", plus an
-unverified app warning screen. Going beyond that needs full verification: a
-homepage and privacy policy on a Search Console verified domain, a demo video,
-and probably a CASA assessment costing $500 to $4,500 and renewed annually.
-Whether CASA applies to a local client that talks only to Google is not
-documented either way.
+**Gmail is capped at 100 users until the app is verified.** The seven day
+session expiry that Testing imposes has been removed: the app is published, and
+that needed no verification. What remains is a cap of 100 users granting
+permission while the scopes are unapproved, which Google says "cannot be reset
+or changed", and an unverified app warning screen. The cap does not apply once
+the scopes are approved, so verification lifts it rather than merely softening
+the warning. Getting there needs a homepage and privacy policy on a Search
+Console verified domain, a demo video, and probably a CASA assessment costing
+$500 to $4,500 renewed annually. Whether CASA applies to a local client that
+talks only to Google is not documented either way.
 
 **Adding Gmail test users is manual, and there is no API.** Every mailbox to be
 connected must be listed in the Cloud Console by hand, capped at 100 for the

@@ -44,6 +44,17 @@ exactly this and permits a client to add the scope. `munim/remote/offline.py`
 does. Delete that module when `strands-agents` allows `mcp>=2.0.0`, which ships
 the same rule.
 
+## What the narrow scope costs
+
+The token carries `openid offline_access` and nothing else, because that is what
+the resource advertises. Deploying works. Reading does not: `list_projects`
+returns an empty list and `get_deployment` answers "Deployment not found" for a
+deployment it created seconds earlier and reported as READY.
+
+So write operations succeed while reads come back empty, which is a confusing
+shape of failure. Whether more scope would fix it is untested; Vercel's resource
+advertises none to ask for.
+
 ## Verified
 
 37 tools, live. Also settles a question this entry used to leave open: Vercel
