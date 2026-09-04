@@ -14,11 +14,11 @@ telemetry.
 
 **What is sent, and to whom**
 
-- **Provider APIs** — Cloudflare, Vercel and Resend receive the requests you ask
+- **Provider APIs.** Cloudflare, Vercel and Resend receive the requests you ask
   Munim to make, authenticated with the credential you connected.
-- **Public DNS resolvers** — checks query `1.1.1.1` and the domain's authoritative
+- **Public DNS resolvers.** Checks query `1.1.1.1` and the domain's authoritative
   nameservers. These are public lookups about public records.
-- **Your chosen model host** — Amazon Bedrock, Gemini, Anthropic or another
+- **Your chosen model host.** Amazon Bedrock, Gemini, Anthropic or another
   Strands-supported provider receives the *findings* it is asked to explain: the
   domain, which checks failed, and the DNS evidence. **No credential is ever sent
   to a model.** Provider tokens are injected at the point of the API call and are

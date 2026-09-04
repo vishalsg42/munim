@@ -1,4 +1,4 @@
-# Multi-client MCP — design
+# Multi-client MCP, design
 
 Status: **draft for review**, 2026-09-03.
 Submission for the AWS Agents for Humans Hackathon (deadline 2026-09-14 17:00 PDT).
@@ -9,7 +9,7 @@ Read `docs/HACKATHON.md` for the contest analysis and the competitive scan this 
 ## 1. The problem
 
 One person maintains the digital estate of a dozen small businesses. **The clients own the
-accounts** — Vercel, Cloudflare, Resend, Supabase — and pay the bills. The operator holds
+accounts**, Vercel, Cloudflare, Resend, Supabase, and pay the bills. The operator holds
 delegated access and does the work.
 
 Every account is single-tenant by design, so the only way to move between clients is to log
@@ -19,14 +19,14 @@ per client**: isolation built out of tabs and discipline.
 That costs three things:
 
 1. **Switching.** Every action on a different client means re-authenticating somewhere.
-2. **No vantage point.** Questions that span clients — *whose domain renews this month?* —
+2. **No vantage point.** Questions that span clients, *whose domain renews this month?*,
    cannot be asked from anywhere, because no place exists that can see all of them.
 3. **Silent failure during setup.** Standing up a new client is a copy-paste dance between
    accounts, and one of the handoffs fails invisibly (see §3).
 
 ## 2. Who it is for
 
-**The operator** is the user of the tool. **The clients are the people it serves** — small
+**The operator** is the user of the tool. **The clients are the people it serves.** small
 business owners whose site launches correctly and whose email does not quietly stop being
 delivered. That is not a positioning choice; the accounts and the money are literally theirs.
 
@@ -51,10 +51,10 @@ Four handoffs, three of them between two different companies' dashboards:
 
 | From | To | What crosses | Failure mode |
 |---|---|---|---|
-| Vercel | Cloudflare | A / CNAME | Site does not resolve — **visible immediately** |
-| Resend | Cloudflare | DKIM, SPF, return-path | Mail silently goes to spam — **invisible for weeks** |
-| Supabase | Vercel | DB URL and keys → env vars | App breaks on deploy — **visible immediately** |
-| all | client | "your site is live" | — |
+| Vercel | Cloudflare | A / CNAME | Site does not resolve, **visible immediately** |
+| Resend | Cloudflare | DKIM, SPF, return-path | Mail silently goes to spam, **invisible for weeks** |
+| Supabase | Vercel | DB URL and keys → env vars | App breaks on deploy, **visible immediately** |
+| all | client | "your site is live" |, |
 
 **The Resend→Cloudflare handoff is the one worth building around.** A wrong DKIM record breaks
 nothing you can see; the client's mail just stops arriving and nobody finds out for a month.
@@ -65,7 +65,7 @@ not a convenience here, it is the task.
 
 ## 4. The concept
 
-**A single MCP server, added once to whatever coding agent the operator uses** — Claude Code,
+**A single MCP server, added once to whatever coding agent the operator uses.** Claude Code,
 Codex, Antigravity, Cursor. It exposes tools for each provider. Every tool call is bound to
 exactly one **client container**, and no other client's credentials are present in that call.
 
@@ -78,7 +78,7 @@ Claude Code / Codex / Antigravity
               └─► container: …        ─► …
 ```
 
-You never log out, because you were never logged in — the container is.
+You never log out, because you were never logged in: the container is.
 
 ### Two rules that define it
 
@@ -92,11 +92,11 @@ inside the container at the point of the API call. The agent receives results, n
 ### Where Strands does the work
 
 The MCP server is the door. Behind a tool like `launch_client`, a **Strands agent** runs the
-multi-step job, because the launch is not a sequence of API calls — it needs judgement:
+multi-step job, because the launch is not a sequence of API calls. It needs judgement:
 
 - **Waiting well.** DNS propagation and certificate issuance are non-deterministic. Poll, back
   off, and distinguish "not yet" from "wrong."
-- **Diagnosing.** The certificate has not issued — propagation, a CAA record, or the wrong
+- **Diagnosing.** The certificate has not issued, propagation, a CAA record, or the wrong
   nameservers? That is reasoning over evidence.
 - **Knowing when to stop.** Nameservers not yet delegated to Cloudflare is a human problem,
   not something to retry.
@@ -111,7 +111,7 @@ client. It cannot invent a DNS record or alter an expiry date.
 ## 4a. The tool surface
 
 What the coding agent actually sees. Every tool that touches a provider takes `client` as its
-first argument — there is no ambient "current client", because an implicit selection is exactly
+first argument. There is no ambient "current client", because an implicit selection is exactly
 how the wrong account gets written to.
 
 **Containers**
@@ -122,14 +122,14 @@ how the wrong account gets written to.
 | `add_client` | Register a client |
 | `connect_provider` | Store a credential for one client and one provider. Runs once per pair |
 
-**Read across** — may span every container, never mutates
+**Read across.** may span every container, never mutates
 
 | Tool | Purpose |
 |---|---|
 | `find_across_clients` | One question over every container: domains, renewals, versions, env keys present |
 | `client_status` | Everything known about one client's estate |
 
-**Write within** — names a client, loads only that client's credentials, confirms before acting
+**Write within.** names a client, loads only that client's credentials, confirms before acting
 
 | Tool | Purpose |
 |---|---|
@@ -174,7 +174,7 @@ so adding GoDaddy or Hostinger later adds assets, not logic.
 
 | Provider | v1 | Why |
 |---|---|---|
-| Vercel | yes | Deploy, domains, env vars — start of the chain |
+| Vercel | yes | Deploy, domains, env vars, start of the chain |
 | Cloudflare | yes | Destination of two of the three handoffs |
 | Resend | yes | The silent-failure handoff; the reason this matters |
 | Supabase | yes | Fourth handoff, into Vercel env vars. Confirmed in v1, 2026-09-03 |
@@ -183,7 +183,7 @@ so adding GoDaddy or Hostinger later adds assets, not logic.
 ### Later, not now
 
 Hosted deployment on AgentCore Runtime, which buys platform-enforced isolation, a live demo
-URL, and the scheduled **watcher** — renewals and cost changes across every client, with a
+URL, and the scheduled **watcher.** renewals and cost changes across every client, with a
 plain-language update drafted for the channel that client uses. The watcher is only meaningful
 once setup has settled, which is why it is phase two.
 
@@ -199,14 +199,14 @@ once setup has settled, which is why it is phase two.
 
 **Out, v1**
 - Hosted deployment and the scheduled watcher
-- Re-billing or invoicing (the clients pay the providers directly — settled 2026-09-03)
+- Re-billing or invoicing (the clients pay the providers directly, settled 2026-09-03)
 - Access auditing across clients
 - Any provider not listed above
 
-## 7. Verification — the heart of it
+## 7. Verification: the heart of it
 
 Confirmed with the operator, 2026-09-03. Every check below is a failure he has actually hit.
-**None of them are run today**, because running twenty checks by hand on every launch for every
+**None of them are run today**, because running thirteen checks by hand on every launch for every
 client is not realistic; problems are found reactively, once something has already broken.
 
 That is the product in one line: **the checks are not hard, there are just too many to do by
@@ -220,29 +220,29 @@ where it happened.
 
 ### The catalogue
 
-**Mail — the invisible failures.** These break nothing observable; the client's mail simply
+**Mail: the invisible failures.** These break nothing observable; the client's mail simply
 stops arriving and nobody notices for weeks. This family is the demo's centre.
 
-- Two `v=spf1` records present — both are then ignored; Resend's record must be *merged*, not added
-- SPF exceeds the 10 DNS-lookup limit — returns `permerror`, treated as a hard fail everywhere
-- DKIM record proxied through Cloudflare (orange cloud) — Cloudflare rewrites it and DKIM breaks
-- DKIM TXT value chunked incorrectly — long records must be split into strings, not pasted as one
-- No DMARC record — Gmail and Outlook deprioritise unauthenticated bulk mail
+- Two `v=spf1` records present, both are then ignored; Resend's record must be *merged*, not added
+- SPF exceeds the 10 DNS-lookup limit, returns `permerror`, treated as a hard fail everywhere
+- DKIM record proxied through Cloudflare (orange cloud), Cloudflare rewrites it and DKIM breaks
+- DKIM TXT value chunked incorrectly, long records must be split into strings, not pasted as one
+- No DMARC record, Gmail and Outlook deprioritise unauthenticated bulk mail
 - Resend domain verified but the `from` address is not on the verified domain
 
 **Domain and certificates**
 
-- Nameservers not fully delegated — certificate issues for the apex but not `www`
-- Cloudflare SSL mode set to Flexible behind Vercel — intermittent redirect loop
+- Nameservers not fully delegated, certificate issues for the apex but not `www`
+- Cloudflare SSL mode set to Flexible behind Vercel, intermittent redirect loop
 - No `www` → apex redirect
 - A CAA record blocking the issuing authority, so the certificate silently never renews
 
 **Deploy and backend**
 
-- Environment variable set without a redeploy — Vercel bakes build-time vars in; setting alone
+- Environment variable set without a redeploy, Vercel bakes build-time vars in; setting alone
   does nothing
-- Variable set on the wrong environment — works in preview, broken in production
-- Supabase connection string using the direct port rather than the pooler — works locally,
+- Variable set on the wrong environment, works in preview, broken in production
+- Supabase connection string using the direct port rather than the pooler, works locally,
   exhausts connections under serverless
 
 ### Definition of done
@@ -257,10 +257,10 @@ stops arriving and nobody notices for weeks. This family is the demo's centre.
 
 | Risk | Response |
 |---|---|
-| **Theme fit.** "Agents for Humans" — this is a tool for a developer, and the DevOps-agent lane is the most crowded in the contest (12+ repos, see `docs/HACKATHON.md`) | Lead with the client, not the operator. The demo ends on a business whose email works, not on a green terminal. This is the weakest criterion for this concept and the pitch must carry it. |
+| **Theme fit.** "Agents for Humans". This is a tool for a developer, and the DevOps-agent lane is the most crowded in the contest (12+ repos, see `docs/HACKATHON.md`) | Lead with the client, not the operator. The demo ends on a business whose email works, not on a green terminal. This is the weakest criterion for this concept and the pitch must carry it. |
 | Local isolation is enforced by our own code, not a platform | State it plainly. Subprocess-per-container, and a test proving credentials for client B are absent from a client A call. Do not claim platform-grade isolation until it runs on AgentCore. |
 | Real client accounts in a public repo and video | Build against real stacks locally, never committed. Demo against a tenant the operator owns, clearly labelled. Same discipline as Passbook's bank statements. |
-| Provider API surface larger than expected | Adapters are thin and read/act only what the workflow needs. No stubs — an unimplemented provider is absent, not faked. |
+| Provider API surface larger than expected | Adapters are thin and read/act only what the workflow needs. No stubs: an unimplemented provider is absent, not faked. |
 | Doing the right thing in the wrong client's account | The core safety property. Mutations name the client; other credentials are not loaded; confirmation shows the client name. |
 
 ## 9. How this maps to the judging criteria
@@ -271,13 +271,13 @@ stops arriving and nobody notices for weeks. This family is the demo's centre.
 | Design | One install line, works inside the tool the user already has; no new UI to learn |
 | Potential Impact | Named audience: small businesses whose launches silently half-fail. The DKIM case is concrete and measurable |
 | Creativity & Originality | Verified-empty lane: every comparable entry scanned is single-tenant (`docs/HACKATHON.md` §3) |
-| Presentation | A launch has a finish line — site live, mail passing DKIM — which films far better than a dashboard |
+| Presentation | A launch has a finish line, site live, mail passing DKIM, which films far better than a dashboard |
 
 ## 10. Open questions
 
 1. **Name.** None chosen. The only genuinely open question.
 
-Resolved 2026-09-03: track is **Professional** — Good Neighbor serves groups, Everyday serves
+Resolved 2026-09-03: track is **Professional.** Good Neighbor serves groups, Everyday serves
 home and family; "makes someone dramatically better at the work they already do" is a precise
 description of this. Definition of done and the verification catalogue are confirmed (§7).
 Supabase is in v1.

@@ -10,7 +10,7 @@ Paste-ready text for each field. Deadline 2026-09-14 17:00 PDT.
 ## Tagline
 
 Look after a dozen small businesses' web and email setup from inside your coding
-agent — without logging out of anything.
+agent, without logging out of anything.
 
 ---
 
@@ -23,7 +23,7 @@ clients own the Vercel, Cloudflare and Resend accounts and pay the bills; the
 operator holds delegated access and does the work.
 
 Every provider allows one login at a time. So the workaround is a separate coding
-agent session per client — isolation built out of browser tabs and discipline.
+agent session per client. Isolation built out of browser tabs and discipline.
 
 That costs three things. Switching, on every action. No vantage point, so
 *"which clients have a domain expiring this quarter?"* cannot be asked from
@@ -31,13 +31,13 @@ anywhere. And silent failure.
 
 The third one is why this exists. Standing up a client means carrying values
 between companies: Resend emits DKIM and SPF records that must be written into
-Cloudflare. Get the A record wrong and the site does not load — you know in
+Cloudflare. Get the A record wrong and the site does not load, and you know in
 minutes. **Get the SPF record wrong and nothing breaks.** The client's invoices
 quietly stop arriving, and nobody finds out for weeks.
 
 ### Who it is for
 
-The person who looks after other people's infrastructure — a freelancer, a small
+The person who looks after other people's infrastructure: a freelancer, a small
 agency, an IT contractor. And, through them, the businesses themselves: the
 bakery whose invoices reach customers, the dentist whose appointment reminders
 land in an inbox instead of a spam folder.
@@ -71,14 +71,14 @@ by code reading a DNS answer. The model cannot contradict it, so it cannot inven
 a record that is not there or argue a failing check into passing.
 
 **The agent does what a rule engine is bad at.** Diagnosing *why* something
-failed when the evidence is ambiguous — is the certificate missing because DNS
+failed when the evidence is ambiguous. Is the certificate missing because DNS
 has not propagated, or because a CAA record blocks the issuer? Deciding whether a
 person must be involved. And saying it to a business owner in words they can act
 on, rather than in record syntax.
 
 It also has to survive its own duration. A launch that polls DNS outlives a
 single tool call, so every event is appended to a run log, progress is read from
-that file, and an interrupted run resumes from what it already did — which is
+that file, and an interrupted run resumes from what it already did, which is
 what stops a re-run adding a second SPF record and causing the exact fault the
 tool exists to catch.
 
@@ -86,7 +86,7 @@ tool exists to catch.
 
 Every DNS result comes from a live lookup with the resolver named and timestamped
 on screen. The demonstration runs against a domain the author owns, deliberately
-broken the way this actually breaks — a leftover policy from a previous mail
+broken the way this actually breaks: a leftover policy from a previous mail
 provider with a second added beside it. Real client accounts appear nowhere: they
 did not consent to a public repository or video.
 
@@ -97,7 +97,7 @@ tool list rather than present and inert.
 unreachable on this account because AWS Marketplace cannot bill AISPL customers
 for a model subscription, and AgentCore Runtime quota defaults to zero with a
 multi-day approval. Strands is model-portable, so the agent runs on a different
-host with one environment variable changed and no code change — which is the
+host with one environment variable changed and no code change, which is the
 property AWS advertises, exercised under duress rather than described.
 
 ---

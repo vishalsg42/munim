@@ -1,6 +1,6 @@
 # Why Bedrock returned INVALID_PAYMENT_INSTRUMENT on my Indian AWS account
 
-*Draft for builder.aws.com — post 1 of 3*
+*Draft for builder.aws.com, post 1 of 3*
 
 I spent an hour of a hackathon deadline on an error whose cause was sitting in the
 API response the whole time. Writing it down because the fix is not obvious and
@@ -39,8 +39,8 @@ twenty. It never changed.
 
 Bedrock model access is provisioned as an **AWS Marketplace subscription** with
 contract pricing. And since March 2022, **AWS Marketplace does not support
-stored credit or debit cards for AISPL customers** — Amazon Internet Services
-Private Limited, the entity Indian AWS accounts are billed through — because of
+stored credit or debit cards for AISPL customers**, Amazon Internet Services
+Private Limited, the entity Indian AWS accounts are billed through, because of
 RBI regulation on card-data storage by payment aggregators.
 
 UPI AutoPay covers your regular AWS invoices. It does not satisfy the Marketplace
@@ -62,7 +62,7 @@ except ClientError as e:
 ```
 
 `INVALID_PAYMENT_INSTRUMENT` appears about 40 characters into a message I was
-truncating at 95 — visible, and not looked at, because a background poller was
+truncating at 95, visible, and not looked at, because a background poller was
 printing only `e.response['Error']['Code']`. I concluded "propagation, wait
 fifteen minutes" from an error that named its own cause.
 

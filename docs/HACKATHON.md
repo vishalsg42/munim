@@ -1,4 +1,4 @@
-# Agents for Humans — contest analysis
+# Agents for Humans, contest analysis
 
 Written 2026-09-03, before any concept is chosen. Facts verified against the Devpost
 page and rules, the judge list, and a ~100-repo GitHub scan of the live field.
@@ -11,30 +11,30 @@ Read this before proposing a concept; the crowded lanes are already mapped.
 | | |
 |---|---|
 | Sponsor | AWS. Every judge is an AWS employee. |
-| Submission deadline | **2026-09-14, 17:00 PDT** — 11 days from today |
+| Submission deadline | **2026-09-14, 17:00 PDT.** 11 days from today |
 | Judging ends | **2026-10-08.** The project must stay live, free and unrestricted until then. |
 | Winners | 2026-10-14, 14:00 PT |
 | Prize pool | $40,000. 1 Grand $10k; each of 3 tracks Gold $5k / Silver $3k / Bronze $2k. **10 payouts.** |
 | Registrants | 7,256 (registration ≠ submission; Devpost conversion is typically 5–12%) |
 | Mandatory | Strands Agents SDK |
-| Recommended | Amazon Bedrock AgentCore deployment — explicitly named as strengthening the Technical score |
+| Recommended | Amazon Bedrock AgentCore deployment, explicitly named as strengthening the Technical score |
 | Licence | MIT or Apache, public repo |
-| Video | **≤ 5 minutes** (note: 5, not 3 — longer than the WebMCP limit) |
+| Video | **≤ 5 minutes** (note: 5, not 3, longer than the WebMCP limit) |
 
 ### Scoring
 
 Stage One is pass/fail: does it fit the theme, does it actually use Strands.
 
-Stage Two is **five equally weighted criteria — 20% each**:
+Stage Two is **five equally weighted criteria, 20% each**:
 
-1. **Technological Implementation** — "How thoroughly and skillfully does the project use
+1. **Technological Implementation.** "How thoroughly and skillfully does the project use
    Strands Agents? Does the code reflect genuine effort and working implementation?"
-2. **Design** — "a complete, coherent product experience and not just a technical proof of concept"
-3. **Potential Impact** — "a credible case for solving a real problem for a real audience"
-4. **Creativity & Originality** — "a creative, non-obvious use of Strands Agents"
-5. **Presentation** — "Does the video clearly demonstrate the project working end-to-end?"
+2. **Design.** "a complete, coherent product experience and not just a technical proof of concept"
+3. **Potential Impact.** "a credible case for solving a real problem for a real audience"
+4. **Creativity & Originality.** "a creative, non-obvious use of Strands Agents"
+5. **Presentation.** "Does the video clearly demonstrate the project working end-to-end?"
 
-**Bonus: up to 0.6 points for builder.aws.com posts — 0.2 each, maximum 3.** On a 5-criterion
+**Bonus: up to 0.6 points for builder.aws.com posts, 0.2 each, maximum 3.** On a 5-criterion
 scale this is roughly a 12% swing on one criterion's worth of points, for three blog posts.
 It is the cheapest available margin in the entire contest and most entrants will write zero.
 
@@ -82,7 +82,7 @@ read repos and that domain charm earned nothing. This panel is different:
   stack is scored, not neutral. AgentCore use is named in the criteria.
 - **Volume.** If 400–900 projects arrive, no judge reads 900 repos. **The video and the Devpost
   description carry the score; the repo is a spot check.** Presentation is a full 20% by itself,
-  and Design — "complete product, not a proof of concept" — is judged largely off the video too.
+  and Design, "complete product, not a proof of concept", is judged largely off the video too.
   That is **40% of the total decided by what the screen recording looks like.**
 
 Both previous projects front-loaded engineering rigour and treated the video as the last task.
@@ -93,7 +93,7 @@ Here, 40% of the score says do the opposite.
 ## 3. The field, measured
 
 ~100 repositories created since 2026-08-01 referencing Strands or this hackathon were scanned
-on 2026-09-03. The field is not empty and it is not random — it clusters hard.
+on 2026-09-03. The field is not empty and it is not random. It clusters hard.
 
 ### Crowded lanes, by observed repo count
 
@@ -117,14 +117,14 @@ to be reachable are D9, D12 and D25 of Agentic Cinema and the load-bearing claim
 Here they are the house style of thirty-plus competitors.
 
 Read the competitor descriptions and the reason is obvious: they are written in the same voice,
-with the same vocabulary — "evidence-first", "bounded autonomy", "human-approved",
+with the same vocabulary, "evidence-first", "bounded autonomy", "human-approved",
 "deterministic … escalating to a human only when". This is a field of LLM-assisted submissions
 converging on the same rhetoric. Passbook's own conclusion applies verbatim: *"Approval-gating
 and revocation are the most crowded framings in this ecosystem; leading with either caps the
 submission at mid-field."*
 
-**So: build the rigour, never lead with it.** Evidence discipline stays — it is why the previous
-projects survived adversarial review — but it goes in the README and the architecture section,
+**So: build the rigour, never lead with it.** Evidence discipline stays. It is why the previous
+projects survived adversarial review, but it goes in the README and the architecture section,
 not the tagline, not the video's first thirty seconds, not the Devpost headline.
 
 ### Genuine whitespace
@@ -132,7 +132,7 @@ not the tagline, not the video's first thirty seconds, not the Devpost headline.
 - **Voice and telephony as the interface.** Near-absent. Three SMS-native entries
   (`Shriniwas410/*`); essentially no phone-call agents. A person who cannot use an app can use a
   phone. It also happens to record beautifully on video.
-- **Real proprietary data.** Almost the entire field runs on synthetic fixtures — the same
+- **Real proprietary data.** Almost the entire field runs on synthetic fixtures: the same
   finding as the WebMCP scan, where it was the decisive moat. Competitors cannot retrofit real
   operational data in eleven days.
 - **Multi-agent used properly.** Most entries are one agent plus tools. Strands ships swarm,
@@ -153,12 +153,12 @@ not the tagline, not the video's first thirty seconds, not the Devpost headline.
 | Professional | Highest | The default for a developer audience, and the DevOps-sentinel pile lands here. Much of it is *agents for engineers*, which strains the "for humans" theme and risks Stage One. |
 | **Good Neighbor** | **Moderate** | Populated (~10 seen) but least so, and the entries are thinner. Also the track whose stories Developer Advocates most want to retell. |
 
-Same logic as Agentic Cinema D1 — pick for odds, not ceiling. Grand Prize is drawn from the
+Same logic as Agentic Cinema D1, pick for odds, not ceiling. Grand Prize is drawn from the
 same pool regardless, so choosing the least-crowded track costs nothing and buys three shots.
 
 **Recommendation: Good Neighbor**, unless the concept has a real-data moat that only exists in
 Professional. A Professional entry backed by a real small business's live operational data would
-beat a synthetic Good Neighbor entry — the moat outranks the track.
+beat a synthetic Good Neighbor entry: the moat outranks the track.
 
 ---
 
@@ -168,12 +168,12 @@ The previous two projects optimised for a technical panel. This scoring says spr
 
 - **Technological Implementation (20%).** Skillful Strands use, not merely present. Multi-agent
   pattern, hooks, structured output, MCP tools, session state, evals. Deploy on **AgentCore
-  Runtime** — it is named in the criterion. A live demo link is explicitly called out as
+  Runtime**. It is named in the criterion. A live demo link is explicitly called out as
   strengthening this score.
 - **Design (20%).** "Complete product, not a proof of concept." Cheapest criterion to win and the
-  one most entrants ignore — Agentic Cinema D13 protected the single-screen control room for
+  one most entrants ignore, Agentic Cinema D13 protected the single-screen control room for
   exactly this reason and it was right. Use `ui-ux-pro-max` / `impeccable` before writing UI.
-- **Potential Impact (20%).** A real audience, named. Not "small businesses" — *this* organisation,
+- **Potential Impact (20%).** A real audience, named. Not "small businesses", *this* organisation,
   *this* many rows, *this* much time. Real data does the work here.
 - **Creativity & Originality (20%).** Read §3 again. Anything in the crowded table scores mid-field
   no matter how well built.
@@ -187,10 +187,10 @@ Plus **0.6 bonus points for three builder.aws.com posts**. Write all three.
 
 - **The 24-day uptime obligation.** Judging runs to 2026-10-08 with judges invoking the agent.
   Bedrock and AgentCore bill per call. $50 of credits against three weeks of unmetered judge
-  traffic is a real exposure — budget, cap concurrency, and set a spend alarm. Agentic Cinema
+  traffic is a real exposure, budget, cap concurrency, and set a spend alarm. Agentic Cinema
   D28 already paid for the lesson that the thing needing a bound is the *work*, not the
   request count.
-- **Stage One theme fit.** "Agents for humans" — an agent whose user is a Kubernetes cluster is
+- **Stage One theme fit.** "Agents for humans": an agent whose user is a Kubernetes cluster is
   a pass/fail risk. Whoever the human is, name them in the first sentence.
 - **Newly-created rule.** Anything carried over from Passbook or Agentic Cinema gets disclosed.
 - **AgentCore is a deployment target, not a weekend.** Do the deploy on day 3–4, not day 10.
@@ -213,14 +213,14 @@ Plus **0.6 bonus points for three builder.aws.com posts**. Write all three.
 **Day 2–4**
 - [ ] Storyboard the ≤5-minute video. It is 20% of the score on its own.
 - [ ] Real data secured and privacy-reviewed. No real records committed, ever.
-- [ ] Architecture diagram — a submission requirement, not optional.
+- [ ] Architecture diagram: a submission requirement, not optional.
 - [ ] Multi-agent structure decided: swarm, graph, or agent-as-tool. Justify it in `DECISIONS.md`.
 
 **Day 5–8**
 - [ ] Product UI, built with the design skill invoked *before* the first component.
 - [ ] Evals with fixed fixtures and a printed failure table, per Agentic Cinema's `RESULTS.md`.
 - [ ] builder.aws.com post #1.
-- [ ] Adversarial review of the running code against the real schemas — D28's lesson: run
+- [ ] Adversarial review of the running code against the real schemas, D28's lesson: run
       `tools/list` before writing anything that constrains a tool.
 
 **Day 9–11**
@@ -254,7 +254,7 @@ Verified against `strandsagents.com/docs/user-guide/quickstart/overview/` and th
 now lives at **`strands-agents/harness-sdk` → `strands-py/`**, not `sdk-python`. Pip package is
 still `strands-agents`; npm is `@strands-agents/sdk`.
 
-Strands is positioned as an agent *harness* that runs in-process — "no hosted control plane,
+Strands is positioned as an agent *harness* that runs in-process, "no hosted control plane,
 scheduler, or database to stand up first."
 
 | Capability | Python | TypeScript |
@@ -267,7 +267,7 @@ scheduler, or database to stand up first."
 | Hooks | Lifecycle hooks + custom providers | same |
 | Structured output, streaming, MCP | yes | yes |
 | Observability | OpenTelemetry | yes |
-| Guardrails, evals | yes (`strands-agents/evals`) | — |
+| Guardrails, evals | yes (`strands-agents/evals`) |, |
 | **Bidirectional streaming (voice / realtime)** | **experimental, Python only** | no |
 
 Deployment targets include Lambda, Fargate, App Runner, EKS, EC2, Docker, Kubernetes, Terraform
@@ -284,9 +284,9 @@ capability that exists in exactly one of the two SDKs. It scores on three criter
 Technological Implementation (a real, non-obvious part of the SDK), Creativity & Originality
 (nobody else is there), and Presentation (a phone call is the single most legible thing that can
 happen in a five-minute video). Being flagged **experimental** is the risk, and it is why it
-gets a day-one gate rather than a day-eight integration — the same discipline that caught
+gets a day-one gate rather than a day-eight integration: the same discipline that caught
 `executeTool`'s double-JSON in Passbook before it could cost a day.
 
 **Two claims to keep honest.** Using many Strands features is not the same as using them
 skillfully; a swarm that a single agent would have done better is a worse answer, not a richer
-one. And "30+ built-in tools" is the *community* package, not the core SDK — cite it that way.
+one. And "30+ built-in tools" is the *community* package, not the core SDK, cite it that way.

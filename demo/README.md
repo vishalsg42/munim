@@ -4,7 +4,7 @@ A fictional business used to exercise Munim end to end against real DNS and real
 mail delivery, so the demonstration runs on records that genuinely resolve rather
 than on fixtures.
 
-**Ivy & Fern Studio** — a flower studio. It has a site, a domain, and a mail
+**Ivy & Fern Studio** is a flower studio. It has a site, a domain, and a mail
 setup that is deliberately broken in the way this happens in practice: a leftover
 SPF record from a previous mail provider, with a second one added alongside when
 the new provider was set up. Two policies, both ignored, and mail that

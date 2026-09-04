@@ -1,11 +1,11 @@
 # Your MCP server cannot print to stdout, and other things I learned building one
 
-*Draft for builder.aws.com — post 2 of 3*
+*Draft for builder.aws.com, post 2 of 3*
 
 I wanted a live view of what my agent was doing: a browser page that fills in as
-the agent works. The obvious design was one sentence in a plan document — *"the
+the agent works. The obvious design was one sentence in a plan document, *"the
 agent emits one event stream; the terminal prints it and the browser renders
-it"* — and it is not possible. Here is why, and what to do instead.
+it"*, and it is not possible. Here is why, and what to do instead.
 
 ## stdout belongs to the protocol
 
@@ -66,7 +66,7 @@ with self.path.open("a", encoding="utf-8") as handle:
 - Append-only means a half-written run is a valid prefix, not a corrupt document.
 - Two coding agents can both drive the same estate. They write different runs.
 
-And the claim I originally wanted — *one source of truth, two consumers* —
+And the claim I originally wanted, *one source of truth, two consumers*,
 becomes literally true rather than something stdio makes impossible.
 
 ## The part that surprised me

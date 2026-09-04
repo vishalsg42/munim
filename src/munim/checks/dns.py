@@ -1,7 +1,7 @@
 """The checks that need no credentials.
 
 Every one of these is a real failure an operator hits, and none of them are run
-today, because running twenty checks by hand on every launch for every client is
+today, because running thirteen checks by hand on every launch for every client is
 not realistic. That is the whole product in one sentence.
 
 Deterministic on purpose (D7): these are pure functions over DNS answers. The

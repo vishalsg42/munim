@@ -4,7 +4,7 @@
 
 **Goal:** A local stdio MCP server that gives any coding agent per-client, credential-isolated access to several clients' Vercel / Cloudflare / Resend / Supabase accounts, with a Strands agent that launches a new client end to end and verifies the result.
 
-**Architecture:** One `Container` per client holds that client's credentials, tools and memory, behind a backend interface (`KeychainBackend` now, `AgentCoreBackend` later). Provider adapters implement one contract and are the only code that talks to a provider. Enumeration and checks are deterministic; a Strands agent supplies judgement — polling, diagnosing, and deciding when to escalate. Cross-client reads fan out across containers; writes require naming one client.
+**Architecture:** One `Container` per client holds that client's credentials, tools and memory, behind a backend interface (`KeychainBackend` now, `AgentCoreBackend` later). Provider adapters implement one contract and are the only code that talks to a provider. Enumeration and checks are deterministic; a Strands agent supplies judgement, polling, diagnosing, and deciding when to escalate. Cross-client reads fan out across containers; writes require naming one client.
 
 **Tech Stack:** Python ≥3.10 · `strands-agents` 1.54.0 · `mcp` 1.x · `keyring` · `httpx` · `dnspython` · `pytest`
 
@@ -14,7 +14,7 @@
 ## Global Constraints
 
 - **Python ≥ 3.10.** The machine currently has 3.9.6. `strands-agents` requires `>=3.10`.
-- **`mcp>=1.23.0,<2.0.0`.** `strands-agents` 1.54.0 pins this. PyPI's latest `mcp` is **2.1.1** — installing it breaks Strands. Pin explicitly.
+- **`mcp>=1.23.0,<2.0.0`.** `strands-agents` 1.54.0 pins this. PyPI's latest `mcp` is **2.1.1.** installing it breaks Strands. Pin explicitly.
 - **No stubs.** No placeholder implementations, no fake data path dressed as real. An unimplemented provider is *absent*, not faked. (`web-mcp-2026/docs/PROJECT-RULES.md`)
 - **No ambient client.** Every tool that touches a provider takes `client` as its first argument. An implicit "current client" is how the wrong account gets written to.
 - **No credential ever crosses the MCP boundary.** No tool returns a token. Tokens are read at the point of the API call and never logged.
@@ -23,7 +23,7 @@
 
 ---
 
-# Phase 0 — Day-one gates
+# Phase 0, Day-one gates
 
 These four tasks exist to falsify the design cheaply. **Do not build Phase 1 until all four pass.**
 `google-agentic-cinema` D28: the miss was writing code against a schema nobody had queried.
@@ -99,7 +99,7 @@ uv pip install -e ".[dev]"
 uv pip show mcp | grep -i version
 ```
 
-Expected: a `1.x` version. **If this prints 2.x, stop** — Strands will fail at import.
+Expected: a `1.x` version. **If this prints 2.x, stop.** Strands will fail at import.
 
 - [ ] **Step 5: Write the Bedrock gate script**
 
@@ -193,7 +193,7 @@ async def test_server_exposes_list_clients():
 uv run pytest tests/test_server.py -v
 ```
 
-Expected: FAIL — `ModuleNotFoundError: No module named 'mcpc.server'`
+Expected: FAIL, `ModuleNotFoundError: No module named 'mcpc.server'`
 
 - [ ] **Step 3: Write the minimal server**
 
@@ -246,7 +246,7 @@ claude mcp add mcpc -- "$(pwd)/.venv/bin/mcpc"
 claude mcp list
 ```
 
-Expected: `mcpc` listed and connected. **This is the gate** — if Claude Code cannot spawn it, nothing downstream matters.
+Expected: `mcpc` listed and connected. **This is the gate.** if Claude Code cannot spawn it, nothing downstream matters.
 
 - [ ] **Step 7: Commit**
 
@@ -321,7 +321,7 @@ def test_container_never_exposes_the_raw_backend():
 uv run pytest tests/test_isolation.py -v
 ```
 
-Expected: FAIL — `ModuleNotFoundError: No module named 'mcpc.container'`
+Expected: FAIL, `ModuleNotFoundError: No module named 'mcpc.container'`
 
 - [ ] **Step 3: Write the implementation**
 
@@ -517,7 +517,7 @@ RESEND_API_KEY=... PROBE_DOMAIN=... uv run python scripts/probe_resend.py
 
 Create `docs/PROBES.md` with the real, verbatim responses and the answers to every
 numbered question above. **If Vercel does not return the A/CNAME target, record the
-constants used instead and why** — then correct §3 of the spec, which currently claims
+constants used instead and why**, then correct §3 of the spec, which currently claims
 "Vercel emits A/CNAME values."
 
 - [ ] **Step 6: Commit**
@@ -535,7 +535,7 @@ All four must hold before Phase 1 begins:
 
 - [ ] `scripts/gate_strands.py` prints `GATE PASSED`
 - [ ] `claude mcp list` shows `mcpc` connected
-- [ ] `tests/test_isolation.py` — 3 passed
+- [ ] `tests/test_isolation.py`, 3 passed
 - [ ] `docs/PROBES.md` contains real responses, and §3 of the spec has been corrected if the Vercel finding requires it
 
 **Phase 1 tasks are deliberately not written in detail yet.** Task 4 can invalidate the
@@ -544,36 +544,36 @@ the mistake recorded in `google-agentic-cinema` D28. Phase 1 is expanded once th
 
 ---
 
-# Phase 1 — Foundation (outline; expanded after Phase 0)
+# Phase 1, Foundation (outline; expanded after Phase 0)
 
 Interfaces are fixed now so Phase 0 work does not need rewriting.
 
-**Task 5 — Client registry.** `src/mcpc/registry.py`. `Registry.clients() -> list[ClientRecord]`,
+**Task 5, Client registry.** `src/mcpc/registry.py`. `Registry.clients() -> list[ClientRecord]`,
 `ClientRecord(name: str, providers: list[str], domain: str | None)`. JSON at
-`~/.mcpc/registry.json`. **Secret references only, never secrets** — the mcpwarden design is
+`~/.mcpc/registry.json`. **Secret references only, never secrets.** the mcpwarden design is
 right about this (D15).
 
-**Task 6 — Adapter contract.** `src/mcpc/adapters/base.py`. `Adapter` protocol:
+**Task 6, Adapter contract.** `src/mcpc/adapters/base.py`. `Adapter` protocol:
 `name: str`, `enumerate(container: Container) -> list[Asset]`. `Asset` carries `client`,
 `provider`, `kind`, `identifier` and optional facets (`expiry`, `reachability`, `exposure`,
 `permission`, `freshness`) per spec §5.
 
-**Tasks 7–10 — Adapters,** one per task, each with recorded-response tests via `respx`:
+**Tasks 7–10, Adapters,** one per task, each with recorded-response tests via `respx`:
 Cloudflare, Vercel, Resend, Supabase. Written against `docs/PROBES.md`, not against docs.
 
-**Task 11 — Verification catalogue.** `src/mcpc/checks/`. Every check in spec §7 as a pure
+**Task 11, Verification catalogue.** `src/mcpc/checks/`. Every check in spec §7 as a pure
 function over assets plus live DNS: duplicate SPF, SPF lookup count > 10, DKIM proxied,
 DKIM chunking, missing DMARC, nameserver delegation, Cloudflare SSL mode, missing www,
 CAA block, env-var-without-redeploy, wrong environment scope, Supabase direct-port.
-Deterministic — **no model involvement** (D7).
+Deterministic, **no model involvement** (D7).
 
-**Task 12 — The Strands launch agent.** `src/mcpc/agent/launch.py`. Adapter calls as Strands
+**Task 12: The Strands launch agent.** `src/mcpc/agent/launch.py`. Adapter calls as Strands
 tools, structured output, per-stage verification, escalation when a human is required.
 
-**Task 13 — Cross-client reads.** `find_across_clients`, fanning out over containers in
+**Task 13, Cross-client reads.** `find_across_clients`, fanning out over containers in
 parallel via a Strands multi-agent pattern. **Read-only** (D5).
 
 ## Deferred
 
-`AgentCoreBackend` (Identity + Runtime) behind the same `CredentialBackend` protocol — D14.
-The watcher — D8.
+`AgentCoreBackend` (Identity + Runtime) behind the same `CredentialBackend` protocol, D14.
+The watcher, D8.

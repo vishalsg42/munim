@@ -6,7 +6,7 @@ costs nothing extra if the room is built with them in mind.
 
 | # | Frame | Beat | Status |
 |---|---|---|---|
-| 1 | The estate at rest — client cards, varied providers and ages | 0:14 | needs 8–12 clients registered |
+| 1 | The estate at rest: client cards, varied providers and ages | 0:14 | needs 8–12 clients registered |
 | 2 | A launch mid-flight, the check grid lighting up | 2:20 | ready |
 | 3 | The SPF finding, with raw resolver output and timestamp | 2:56 | ✅ `03-the-finding.jpg` |
 | 4 | Received email headers: `spf=pass dkim=pass dmarc=pass` | 3:48 | needs a real send |

@@ -15,7 +15,7 @@ the Vercel, Cloudflare and Resend accounts and pay the bills; the operator holds
 access and does the work.
 
 Every provider allows one login at a time. So the operator's workaround is a separate
-coding-agent session per client — isolation built out of browser tabs and discipline.
+coding-agent session per client. Isolation built out of browser tabs and discipline.
 
 That costs three things:
 
@@ -26,7 +26,7 @@ That costs three things:
    of the handoffs fails invisibly.
 
 That last one is the reason this exists. Resend emits DKIM and SPF records that must be
-written into Cloudflare. Get the A record wrong and the site does not load — you find out
+written into Cloudflare. Get the A record wrong and the site does not load, and you find out
 in minutes. **Get the SPF record wrong and nothing breaks**: the client's invoices quietly
 stop arriving, and nobody notices for weeks.
 
@@ -52,8 +52,9 @@ uv venv && uv pip install -e .
 claude mcp add munim -- "$(pwd)/.venv/bin/munim-mcp"
 ```
 
-Set a model host in `.env` (see `.env.example`). Any Strands-supported provider works —
-Amazon Bedrock, Gemini, Anthropic, OpenAI, Ollama:
+Set a model host in `.env` (see `.env.example`). Any Strands-supported provider works:
+Amazon Bedrock, Gemini, Anthropic, OpenAI, Ollama.
+
 
 ```
 GEMINI_API_KEY=...
@@ -91,14 +92,14 @@ uv run munim-room --runs ~/.munim/runs   # serve a different set of runs
 |---|---|
 | Per-client credential containers, OS keychain | ✅ |
 | Read across / write within | ✅ |
-| Check catalogue — 13 checks, no credentials needed | ✅ |
-| Strands launch agent — diagnosis and owner-facing explanation | ✅ |
+| Check catalogue, 13 checks, no credentials needed | ✅ |
+| Strands launch agent: diagnosis and owner-facing explanation | ✅ |
 | Run log with replay and resume | ✅ |
 | Control room, live over SSE | ✅ |
 | Launch report for the business owner | ✅ |
 | OAuth connect (PKCE) | ✅ built; needs a provider client ID |
-| Cloudflare DNS writes — idempotent upsert, SPF merge | ✅ tested against documented shapes; not yet probed live |
-| Vercel reads — deploys, env scope, env applied | ✅ |
+| Cloudflare DNS writes: idempotent upsert, SPF merge | ✅ tested against documented shapes; not yet probed live |
+| Vercel reads: deploys, env scope, env applied | ✅ |
 | Vercel / Resend write operations | ⬜ not yet |
 
 ### Why there is no AgentCore deployment
@@ -116,7 +117,7 @@ advertises; this exercised it under duress. Restoring Bedrock is
 
 **Nothing here is stubbed.** A capability that is not implemented is absent from the tool
 list rather than present and inert. Resend, for example, has no OAuth flow anywhere in this
-codebase because Resend publishes no authorization endpoint — not because it was skipped.
+codebase because Resend publishes no authorization endpoint, not because it was skipped.
 
 ## How it is built
 
@@ -150,7 +151,7 @@ leaves a record to resume from.
 **A container is bound to one client at construction and cannot widen.** `"acme"` versus
 `"acme-uk"` would otherwise be a *successful* mutation on the wrong account. Container
 construction fails on an unregistered name, and the raw credential is never returned to
-calling code — adapters receive an authenticated HTTP client, so no log line or stack trace
+calling code. Adapters receive an authenticated HTTP client, so no log line or stack trace
 can leak a token.
 
 ## Development
@@ -165,8 +166,8 @@ cd room && npm install && npm run build
 The control room ships pre-built, so installing from a clone needs no npm step.
 Rebuild it only if you change `room/src`.
 
-To check the claim this project rests on — reading two client accounts at once,
-with no logout between them — connect two of your own and run:
+To check the claim this project rests on, which is reading two client accounts
+at once with no logout between them, connect two of your own and run:
 
 ```bash
 uv run python scripts/cross_account_probe.py

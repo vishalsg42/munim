@@ -1,6 +1,6 @@
 # The agent should not decide whether the check passed
 
-*Draft for builder.aws.com — post 3 of 3*
+*Draft for builder.aws.com, post 3 of 3*
 
 I built an agent that inspects a small business's domain: is email
 authentication set up, will the certificate renew, does the site load. It writes
@@ -13,7 +13,7 @@ of the work the model is allowed to touch.**
 
 **Deciding whether a check passed is not model work.** Whether a domain has two
 SPF records is a fact. You fetch the TXT records, count the ones starting
-`v=spf1`, and if there are two then receivers ignore both — that is RFC 7208, not
+`v=spf1`, and if there are two then receivers ignore both. That is RFC 7208, not
 an opinion. Code decides it:
 
 ```python
@@ -29,7 +29,7 @@ useful agent and a liability.
 
 **Deciding what to do about it is exactly model work.** A domain with two SPF
 records has a wrong answer that looks right: add a third record containing the
-new provider. What it needs is the two combined into one — keeping every sender,
+new provider. What it needs is the two combined into one, keeping every sender,
 taking the stricter qualifier, and checking the result still fits inside SPF's
 ten-lookup limit, because a merged policy that busts the limit fails too and is
 not a fix.
@@ -53,7 +53,7 @@ falsify the output.
 ## The failure this prevents
 
 An earlier version would have appended. A launch that failed halfway and got
-re-run would have added a second SPF record beside the first — **producing the
+re-run would have added a second SPF record beside the first, **producing the
 exact fault the tool was built to detect.** A tool that causes the bug it reports
 is worse than no tool.
 

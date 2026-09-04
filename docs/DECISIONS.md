@@ -1,7 +1,7 @@
 # Decision log
 
 Why this project is shaped the way it is. Each entry records the decision, what drove it, and
-what it costs — including the ones that were wrong first time. Reversals are kept rather than
+what it costs, including the ones that were wrong first time. Reversals are kept rather than
 tidied away, because the reasoning is the useful part.
 
 Contest facts and the competitive scan live in `docs/HACKATHON.md`. The design lives in
@@ -9,12 +9,12 @@ Contest facts and the competitive scan live in `docs/HACKATHON.md`. The design l
 
 ---
 
-## D1 — The concept came from the operator's workflow, not from the inspiration text
+## D1: The concept came from the operator's workflow, not from the inspiration text
 
 **Context.** Devpost publishes an "Inspiration" section. Every one of its examples was checked
 against a ~100-repo scan of the live field on 2026-09-03: bills-before-due-date, family
 calendar, contractor compliance, teacher materials, solo researcher, shop-owner bookings, food
-bank volunteer matching — **all already occupied**, most by four or more entries.
+bank volunteer matching, **all already occupied**, most by four or more entries.
 
 **Decision.** Treat the inspiration text as a crowding predictor, not an idea source. Build from
 work the operator actually does.
@@ -24,7 +24,7 @@ explain itself rather than borrowing the organiser's framing.
 
 ---
 
-## D2 — The graveyard
+## D2: The graveyard
 
 Concepts raised and killed, with the evidence that killed them.
 
@@ -32,22 +32,22 @@ Concepts raised and killed, with the evidence that killed them.
 |---|---|---|
 | 1 | LinkedIn daily posting | Automated posting scores badly on Potential Impact and reads as spam-adjacent to judges whose job is developer trust |
 | 2 | Lead generation | Commercially self-serving, "for humans" is a stretch, and it is the most saturated category in the wider agent space |
-| 3 | Cheap low-latency voice agent | Real, felt problem and near-zero competition, but it is infrastructure rather than an agent for humans — Stage One theme-fit risk, and cost/latency graphs do not demo |
+| 3 | Cheap low-latency voice agent | Real, felt problem and near-zero competition, but it is infrastructure rather than an agent for humans, Stage One theme-fit risk, and cost/latency graphs do not demo |
 | 4 | r/zoho community answering agent | Genuinely empty lane and the operator's own lived loop, but Reddit blocked every verification path available, subreddit AI-content rules were unknown, and the posting path could have been dead on arrival |
 | 5 | Housing society / RWA agent | No real org access, and `quorum-wip` (pushed 2026-09-01) already occupies residential-building coordination |
 | 6 | Indian SMB statutory compliance | Genuinely empty lane, but no real access to a business's filings and US-based judges would not feel the pain |
 | 7 | Re-billing provider costs into Zoho invoices | **Killed on a fact**: the clients own the provider accounts and pay directly. There is nothing to re-bill |
-| 8 | Cross-client cost and renewal watcher | Not killed — deferred. It is meaningless until a client's setup has settled, so it is phase two (D8) |
+| 8 | Cross-client cost and renewal watcher | Not killed, deferred. It is meaningless until a client's setup has settled, so it is phase two (D8) |
 
 ---
 
-## D3 — It is an MCP server, not a CLI and not a dashboard
+## D3: It is an MCP server, not a CLI and not a dashboard
 
 **Context.** The operator's first message on the topic asked for "containerized mcp… authenticate
 multiple accounts at the same time without relogging & logout." Three subsequent design passes
 drifted to a dashboard, then a watcher, then a standalone CLI. Each was corrected.
 
-**Decision.** A single MCP server, added once to whatever coding agent is in use — Claude Code,
+**Decision.** A single MCP server, added once to whatever coding agent is in use, Claude Code,
 Codex, Antigravity, Cursor.
 
 **Why.** MCP is the only interface that satisfies "inside any coding agent." A standalone CLI
@@ -59,11 +59,11 @@ When a user names a mechanism, check whether they mean it before reframing it.
 
 ---
 
-## D4 — Local stdio first, hosted later
+## D4: Local stdio first, hosted later
 
 **Decision.** Ship as a local stdio MCP server. AgentCore Runtime deployment comes later.
 
-**Why.** Everything the operator described — deploy, configure DNS, pull logs, launch a client —
+**Why.** Everything the operator described, deploy, configure DNS, pull logs, launch a client,
 is work done at their own machine. Local means no hosting, no cost, credentials never leave the
 machine, and a one-line install a judge can reproduce.
 
@@ -78,13 +78,13 @@ strengthening the Technical score. Local costs some of that and buys installabil
 
 ---
 
-## D5 — Read across, write within
+## D5: Read across, write within
 
 **Decision.** Cross-container queries are read-only and may span every client. Mutations require
 explicitly entering one container, and no other client's credentials are loaded for that call.
 
-**Why.** The two things the operator wants are in tension. Isolation is the safety property —
-today, logging out is the seatbelt, and removing it needs a replacement. But the valuable
+**Why.** The two things the operator wants are in tension. Isolation is the safety property.
+Today, logging out is the seatbelt, and removing it needs a replacement. But the valuable
 questions (*whose domain renews this month?*) are exactly the ones that span clients. This rule
 gives the vantage point without giving up the wall.
 
@@ -95,7 +95,7 @@ the honest risk here.
 
 ---
 
-## D6 — The coding agent never sees a credential
+## D6: The coding agent never sees a credential
 
 **Decision.** Keys live in the credential store and are injected inside the container at the
 point of the API call. The coding agent receives results, never tokens.
@@ -106,7 +106,7 @@ key.
 
 ---
 
-## D7 — Enumeration is deterministic; only judgement is model work
+## D7: Enumeration is deterministic; only judgement is model work
 
 **Decision.** Carried directly from `google-agentic-cinema` D16. Adapters enumerate. Rules
 compute findings with real dates. The model diagnoses, decides when to escalate, and writes for
@@ -117,7 +117,7 @@ of error that would be fatal in someone else's production account.
 
 ---
 
-## D8 — Launch first, watcher second
+## D8: Launch first, watcher second
 
 **Context.** The design drifted twice toward a monitoring product. The operator corrected it
 twice: *"initially I have to setup everything on vercel, cloudflare dns update or configuring
@@ -125,17 +125,17 @@ resend… then the watcher comes into picture when the initial setup settles dow
 
 **Decision.** Build the launch workflow. The watcher is phase two.
 
-**Why.** You cannot monitor a stack you have not stood up. A launch also has a finish line —
-site live, certificate valid, mail passing DKIM — and a monitoring dashboard has no ending,
+**Why.** You cannot monitor a stack you have not stood up. A launch also has a finish line,
+site live, certificate valid, mail passing DKIM, and a monitoring dashboard has no ending,
 which matters when Presentation is 20% of the score.
 
 ---
 
-## D9 — The Resend → Cloudflare handoff is the one worth building around
+## D9: The Resend → Cloudflare handoff is the one worth building around
 
 **Finding.** The launch has four cross-account handoffs. Three fail visibly: a wrong A record
 means the site does not resolve, wrong env vars mean the build breaks. **A wrong DKIM record
-breaks nothing observable** — the client's mail silently stops being delivered and nobody finds
+breaks nothing observable**: the client's mail silently stops being delivered and nobody finds
 out for weeks.
 
 **Consequence.** Resend is in v1 despite being the third provider, and the invisible-failure
@@ -143,7 +143,7 @@ case is the demo's emotional centre.
 
 ---
 
-## D10 — Do not lead with the approval boundary
+## D10: Do not lead with the approval boundary
 
 **Context.** The two previous submissions (`google-agentic-cinema`, `web-mcp-2026`) both led on
 evidence provenance and the human-approval boundary. The 2026-09-03 scan found those to be the
@@ -160,7 +160,7 @@ ecosystem; leading with either caps the submission at mid-field."*
 
 ---
 
-## D11 — Providers in v1
+## D11: Providers in v1
 
 **Decision.** Vercel, Cloudflare, Resend. Supabase if time. GoDaddy, Gmail/Zoho Mail and
 Hostinger later, through the same adapter contract.
@@ -174,7 +174,7 @@ which is exactly what that costs from outside.
 
 ---
 
-## D12 — Real data for building, an owned tenant for the film
+## D12: Real data for building, an owned tenant for the film
 
 **Decision.** Calibrate against real client stacks locally, never committed and never filmed.
 Demo exclusively against a tenant the operator owns, clearly labelled as a demo estate.
@@ -185,7 +185,7 @@ statements.
 
 ---
 
-## D13 — AgentCore is justified by hosting, not by the rules *(revises D4)*
+## D13: AgentCore is justified by hosting, not by the rules *(revises D4)*
 
 **Context.** D4 chose local-first, which left AgentCore barely used. The obvious fix was to move
 the agents onto AgentCore Runtime. Challenged on 2026-09-03: *does it really need AgentCore, and
@@ -193,7 +193,7 @@ how would we justify it?*
 
 **Finding.** For the local mode it is not needed, and forcing it would be visible. Twelve AWS
 judges know their own product. Shipping a client's API keys to a cloud vault when the OS keychain
-would keep them on the operator's own machine is not a stronger design — for this use case it is
+would keep them on the operator's own machine is not a stronger design, for this use case it is
 arguably a weaker one. Also worth stating precisely: **Strands is required, AgentCore is only
 recommended.** The criterion's subject is Strands.
 
@@ -208,7 +208,7 @@ Strands sits above both and is identical either way; the backend only decides wh
 come from.
 
 **Why this is the honest justification.** AgentCore appears **because hosting other people's
-credentials changes the threat model** — not because the rules suggested it. "We wrote our own
+credentials changes the threat model**, not because the rules suggested it. "We wrote our own
 sandbox" is the wrong answer once twelve clients' keys share a host; per-session isolation is
 the right one. And OAuth flows cannot be completed interactively on a headless box, which is
 what Identity handles.
@@ -223,13 +223,13 @@ finish line, and genuine work for a Strands agent to do.
 
 ---
 
-## D14 — Keychain locally, Identity only when hosted *(revises D13)*
+## D14: Keychain locally, Identity only when hosted *(revises D13)*
 
 **Context.** D13 concluded AgentCore Identity should be used in both modes, on the grounds that
 it vends short-lived scoped credentials and gives an audit trail. Challenged immediately: *the
 credentials still travel over the network.*
 
-**Finding — the challenge is correct.** The data flow differs by one hop:
+**Finding: the challenge is correct.** The data flow differs by one hop:
 
 ```
 Keychain    at rest: this machine        in flight: machine → provider
@@ -242,7 +242,7 @@ over it.
 **The counter-argument, kept because neither option dominates.** The two protect against
 different threats. Against the network, keychain wins. Against device compromise, Identity
 wins: a stolen laptop yields 48 long-lived provider tokens from a keychain, versus one scoped,
-expiring workload token — and recovery is one central revocation rather than rotating 48
+expiring workload token, and recovery is one central revocation rather than rotating 48
 credentials across 4 providers for 12 clients by hand. Identity also logs every credential use,
 which a password manager cannot.
 
@@ -259,11 +259,11 @@ product. Genericising them would remove the point.
 
 ---
 
-## D15 — Prior art: the switching problem is solved; the work is not
+## D15: Prior art: the switching problem is solved; the work is not
 
 **Searched 2026-09-03**, GitHub-wide and not limited to the hackathon.
 
-**`ibhugeloo/mcpwarden`** — TypeScript, created 2026-06-25, last pushed 2026-07-29, **0 stars**.
+**`ibhugeloo/mcpwarden`.** TypeScript, created 2026-06-25, last pushed 2026-07-29, **0 stars**.
 States this exact problem in the same words:
 
 > *"Most MCP clients (Claude, Cursor…) bind one account per connector via OAuth. The moment you
@@ -278,20 +278,20 @@ server. It is a good design and it is honestly built.
 **What it does not do, and these are the gaps this project occupies:**
 
 1. **`mcpwarden profile use` selects one active context.** It removes the *re-login*, not the
-   *switching* — you are still on one client at a time, so cross-client questions remain
+   *switching*. You are still on one client at a time, so cross-client questions remain
    impossible.
 2. **N servers, not N containers.** Twelve clients across four providers is 48 registered MCP
    servers and 48 namespaces in the client's tool list.
 3. **It is a config manager and launcher, not an agent.** No workflow, no verification.
-4. **No cross-account work at all** — which is the actual job here, because the output of one
+4. **No cross-account work at all.** which is the actual job here, because the output of one
    account is the input of another (Resend DKIM → Cloudflare DNS).
 
 **`sagemcp` (44★) and `Super-I-Tech/mcp_plexus` (30★)** solve the *inverse* problem: hosting one
 MCP server for many customers, SaaS-style. Many users, one operator. Not one operator, many
 accounts. Different problem, despite the shared phrase "multi-tenant".
 
-**Official provider MCP servers** — `cloudflare/mcp-server-cloudflare` (4.1k★), `supabase/mcp`
-(2.9k★), `resend/resend-mcp` (566★) — all bind a single account. The wall mcpwarden describes
+**Official provider MCP servers.** `cloudflare/mcp-server-cloudflare` (4.1k★), `supabase/mcp`
+(2.9k★), `resend/resend-mcp` (566★): all bind a single account. The wall mcpwarden describes
 is real and current.
 
 **Nothing found at all** for agency/MSP multi-client cloud management, or for cross-provider
@@ -307,12 +307,12 @@ be said. The defensible claims are narrower and stronger:
 
 - Existing work removes the re-login but keeps you on **one account at a time**.
 - **No prior work performs a task that spans two client accounts**, which is what a launch is.
-- **No prior work verifies the result** — the silent-failure catalogue in spec §7 has no
+- **No prior work verifies the result.** the silent-failure catalogue in spec §7 has no
   equivalent anywhere found.
 
 ---
 
-## D16 — What the rules actually require, confirmed by the organisers
+## D16: What the rules actually require, confirmed by the organisers
 
 Three official answers from a Devpost manager, on the hackathon forum, 2026-09-03/04.
 
@@ -329,14 +329,14 @@ This vindicates D4 and removes the AgentCore Runtime quota from the critical pat
 > *"**Judges will not install anything locally**"*, and *"Judges are not required to test the
 > Project and may choose to judge based solely on the text description, images, and video."*
 
-**This is the most consequential finding in the whole analysis.** Every criterion — including
-Technological Implementation — is scored from the video, the description, the architecture
+**This is the most consequential finding in the whole analysis.** Every criterion, including
+Technological Implementation, is scored from the video, the description, the architecture
 diagram, and a repo skim. `docs/HACKATHON.md` treated the video as one criterion worth 20%.
 It is in fact the entire evaluation surface. Consequences:
 
 - The video is the deliverable; the code is what makes it truthful. It is not a last-week task.
 - The architecture diagram is promoted: it is how a judge understands a system they will never run.
-- Install-experience polish drops down the list. Correctness does not — a judge reading the repo
+- Install-experience polish drops down the list. Correctness does not: a judge reading the repo
   can still catch a lie.
 - **A check nobody sees run may as well not exist.** The verification catalogue must be visible
   on screen, not merely implemented.
@@ -350,7 +350,7 @@ Only Strands is mandatory.
 
 ---
 
-## D17 — Bedrock is unreachable on this account; Gemini is the working host
+## D17: Bedrock is unreachable on this account; Gemini is the working host
 
 **Context.** The AWS account is an **AISPL** (AWS India) account. Every Anthropic model on
 `bedrock-runtime` fails:
@@ -362,7 +362,7 @@ Only Strands is mandatory.
 **Cause, established rather than guessed.** Bedrock model access is provisioned as an AWS
 Marketplace subscription with contract pricing. AWS Marketplace has not supported stored card
 payments for AISPL customers since March 2022, because of RBI payment-aggregator regulation.
-UPI AutoPay (PhonePe) is enabled, Default, and green in Payment Preferences — it covers regular
+UPI AutoPay (PhonePe) is enabled, Default, and green in Payment Preferences. It covers regular
 AWS invoices but not the Marketplace subscription. IAM is `AdministratorAccess`, so it is not a
 permissions problem. A 20-minute poll confirmed it is not propagation either.
 
@@ -372,7 +372,7 @@ permissions problem. A 20-minute poll confirmed it is not propagation either.
   above, and the use case form does not lift it.
 - Bare model ids fail: `anthropic.claude-sonnet-4-5-...` needs an inference profile, hence the
   `us.` / `global.` prefix.
-- The Anthropic **use case details form was submitted successfully** and that gate did clear —
+- The Anthropic **use case details form was submitted successfully** and that gate did clear,
   the error changed from `ResourceNotFoundException` to `AccessDeniedException`, which is how
   the real cause was found.
 
@@ -382,18 +382,18 @@ permissions problem. A 20-minute poll confirmed it is not propagation either.
 so restoring Bedrock is a config change with no code change.
 
 **Why this is not a compromise.** Strands is the requirement; the model host is not (D16). And
-Strands advertises model portability — this exercises it under real duress rather than claiming
+Strands advertises model portability. This exercises it under real duress rather than claiming
 it. The README should say so plainly.
 
 **The process lesson.** The cause sat in the API response for an hour while the probes printed
 `e.response['Error']['Code']` and truncated messages to 95 characters. `INVALID_PAYMENT_INSTRUMENT`
-appears ~40 characters into a message that was being cut at 95 — visible, and not looked at. Same
+appears ~40 characters into a message that was being cut at 95, visible, and not looked at. Same
 shape as `google-agentic-cinema` D28: the answer was in the output and nobody read it. **Never
 truncate an error message in a diagnostic.**
 
 ---
 
-## D18 — The control room is a window, not a dashboard *(reconciles D3)*
+## D18: The control room is a window, not a dashboard *(reconciles D3)*
 
 **The contradiction.** D3 is titled "It is an MCP server, not a CLI and **not a
 dashboard**", and records that the design drifted to a dashboard three times and
@@ -408,7 +408,7 @@ stopped and needs a person. Everything else is read-only.
 
 The operator works in their coding agent, which is what D3 settled and has not
 changed. The room exists because a process that takes four minutes and touches
-three companies is otherwise invisible — and the organisers confirmed judges will
+three companies is otherwise invisible, and the organisers confirmed judges will
 not install anything (D16), so a component that cannot be seen earns nothing.
 
 **The test of it.** If the room were removed, nothing about how the product is
@@ -417,7 +417,7 @@ That is the difference between a window and an interface.
 
 ---
 
-## D19 — Reads may register a client; writes may not
+## D19: Reads may register a client; writes may not
 
 **Context.** Naming a client, then connecting it, then checking it, is three
 steps before anything useful happens. Nobody wants a setup wizard.
@@ -434,11 +434,11 @@ refuses a client that was not named deliberately, and a test asserts it.
 
 ---
 
-## D20 — A check that fires on a platform domain is worth less than no check
+## D20: A check that fires on a platform domain is worth less than no check
 
 **Found by running the catalogue against a real client's Vercel URL.** It
-reported six failures — no SPF, no DKIM, no DMARC, no MX, no nameservers, no www
-— and every one was correct behaviour. Nobody sends mail from a `vercel.app`
+reported six failures, no SPF, no DKIM, no DMARC, no MX, no nameservers, no www
+,  and every one was correct behaviour. Nobody sends mail from a `vercel.app`
 address, and it has no nameservers of its own because it is a subdomain of the
 platform.
 
@@ -455,7 +455,7 @@ run. That is the argument for D12's "real data for building" in a sentence.
 
 ---
 
-## D21 — The fan-out claim, measured twice and corrected once
+## D21: The fan-out claim, measured twice and corrected once
 
 **The claim.** That answering one question across a dozen clients concurrently is
 a differentiator, and that it is "parallel fan-out, not a for-loop."
@@ -474,7 +474,7 @@ several checks share:
 
 **Both numbers stay in the code.** Against a warm resolver a lookup costs
 microseconds and thread overhead dominates, so concurrency loses. The case that
-happens — an operator asking about a dozen clients they have not touched today —
+happens: an operator asking about a dozen clients they have not touched today,
 is the cold one, and there it halves the wait. Quoting only the 2.0x would be the
 kind of unearned number `web-mcp-2026/docs/PROJECT-RULES.md` exists to prevent.
 
@@ -486,7 +486,7 @@ and the criterion says *skilfully*, not *thoroughly*.
 
 ---
 
-## D22 — OAuth stays, because the project outlives the contest *(revises the review consensus)*
+## D22: OAuth stays, because the project outlives the contest *(revises the review consensus)*
 
 **Context.** Three independent reviewers said cut OAuth. Their reasoning was
 sound *for the contest*: judges will not install anything (D16), so a browser
@@ -498,7 +498,7 @@ first and a submission second.
 
 **Why that changes the answer.** `mcpwarden` solves the same credential problem,
 asks you to paste a token per account, and has no adopters (D15). For a tool
-strangers are meant to install, browser login is not polish — it is whether
+strangers are meant to install, browser login is not polish. It is whether
 anyone gets past step one. There is also a judge-shaped upside the reviewers
 missed: Lahari Chowtoori sits on the panel as Open Source TPM, AI/ML.
 
@@ -506,7 +506,7 @@ missed: Lahari Chowtoori sits on the panel as Open Source TPM, AI/ML.
 Vercel write path and the intervention handler.
 
 **Where it is honest.** Resend is absent from the provider table because it
-publishes no authorization endpoint — that is Resend offering nothing, not a
+publishes no authorization endpoint. That is Resend offering nothing, not a
 preference. Cloudflare's endpoints are recorded but unused until a client id
 exists; their own MCP server reads one they were issued, and whether registration
 is self-serve is unconfirmed. `TokenConnector` ships regardless, so a provider
@@ -514,11 +514,11 @@ approval that never arrives cannot block the submission.
 
 ---
 
-## D23 — The cross-account claim, measured against two real accounts
+## D23: The cross-account claim, measured against two real accounts
 
 **Context.** D15's defensible claim is that no prior work performs a task
 spanning two client accounts. Until 2026-09-04 that claim had never been run
-against two real accounts — only against one account plus fixtures. A claim the
+against two real accounts, only against one account plus fixtures. A claim the
 whole submission rests on, resting in turn on nothing.
 
 **What was run.** Two genuine Vercel teams, connected by browser login minutes
@@ -547,14 +547,14 @@ rather than reading about it:
    `/integrations/<slug>/new`, takes only `state`, and exchanges at
    `/v2/oauth/access_token` with the secret and no PKCE.
 2. The callback listener served exactly one request, so the first thing to touch
-   the port consumed it — a favicon prefetch, a port scan — and the login failed
+   the port consumed it: a favicon prefetch, a port scan, and the login failed
    with "no callback received" having received one.
 3. `ClientRecord.providers` was a second copy of a fact the keychain held, and
    `munim connect` never updated it. Removed rather than synchronised.
 4. `.gitignore`'s `.env.*` had been swallowing `.env.example` since the repo was
    created, so no clone ever carried the list of variables to set.
 
-**What it also showed.** The first grant landed on the wrong team — the operator
+**What it also showed.** The first grant landed on the wrong team: the operator
 picked the scope that did not own the client's project. Nothing in the tool can
 catch that: the account picker is the one step only a person can get right,
 which is why `connect` prints the team id it just authorised.
