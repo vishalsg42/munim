@@ -179,8 +179,48 @@ def endpoint_for(client: str, provider: str, backend=None) -> str:
     return stored
 
 
+class WrongAccount(Exception):
+    """The session opened, and it is not the account this client was bound to."""
+
+
+async def _verify_account(session, client: str, provider: str, backend=None) -> None:
+    """Refuse a session that has drifted to another account.
+
+    Access tokens expire, and a refresh that fails becomes a fresh
+    authorization. That authorization is decided by whoever the browser is
+    signed in to, not by the client record, so a client can be silently
+    rebound to a different account: it happened here, between one probe and the
+    next, and nothing noticed because the client id and the stored name were
+    both still right.
+
+    Checked on every session rather than at connect time, because connect time
+    is not when it goes wrong.
+    """
+    from munim.remote.identity import identity_of
+
+    store = KeychainTokenStorage(client, provider, backend)
+    expected = store.account()
+    if not expected:
+        # Never recorded, so there is nothing to compare against. Record it now
+        # so the next session has something.
+        found = await identity_of(session, provider)
+        if found:
+            store.remember_account(found)
+        return
+
+    found = await identity_of(session, provider)
+    if found and found != expected:
+        raise WrongAccount(
+            f"This session is authenticated as {found!r}, and this client was "
+            f"connected as {expected!r}. A token was refreshed against whichever "
+            f"account the browser was signed in to. Nothing was read or "
+            f"changed. Reconnect it: munim connect <client> {provider}"
+        )
+
+
 @asynccontextmanager
-async def session_for(client: str, provider: str, *, backend=None, on_url=None):
+async def session_for(client: str, provider: str, *, backend=None, on_url=None,
+                      verify: bool = True):
     """Open one client's session with one provider's MCP server."""
     server = server_for(provider)
     if server is None:
@@ -195,13 +235,32 @@ async def session_for(client: str, provider: str, *, backend=None, on_url=None):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 yield session
-        return
+        return  # a url-authenticated server has no account to drift
 
     auth = auth_for(client, provider, backend=backend, on_url=on_url)
-    async with streamablehttp_client(url, auth=auth) as (read, write, _):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            yield session
+    try:
+        async with streamablehttp_client(url, auth=auth) as (read, write, _):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                if verify:
+                    await _verify_account(session, client, provider, backend)
+                yield session
+    except BaseExceptionGroup as group:
+        # The transport runs inside an anyio task group, so anything raised in
+        # here comes back wrapped. A caller cannot catch WrongAccount through a
+        # group, and this is the one exception they most need to catch.
+        wrong = [e for e in _flatten(group) if isinstance(e, WrongAccount)]
+        if wrong:
+            raise wrong[0] from None
+        raise
+
+
+def _flatten(error: BaseException):
+    if isinstance(error, BaseExceptionGroup):
+        for inner in error.exceptions:
+            yield from _flatten(inner)
+    else:
+        yield error
 
 
 async def tools_for(client: str, provider: str, **kwargs) -> list[str]:

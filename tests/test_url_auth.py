@@ -78,3 +78,65 @@ def test_the_endpoint_follows_a_rename(zoho):
     store.move_to("c_new")
     assert KeychainTokenStorage("c_new", "zoho", ring).endpoint() == SECRET_URL
     assert KeychainTokenStorage("c_old", "zoho", ring).endpoint() is None
+
+
+class _Session:
+    """A session that says which account it is, the way a provider would."""
+    def __init__(self, account):
+        self._account = account
+
+    async def call_tool(self, name, args):
+        import types
+        text = f'[{{"id": "x", "name": "{self._account}"}}]'
+        return types.SimpleNamespace(content=[types.SimpleNamespace(text=text)])
+
+
+async def test_a_session_on_another_account_is_refused():
+    """The failure this exists for, and it happened on a real machine.
+
+    A browser opened for one client while Chrome was signed in to a different
+    provider account, and the authorisation went there. The client id was still
+    right and the stored name was still right, so nothing about the record
+    looked wrong: only the token had moved. Checked on every session rather
+    than at connect, because connect is not when it goes wrong.
+    """
+    from munim.remote.session import WrongAccount, _verify_account
+
+    ring = Ring()
+    KeychainTokenStorage("c_1", "cloudflare", ring).remember_account("Theirs")
+
+    with pytest.raises(WrongAccount, match="Theirs"):
+        await _verify_account(_Session("Somebody Else"), "c_1", "cloudflare", ring)
+
+
+async def test_the_right_account_passes():
+    from munim.remote.session import _verify_account
+
+    ring = Ring()
+    KeychainTokenStorage("c_1", "cloudflare", ring).remember_account("Theirs")
+    await _verify_account(_Session("Theirs"), "c_1", "cloudflare", ring)
+
+
+async def test_a_first_session_records_the_account_it_landed_on():
+    """Nothing to compare against yet, so there is nothing to refuse. Recording
+    it is what makes the next session checkable."""
+    from munim.remote.session import _verify_account
+
+    ring = Ring()
+    store = KeychainTokenStorage("c_1", "cloudflare", ring)
+    assert store.account() is None
+
+    await _verify_account(_Session("Theirs"), "c_1", "cloudflare", ring)
+    assert store.account() == "Theirs"
+
+
+async def test_the_refusal_says_how_to_fix_it():
+    from munim.remote.session import WrongAccount, _verify_account
+
+    ring = Ring()
+    KeychainTokenStorage("c_1", "cloudflare", ring).remember_account("Theirs")
+    with pytest.raises(WrongAccount) as caught:
+        await _verify_account(_Session("Wrong"), "c_1", "cloudflare", ring)
+    said = str(caught.value)
+    assert "Nothing was read or changed" in said
+    assert "munim connect" in said
