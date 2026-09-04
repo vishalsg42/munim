@@ -29,10 +29,12 @@ export default function App() {
   }, []);
 
   const live = state.client !== null;
-  // A check run only ever emits `verify` events. Calling that a launch would
-  // claim work the run never did.
+  // A check run emits `verify`, and `diagnose` too once something fails and the
+  // agent is asked to explain it. Neither is deploying anything, so calling
+  // either a launch would claim work the run never did.
+  const CHECK_ONLY = ["verify", "diagnose"];
   const eyebrow =
-    state.stagesSeen.length > 0 && state.stagesSeen.every((s) => s === "verify")
+    state.stagesSeen.length > 0 && state.stagesSeen.every((s) => CHECK_ONLY.includes(s))
       ? "Checking"
       : "Launching";
 

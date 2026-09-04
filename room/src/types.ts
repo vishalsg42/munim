@@ -37,4 +37,7 @@ export const CHECK_LABELS: Record<string, string> = {
   env_redeployed: "Env applied", site_responds: "Site responds",
 };
 
-export const STAGES = ["deploy", "domain", "dns", "mail", "verify"] as const;
+// `diagnose` is where the agent works out what a failure means. It was missing,
+// so the one step that makes this an agent rather than a DNS script never
+// appeared in the rail: its events reached the log and nothing else.
+export const STAGES = ["deploy", "domain", "dns", "mail", "verify", "diagnose"] as const;

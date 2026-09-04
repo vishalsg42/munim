@@ -47,3 +47,11 @@ test("a launch touches more than verify", () => {
   s = reduce(s, { type: "event", event: ev(2, "stage_start", {}, "verify") });
   assert.deepEqual(s.stagesSeen, ["deploy", "verify"]);
 });
+
+test("a run that diagnoses a failure is still a check, not a launch", () => {
+  let s = reduce(initialState, { type: "event", event: ev(1, "stage_start", {}, "verify") });
+  s = reduce(s, { type: "event", event: ev(2, "finding", { check: "dmarc_policy" }, "verify") });
+  s = reduce(s, { type: "event", event: ev(3, "stage_start", {}, "diagnose") });
+  s = reduce(s, { type: "event", event: ev(4, "stage_done", {}, "diagnose") });
+  assert.deepEqual(s.stagesSeen, ["verify", "diagnose"]);
+});
