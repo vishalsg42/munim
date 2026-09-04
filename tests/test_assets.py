@@ -83,7 +83,7 @@ def test_a_naive_expiry_does_not_crash_the_one_rule():
     """Providers are inconsistent: Vercel returns epoch ms, Resend returns
     unsuffixed stamps. Before the validator this raised
     `TypeError: can't subtract offset-naive and offset-aware datetimes`
-    inside expiring_within — the one function the "one rule, every provider"
+    inside expiring_within, the one function the "one rule, every provider"
     claim rests on. Every other test here uses the aware _at() helper, so the
     suite structurally could not catch it."""
     asset = Asset(

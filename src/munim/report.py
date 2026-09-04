@@ -88,8 +88,11 @@ def render(log: RunLog, *, domain: str, business: str) -> str:
 
     cards = []
     for e in fixed:
-        cards.append(f'<div class="card fixed"><p class="what">Fixed &mdash; '
-                     f'{_e(e.human_text)}</p></div>')
+        # What is true now, not the problem it used to have. "Fixed. This domain
+        # has more than one sender policy" told the owner it still did.
+        says = resolved_text.get(e.detail.get("check")) or e.human_text
+        cards.append(f'<div class="card fixed"><p class="what">Fixed. '
+                     f'{_e(says)}</p></div>')
     for e in outstanding:
         why = e.detail.get("operator_text", "")
         cards.append(
@@ -114,7 +117,7 @@ def render(log: RunLog, *, domain: str, business: str) -> str:
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{_e(business)} &mdash; what we checked</title>
+<title>{_e(business)}: what we checked</title>
 <style>{_CSS}</style></head>
 <body><main>
   <p class="eyebrow">{_e(when)}</p>

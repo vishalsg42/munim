@@ -1,4 +1,4 @@
-"""`munim doctor` — what is set up, what is not, and the exact next step.
+"""`munim doctor`: what is set up, what is not, and the exact next step.
 
 For a tool strangers are meant to install, "it does not work" is the failure that
 loses them. Every check here reports the specific missing thing and the one
@@ -91,11 +91,11 @@ def _oauth_apps() -> list[Finding]:
             out.append(Finding(OK, f"OAuth app: {provider}", "registered"))
         else:
             out.append(Finding(
-                WARN, f"OAuth app: {provider}", "not registered — key entry still works",
+                WARN, f"OAuth app: {provider}", "not registered, but key entry still works",
                 fix=f"register an app with redirect {REDIRECT_URI}, then set "
                     f"{provider.upper()}_OAUTH_CLIENT_ID in .env"))
     out.append(Finding(OK, "OAuth app: resend",
-                       "not applicable — Resend publishes no OAuth endpoint"))
+                       "not applicable: Resend publishes no OAuth endpoint"))
     return out
 
 

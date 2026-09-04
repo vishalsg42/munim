@@ -1,4 +1,4 @@
-"""`munim connect` — log in to a provider as one client.
+"""`munim connect`: log in to a provider as one client.
 
 Kept out of the MCP server on purpose. OAuth needs a browser and a callback
 listener, which a stdio subprocess spawned by a coding agent has no business

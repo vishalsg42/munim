@@ -88,6 +88,28 @@ def test_a_repaired_finding_appears_in_what_we_looked_at(tmp_path):
     assert "more than one sender policy" not in body
 
 
+def test_the_fixed_card_says_what_is_true_now(tmp_path):
+    """"Fixed. This domain has more than one sender policy" told the owner it
+    still did."""
+    log = _log_from(tmp_path, [
+        ("finding", "spf_single", "This domain has more than one sender policy."),
+        ("resolved", "spf_single", "One sender policy now, covering every sender."),
+    ])
+    page = render(log, domain="ivyandfern.co.uk", business="Ivy & Fern Studio")
+    assert "Fixed. One sender policy now" in page
+
+
+def test_no_em_dashes_anywhere_on_the_page(tmp_path):
+    """They read as machine-written, and this is the page a client reads."""
+    log = _log_from(tmp_path, [
+        ("finding", "spf_single", "This domain has more than one sender policy."),
+        ("resolved", "spf_single", "One sender policy now, covering every sender."),
+        ("observation", "mx_present", "Mail can reach you."),
+    ])
+    page = render(log, domain="ivyandfern.co.uk", business="Ivy & Fern Studio")
+    assert "\u2014" not in page and "&mdash;" not in page
+
+
 def test_no_heading_over_an_empty_list(tmp_path):
     """A run that checked nothing must not promise everything it looked at."""
     log = _log_from(tmp_path, [("stage_start", None, "Checking email authentication")])

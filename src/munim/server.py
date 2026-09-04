@@ -20,7 +20,7 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-from munim.checks.dns import run_all, run_reachability
+from munim.checks.dns import run_all_async, run_reachability_async
 from munim.connect.oauth import PROVIDERS as OAUTH_PROVIDERS
 from munim.connect.token import TokenConnector
 from munim.container import Container, KeychainBackend, UnknownClient
@@ -94,7 +94,7 @@ def build_server(backend=None, registry=None, runs_dir=None,
         return out
 
     @server.tool()
-    def find_across_clients(need: str) -> list[dict]:
+    async def find_across_clients(need: str) -> list[dict]:
         """Answer one question across every client at once.
 
         Read-only by design: this is the one place that spans containers, so it
@@ -109,11 +109,17 @@ def build_server(backend=None, registry=None, runs_dir=None,
         if wanted is None:
             raise ValueError(f"unknown question {need!r}")
 
+        # Every client at once. Serially this was one blocking network call
+        # after another inside the event loop, so the whole server froze for
+        # the length of the slowest client - on the one tool whose entire
+        # purpose is spanning them all.
+        records = [r for r in registry.clients() if r.domain]
+        per_client = await asyncio.gather(
+            *(run_all_async(r.domain) for r in records))
+
         hits = []
-        for record in registry.clients():
-            if not record.domain:
-                continue
-            for result in run_all(record.domain):
+        for record, results in zip(records, per_client):
+            for result in results:
                 if result.check in wanted and result.status == "fail":
                     hits.append({"client": record.name, "domain": record.domain,
                                  "check": result.check, "says": result.human_text})
@@ -171,9 +177,11 @@ def build_server(backend=None, registry=None, runs_dir=None,
         log = RunLog(new_run_id(), runs)
         log.append(client=client, stage="verify", kind="stage_start",
                    human_text=f"Checking {target_domain}")
-        results = await asyncio.to_thread(run_all, target_domain,
-                                          dkim_selector=dkim_selector)
-        results += await asyncio.to_thread(run_reachability, target_domain)
+        # run_all_async, not run_all in a thread: the async path fans the
+        # lookups out and deduplicates them, which is where the time goes.
+        # Thirteen checks read eight distinct records, several of them twice.
+        results = await run_all_async(target_domain, dkim_selector=dkim_selector)
+        results += await run_reachability_async(target_domain)
         for r in results:
             if r.status == "skip":
                 continue

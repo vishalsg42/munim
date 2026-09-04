@@ -18,6 +18,7 @@ import asyncio
 import re
 import socket
 import ssl
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Literal
@@ -82,9 +83,25 @@ def _resolver(nameserver: str | None = None) -> dns.resolver.Resolver:
     return r
 
 
+# Prefetched answers for the task currently running. A ContextVar rather than a
+# module global: gather() copies the context into each task, so two clients
+# checked at once cannot see each other's answers. The previous version swapped
+# the module-level `query` for a closure and restored it in a finally, which is
+# safe only for as long as nothing between the swap and the restore awaits. One
+# await added later, or one call from a second event loop, and a client is
+# served another client's DNS - the exact failure this project exists to prevent.
+_prefetched: ContextVar[dict[tuple[str, str], list[str]] | None] = ContextVar(
+    "_prefetched", default=None)
+
+
 def query(name: str, rdtype: str, nameserver: str = "1.1.1.1") -> list[str]:
     """Return record values as strings. An absent record is an empty list, not
     an exception - absence is an answer here, not a failure."""
+    cache = _prefetched.get()
+    if cache is not None:
+        answered = cache.get((name, rdtype))
+        if answered is not None:
+            return answered
     try:
         answers = _resolver(nameserver).resolve(name, rdtype)
     except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer, dns.resolver.NoNameservers):
@@ -397,16 +414,27 @@ async def prefetch(domain: str, dkim_selector: str = "resend",
 async def run_all_async(domain: str, *, dkim_selector: str = "resend",
                         expect_ns: str = "", ns: str = "1.1.1.1") -> list[CheckResult]:
     """run_all, with the lookups fanned out and deduplicated first."""
-    global query
     cache = await prefetch(domain, dkim_selector, ns)
-    original = query
+    token = _prefetched.set(cache)
     try:
-        query = lambda name, rdtype, nameserver="1.1.1.1": cache.get(  # noqa: E731
-            (name, rdtype), original(name, rdtype, nameserver))
-        return run_all(domain, dkim_selector=dkim_selector,
-                       expect_ns=expect_ns, ns=ns)
+        # In a thread, not inline: the checks are synchronous, and any lookup
+        # the prefetch missed is a network call that would otherwise stall the
+        # event loop and every other client being checked alongside it.
+        # to_thread copies the context, so the cache above travels with it.
+        return await asyncio.to_thread(
+            run_all, domain, dkim_selector=dkim_selector,
+            expect_ns=expect_ns, ns=ns)
     finally:
-        query = original
+        _prefetched.reset(token)
+
+
+async def run_reachability_async(domain: str) -> list[CheckResult]:
+    """run_reachability, with the three connections made at the same time."""
+    return list(await asyncio.gather(
+        asyncio.to_thread(www_redirect, domain),
+        asyncio.to_thread(https_enforced, domain),
+        asyncio.to_thread(cert_valid, domain),
+    ))
 
 
 def run_all(domain: str, *, dkim_selector: str = "resend",
