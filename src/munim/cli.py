@@ -173,6 +173,39 @@ def connect_via_mcp(client: str | None, provider: str) -> int:
         print(str(exc), file=sys.stderr)
         return 2
 
+    # Remember which account this turned out to be. Without it, connecting the
+    # same account under a second label makes a second client and nothing can
+    # tell: the sessions look different because the labels are.
+    from munim.remote.accounts import holder_of
+    from munim.remote.storage import KeychainTokenStorage
+
+    registry = _registry()
+    current_id = None
+    if not naming:
+        try:
+            current_id = registry.get(client).id
+        except UnknownClient:
+            current_id = None
+
+    if account:
+        already = holder_of(registry, provider, account, exclude=current_id)
+        if already is not None:
+            # The provisional session is a duplicate of one already held. Drop
+            # it rather than leaving a second set of credentials for one
+            # account, which is the thing `merge` exists to clean up.
+            if naming:
+                KeychainTokenStorage(PROVISIONAL, provider).move_to(already.id)
+                print(f"That is {already.name}'s {provider} account, which was "
+                      f"already connected. Refreshed it rather than adding a "
+                      f"second client.", file=sys.stderr)
+                return 0
+            print(f"That {provider} account is already connected as "
+                  f"{already.name!r}. Nothing was added: two clients holding "
+                  f"one account means a call could go to either.\n"
+                  f"  To move it: munim merge {already.name!r} {client!r}",
+                  file=sys.stderr)
+            return 2
+
     if naming:
         if not account:
             print(f"{provider} did not say which account was authorised, so "
@@ -180,19 +213,22 @@ def connect_via_mcp(client: str | None, provider: str) -> int:
                   f"name: munim connect \"<client>\" {provider}",
                   file=sys.stderr)
             return 2
-        from munim.remote.storage import KeychainTokenStorage
         KeychainTokenStorage(PROVISIONAL, provider).move_to(account)
-        client = account
-        registry = _registry()
         try:
-            registry.get(client)
+            record = registry.get(account)
         except UnknownClient:
-            registry.add(ClientRecord(name=client))
+            record = ClientRecord(name=account)
+            registry.add(record)
+        client = record.name
+        KeychainTokenStorage(record.id, provider).remember_account(account)
 
     # The account the provider says was authorised, beside the name it was
     # stored under. This is the only moment the two can be compared, and until
     # now nothing compared them: a typo at the prompt stored a real token under
     # a name that had nothing to do with it.
+    if account and not naming and current_id is not None:
+        KeychainTokenStorage(current_id, provider).remember_account(account)
+
     where = f"\n  account: {account}" if account and not naming else ""
     print(f"Connected {provider} for {client}: {len(tools)} tools.{where}",
           file=sys.stderr)
