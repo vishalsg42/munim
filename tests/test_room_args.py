@@ -37,3 +37,27 @@ def test_an_unknown_flag_is_an_error_not_a_shrug():
     import pytest
     with pytest.raises(SystemExit):
         parse_args(["--prot", "8986"])
+
+
+def test_the_reports_directory_can_be_pointed_elsewhere():
+    """A room pointed at one set of runs must not serve another set's reports."""
+    assert parse_args([]).reports is None
+    assert parse_args(["--reports", "/tmp/demo-reports"]).reports == Path("/tmp/demo-reports")
+
+
+def test_build_app_keeps_runs_and_reports_together(tmp_path):
+    from munim.room.server import build_app
+    app = build_app(tmp_path / "runs", tmp_path / "reports")
+    assert app.state.runs_dir == tmp_path / "runs"
+    assert app.state.reports_dir == tmp_path / "reports"
+
+
+def test_the_report_route_reads_the_configured_directory(tmp_path):
+    """It imported REPORTS_DIR directly, so --runs moved the runs and left the
+    reports behind."""
+    import inspect
+
+    from munim.room import server
+    body = inspect.getsource(server.report)
+    assert "app.state.reports_dir" in body
+    assert "REPORTS_DIR" not in body

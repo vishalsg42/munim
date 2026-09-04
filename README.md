@@ -83,7 +83,7 @@ Open the control room to watch a run:
 ```bash
 uv run munim-room                        # http://127.0.0.1:8977
 uv run munim-room --port 8986            # if 8977 is taken
-uv run munim-room --runs ~/.munim/runs   # serve a different set of runs
+uv run munim-room --runs DIR --reports DIR   # serve a different set of runs
 ```
 
 ## What is implemented

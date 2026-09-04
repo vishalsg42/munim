@@ -29,6 +29,7 @@ from starlette.responses import (
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
+from munim.report import REPORTS_DIR
 from munim.runlog import RUNS_DIR, RunLog, all_runs, latest_run
 
 POLL_SECONDS = 0.25
@@ -105,10 +106,8 @@ async def run_events(request: Request) -> Response:
 async def report(request: Request) -> Response:
     """Serve a launch report. The owner-facing page lives next to the run it
     came from, so a link in an email and a link in the room are the same page."""
-    from munim.report import REPORTS_DIR
-
     run_id = request.path_params["run_id"]
-    page = REPORTS_DIR / f"{run_id}.html"
+    page = request.app.state.reports_dir / f"{run_id}.html"
     if page.exists():
         return FileResponse(page)
     return JSONResponse({"error": "no report for that run"}, status_code=404)
@@ -124,7 +123,8 @@ async def index(request: Request) -> Response:
     )
 
 
-def build_app(runs_dir: Path | None = None) -> Starlette:
+def build_app(runs_dir: Path | None = None,
+              reports_dir: Path | None = None) -> Starlette:
     routes = [
         Route("/api/runs", list_runs),
         Route("/api/runs/{run_id}/events", run_events),
@@ -137,6 +137,10 @@ def build_app(runs_dir: Path | None = None) -> Starlette:
 
     app = Starlette(routes=routes)
     app.state.runs_dir = Path(runs_dir or RUNS_DIR)
+    # Reports follow the runs. A room pointed at one set of runs that served
+    # reports from another would answer /reports/<id> with someone else's page,
+    # or with a 404 for a run it is displaying.
+    app.state.reports_dir = Path(reports_dir or REPORTS_DIR)
     return app
 
 
@@ -157,6 +161,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--runs", type=Path, default=None, metavar="DIR",
         help=f"directory of run logs (default: {RUNS_DIR})")
+    parser.add_argument(
+        "--reports", type=Path, default=None, metavar="DIR",
+        help=f"directory of launch reports (default: {REPORTS_DIR})")
     return parser.parse_args(argv)
 
 
@@ -184,7 +191,8 @@ def main() -> None:
     sock.listen()
 
     print(f"control room → http://127.0.0.1:{args.port}", flush=True)
-    config = uvicorn.Config(build_app(args.runs), log_level="warning")
+    config = uvicorn.Config(build_app(args.runs, args.reports),
+                            log_level="warning")
     uvicorn.Server(config).run(sockets=[sock])
 
 
