@@ -215,3 +215,17 @@ def test_token_entry_reaches_neither_path(monkeypatch, capsys):
 
     assert cli.main(["connect", "Acme", "cloudflare", "--token"]) == 2
     assert taken == {}, "a pasted key should not start a browser login"
+
+
+def test_the_listener_waits_as_long_as_the_sdk_does():
+    """Undercutting it means giving up while the browser is still on the
+    provider's login page and reporting that no callback arrived."""
+    import inspect
+
+    from mcp.client.auth import OAuthClientProvider
+
+    from munim.remote.session import LOGIN_TIMEOUT
+
+    sdk = inspect.signature(OAuthClientProvider.__init__).parameters["timeout"].default
+    assert LOGIN_TIMEOUT >= sdk, (
+        f"the listener gives up after {LOGIN_TIMEOUT}s and the SDK waits {sdk}s")

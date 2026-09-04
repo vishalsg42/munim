@@ -26,6 +26,11 @@ from munim.remote.servers import SERVERS, server_for
 from munim.remote.storage import KeychainTokenStorage
 
 
+# What OAuthClientProvider allows for the whole flow. The listener matches it
+# rather than undercutting it.
+LOGIN_TIMEOUT = 300.0
+
+
 class NoRemoteServer(Exception):
     """This provider runs no MCP server, so there is nothing to connect to."""
 
@@ -77,7 +82,13 @@ def auth_for(client: str, provider: str, *, backend=None,
             webbrowser.open(url)
 
     async def callback() -> tuple[str, str | None]:
+        # As long as the SDK is prepared to wait, and no longer. The listener
+        # defaulted to 180s while OAuthClientProvider allows 300, so a sign-in
+        # that involved actually logging in - a fresh account, a second factor -
+        # ran out here first and reported no callback while the browser was
+        # still on the provider's login page.
         answer = await asyncio.to_thread(serve_until_callback,
+                                         timeout=LOGIN_TIMEOUT,
                                          expect_state=pending.get("state"))
         if "error" in answer:
             # Ours, and a refusal. Saying so beats waiting out the deadline and
