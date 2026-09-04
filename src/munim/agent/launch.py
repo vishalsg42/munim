@@ -22,7 +22,8 @@ from strands import Agent, tool
 from munim.adapters.cloudflare import Cloudflare
 from munim.agent.model import build_model
 from munim.agent.spf import merge_spf, within_lookup_limit
-from munim.checks.dns import CheckResult, query, run_all, spf_single
+from munim.checks.dns import (CheckResult, query, run_all_async,
+                             run_reachability_async, spf_single)
 from munim.container import Container
 from munim.runlog import RunLog, new_run_id
 
@@ -47,14 +48,17 @@ Be brief. No preamble, no apology, no restating the question."""
 
 def _tools(domain: str, log: RunLog, client: str):
     @tool
-    def look_up(name: str, record_type: str) -> str:
+    async def look_up(name: str, record_type: str) -> str:
         """Look up a DNS record. Use this to gather evidence before diagnosing.
 
         Args:
             name: the fully qualified name, e.g. _dmarc.example.com
             record_type: TXT, MX, NS, A, AAAA or CAA
         """
-        answers = query(name, record_type.upper())
+        # The agent decides when to call this, so it can happen at any point in
+        # a run. Synchronously it would stall the event loop, and with it every
+        # other client being checked alongside this one.
+        answers = await asyncio.to_thread(query, name, record_type.upper())
         log.append(client=client, stage="diagnose", kind="observation",
                    human_text=f"Looked up {record_type.upper()} for {name}",
                    detail={"name": name, "type": record_type.upper(),
@@ -69,7 +73,8 @@ async def run_checks(domain: str, client: str, log: RunLog,
     """Deterministic. Each result is written to the run log as it lands."""
     log.append(client=client, stage="verify", kind="stage_start",
                human_text=f"Checking {domain}")
-    results = await asyncio.to_thread(run_all, domain, dkim_selector=dkim_selector)
+    results = await run_all_async(domain, dkim_selector=dkim_selector)
+    results += await run_reachability_async(domain)
     for r in results:
         if r.status == "skip":
             continue
@@ -92,20 +97,35 @@ async def explain(domain: str, client: str, failures: list[CheckResult],
     if not failures:
         return "Everything checked out."
 
-    model, label = build_model()
-    agent = Agent(model=model, tools=_tools(domain, log, client), system_prompt=SYSTEM)
-    log.append(client=client, stage="diagnose", kind="stage_start",
-               human_text=f"Working out what to tell {client}", detail={"model": label})
-
     findings = "\n".join(
         f"- {r.check}: {r.operator_text}" + (f"\n  evidence: {r.evidence}" if r.evidence else "")
         for r in failures
     )
-    reply = await agent.invoke_async(
-        f"Domain: {domain}\nBusiness: {client}\n\nFailing checks:\n{findings}\n\n"
-        "For each one, write the owner-facing explanation and say whether you can "
-        "fix it or a person must decide."
-    )
+
+    # The checks are deterministic and have already run. Losing the explanation
+    # is worth saying out loud; losing the findings with it would be absurd. A
+    # missing key and a stale one both land here: build_model only constructs
+    # the client, so an invalid credential does not surface until the call.
+    try:
+        model, label = build_model()
+        agent = Agent(model=model, tools=_tools(domain, log, client),
+                      system_prompt=SYSTEM)
+        log.append(client=client, stage="diagnose", kind="stage_start",
+                   human_text=f"Working out what to tell {client}",
+                   detail={"model": label})
+        reply = await agent.invoke_async(
+            f"Domain: {domain}\nBusiness: {client}\n\nFailing checks:\n{findings}\n\n"
+            "For each one, write the owner-facing explanation and say whether you "
+            "can fix it or a person must decide."
+        )
+    except Exception as exc:
+        log.append(client=client, stage="diagnose", kind="escalated",
+                   human_text="The findings below stand, but no model host "
+                              "answered, so they have no plain-English "
+                              "explanation.",
+                   detail={"error": f"{type(exc).__name__}: {exc}"})
+        return ""
+
     text = str(reply)
     log.append(client=client, stage="diagnose", kind="stage_done",
                human_text=text.strip()[:400], detail={"model": label})
@@ -113,7 +133,12 @@ async def explain(domain: str, client: str, failures: list[CheckResult],
 
 
 async def launch(domain: str, client: str, *, dkim_selector: str = "resend",
-                 runs_dir=None) -> RunLog:
+                 runs_dir=None) -> tuple[RunLog, list[CheckResult]]:
+    """Check a domain, then have the agent explain whatever failed.
+
+    Returns the log and the results, so a caller can answer from what already
+    ran rather than checking the domain a second time.
+    """
     log = RunLog(new_run_id(), runs_dir)
     results = await run_checks(domain, client, log, dkim_selector)
     failures = [r for r in results if r.status == "fail"]
@@ -122,7 +147,7 @@ async def launch(domain: str, client: str, *, dkim_selector: str = "resend",
     log.append(client=client, stage="verify", kind="run_done",
                human_text=f"Finished checking {domain}.",
                detail={"failures": [asdict(f)["check"] for f in failures]})
-    return log
+    return log, results
 
 
 class NeedsAPerson(Exception):
@@ -140,7 +165,7 @@ async def fix_spf(container: Container, domain: str, log: RunLog, *,
     someone else's live DNS.
     """
     client = container.client
-    finding = spf_single(domain)
+    finding = await asyncio.to_thread(spf_single, domain)
     if finding.status == "pass":
         log.append(client=client, stage="mail", kind="observation",
                    human_text="One sender policy, nothing to combine",
@@ -182,7 +207,7 @@ async def fix_spf(container: Container, domain: str, log: RunLog, *,
     zone = await cloudflare.zone_id(domain)
     await cloudflare.merge_spf(zone, domain, merge.merged)
 
-    after = spf_single(domain)
+    after = await asyncio.to_thread(spf_single, domain)
     log.append(client=client, stage="mail",
                kind="resolved" if after.status == "pass" else "finding",
                human_text=("One sender policy now, covering every sender."

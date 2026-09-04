@@ -20,7 +20,7 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-from munim.checks.dns import run_all_async, run_reachability_async
+from munim.agent.launch import launch
 from munim.connect.oauth import PROVIDERS as OAUTH_PROVIDERS
 from munim.connect.token import TokenConnector
 from munim.container import Container, KeychainBackend, UnknownClient
@@ -167,32 +167,22 @@ def build_server(backend=None, registry=None, runs_dir=None,
 
         `target` can be a client you have already added, a domain belonging to
         one, or a domain nobody has mentioned before - there is no setup step.
-        Results come from live DNS, not from a model. Open the control room to
-        watch, or read the report afterwards.
+        What passed or failed is decided by live DNS, never by a model. What a
+        failure *means* is the agent's part: it reads more records if it needs
+        them and writes the explanation the owner gets. Open the control room
+        to watch, or read the report afterwards.
         """
         record = resolve(target)
         client = record.name
         target_domain = record.domain or target
 
-        log = RunLog(new_run_id(), runs)
-        log.append(client=client, stage="verify", kind="stage_start",
-                   human_text=f"Checking {target_domain}")
-        # run_all_async, not run_all in a thread: the async path fans the
-        # lookups out and deduplicates them, which is where the time goes.
-        # Thirteen checks read eight distinct records, several of them twice.
-        results = await run_all_async(target_domain, dkim_selector=dkim_selector)
-        results += await run_reachability_async(target_domain)
-        for r in results:
-            if r.status == "skip":
-                continue
-            log.append(client=client, stage="verify",
-                       kind="observation" if r.status == "pass" else "finding",
-                       human_text=r.human_text or r.operator_text,
-                       detail={"check": r.check, "operator_text": r.operator_text,
-                               "evidence": r.evidence, "resolver": r.resolver})
+        # The agent, not a copy of its first half. This tool used to run the
+        # checks itself and return the JSON, so `launch` had no callers and the
+        # Strands agent never ran: the architecture diagram promised a
+        # diagnosis step that no code path could reach.
+        log, results = await launch(target_domain, client,
+                                    dkim_selector=dkim_selector, runs_dir=runs)
         failures = [r for r in results if r.status == "fail"]
-        log.append(client=client, stage="verify", kind="run_done",
-                   human_text=f"Checked {target_domain}.")
         report = write_report(log, domain=target_domain, business=client,
                               out_dir=reports)
         return {
