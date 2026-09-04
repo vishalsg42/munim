@@ -181,3 +181,55 @@ def test_the_environment_still_wins_over_a_shipped_id(monkeypatch):
 
     monkeypatch.setenv("CLOUDFLARE_OAUTH_CLIENT_ID", "mine")
     assert cli._client_id("cloudflare")[0] == "mine"
+
+
+def _flow(monkeypatch, keychain, *, extra_callback_params=""):
+    """Drive a real connect() with the browser step faked."""
+    import contextlib
+    import urllib.request
+
+    from munim.connect import oauth
+
+    def browser(url):
+        query = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(url).query))
+        with contextlib.suppress(Exception):
+            urllib.request.urlopen(
+                f"{oauth.REDIRECT_URI}?code=abc&state={query['state']}"
+                f"{extra_callback_params}", timeout=5).read()
+
+    monkeypatch.setattr(oauth.webbrowser, "open", browser)
+    monkeypatch.setattr(oauth.httpx, "post",
+                        lambda *a, **k: _FakeResponse({"access_token": "tok"}))
+    return OAuthConnector(keychain)
+
+
+def test_a_response_from_the_wrong_issuer_is_discarded(monkeypatch):
+    """RFC 9207. State proves the response answers our request; the issuer
+    proves it came from the server we sent the user to. Holding a dozen grants
+    across four providers, a response from the wrong issuer is a mix-up attack,
+    and the code must never be exchanged."""
+    keychain = FakeKeychain()
+    connector = _flow(monkeypatch, keychain,
+                      extra_callback_params="&iss=https://evil.example")
+
+    with pytest.raises(ValueError, match="issuer mismatch"):
+        connector.connect("Acme", "cloudflare", "cid", timeout=15)
+    assert keychain.get("Acme", "cloudflare") is None, "a token was stored anyway"
+
+
+def test_the_right_issuer_is_accepted(monkeypatch):
+    keychain = FakeKeychain()
+    connector = _flow(monkeypatch, keychain,
+                      extra_callback_params="&iss=https://dash.cloudflare.com")
+    connector.connect("Acme", "cloudflare", "cid", timeout=15)
+    assert keychain.get("Acme", "cloudflare") == "tok"
+
+
+def test_no_issuer_in_the_response_still_proceeds(monkeypatch):
+    """RFC 9207 keys rejection on the server advertising the parameter. Absent
+    and unadvertised means proceed, or every provider that has not adopted it
+    yet would stop working."""
+    keychain = FakeKeychain()
+    connector = _flow(monkeypatch, keychain)
+    connector.connect("Acme", "cloudflare", "cid", timeout=15)
+    assert keychain.get("Acme", "cloudflare") == "tok"

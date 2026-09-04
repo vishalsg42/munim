@@ -558,3 +558,55 @@ rather than reading about it:
 picked the scope that did not own the client's project. Nothing in the tool can
 catch that: the account picker is the one step only a person can get right,
 which is why `connect` prints the team id it just authorised.
+
+---
+
+## D24: OAuth follows MCP's own authorization spec, including where it does not apply
+
+**Context.** The operator's instruction was to keep the same experience MCP
+already provides rather than invent one, and to prefer OAuth over pasted tokens
+because the project is open source first. The MCP authorization specification
+(revision 2026-07-28) settles most of what that means.
+
+**What the spec says about a server like this one.** Its subject is an MCP
+server acting as an OAuth *resource server*: a client authenticating *to* the
+server over HTTP. Munim is local and speaks stdio, and the spec is explicit that
+stdio implementations "SHOULD NOT follow this specification, and instead
+retrieve credentials from the environment". So none of the resource-server
+machinery applies: no protected resource metadata, no `WWW-Authenticate`
+challenge, no audience validation of an inbound token, because there is no
+inbound token.
+
+What does apply is one sentence: "If the MCP server makes requests to upstream
+APIs, it may act as an OAuth client to them. The access token used at the
+upstream API is a separate token, issued by the upstream authorization server."
+That is exactly Munim's shape, and the design already matched: a token per
+`(client, provider)` in the OS keychain, never passed through, never returned to
+calling code.
+
+**Registration.** The spec names three ways a client obtains an id: Client ID
+Metadata Documents, pre-registration, and Dynamic Client Registration. As of
+2026-07-28 DCR is **deprecated**, demoted to MAY and "retained for backwards
+compatibility"; Client ID Metadata Documents, where the client id is an HTTPS
+URL the authorization server fetches metadata from, is the new SHOULD.
+
+Cloudflare's discovery document advertises neither: no `registration_endpoint`
+and no client-id-metadata support. That leaves pre-registration, which the spec
+lists as a first-class mechanism, and the decision is to ship the id rather than
+ask each user to make one. Cloudflare supports `none` for token endpoint
+authentication, so the flow is a public PKCE client and its id is public by
+design. A test refuses to let an id be shipped for any provider whose flow needs
+a secret.
+
+**Issuer validation.** The same revision requires clients to record the expected
+issuer and compare it against `iss` in the authorization response before the
+code is transmitted anywhere (RFC 9207), with a plain string comparison and no
+URI normalisation. This was missing: `state` was checked and `iss` was not.
+State proves a response answers our request; only the issuer proves it came from
+the server the user was sent to. For a tool holding a dozen grants across four
+providers that is the mix-up attack it exists to prevent.
+
+**Where this leaves Vercel.** Vercel's integration flow needs a client secret,
+so its id cannot ship and each operator registers their own integration. That
+asymmetry is a property of Vercel's flow, not a preference, and it is recorded
+here so nobody tries to "fix" it by committing a secret.

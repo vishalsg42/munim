@@ -59,6 +59,10 @@ class Provider:
     # Some providers reject PKCE-only public clients and require the secret too.
     needs_client_secret: bool = False
     extra_authorize: dict = field(default_factory=dict)
+    # The issuer, exactly as the provider's discovery document spells it. RFC
+    # 9207 comparison is a simple string match with no normalisation, so this is
+    # copied rather than derived from the authorize URL.
+    issuer: str = ""
     # Vercel's integration install flow is not an OAuth authorization endpoint.
     # The app is named by the slug in the path rather than a client_id
     # parameter, the scopes live in the Integrations Console rather than the
@@ -99,6 +103,7 @@ PROVIDERS: dict[str, Provider] = {
         name="cloudflare",
         authorize_url="https://dash.cloudflare.com/oauth2/auth",
         token_url="https://dash.cloudflare.com/oauth2/token",
+        issuer="https://dash.cloudflare.com",
         scopes=("account:read", "zone:read", "dns_records:edit", "offline_access"),
     ),
     # Registered via the Supabase Management API.
@@ -229,6 +234,21 @@ class OAuthConnector:
         if result.get("state") != state:
             # Mismatched state means the response is not ours. Never exchange it.
             raise ValueError("state mismatch; discarding the authorization response")
+
+        # RFC 9207. State proves the response answers our request; the issuer
+        # proves it came from the authorization server we sent the user to. In a
+        # tool holding a dozen clients' grants across four providers, a response
+        # from the wrong issuer is the mix-up attack this exists to stop, and it
+        # is checked before the code is transmitted anywhere. Comparison is a
+        # plain string match: RFC 3986 normalisation is explicitly forbidden.
+        returned_issuer = result.get("iss")
+        if returned_issuer is not None and spec.issuer:
+            if returned_issuer != spec.issuer:
+                raise ValueError(
+                    f"issuer mismatch: the response came back from "
+                    f"{returned_issuer!r}, not {spec.issuer!r}. Discarding it "
+                    "without exchanging the code."
+                )
         if "error" in result:
             raise RuntimeError(f"{provider} refused: {result.get('error_description', result['error'])}")
 
