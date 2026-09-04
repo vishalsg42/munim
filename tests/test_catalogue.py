@@ -126,3 +126,54 @@ def test_a_bad_certificate_is_not_retried(monkeypatch):
     monkeypatch.setattr("socket.create_connection", lambda *a, **k: _Sock())
     checks.cert_valid("acme.example", timeout=1, attempts=3)
     assert len(tries) == 1, f"retried a rejected certificate {len(tries)} times"
+
+
+def test_www_that_does_not_resolve_is_a_real_failure(monkeypatch):
+    """Customers typing www genuinely cannot reach it. That is the finding."""
+    import httpx
+
+    monkeypatch.setattr(checks.httpx, "get",
+                        lambda *a, **k: (_ for _ in ()).throw(httpx.ConnectError("no")))
+    monkeypatch.setattr(checks, "query", lambda *a, **k: [])
+    result = checks.www_redirect("acme.example", timeout=1)
+    assert result.status == "fail"
+    assert "does not resolve" in result.operator_text
+
+
+def test_www_that_resolves_but_times_out_is_undetermined(monkeypatch):
+    """Same exception, different answer. Reporting the network on the day as a
+    broken site is how an audit across a dozen clients trains people to ignore
+    it (D20)."""
+    import httpx
+
+    monkeypatch.setattr(checks.httpx, "get",
+                        lambda *a, **k: (_ for _ in ()).throw(httpx.ReadTimeout("slow")))
+    monkeypatch.setattr(checks, "query", lambda name, rdtype, *a, **k:
+                        ["1.2.3.4"] if rdtype == "A" else [])
+    result = checks.www_redirect("acme.example", timeout=1)
+    assert result.status == "skip"
+    assert "Undetermined" in result.operator_text
+
+
+def test_https_enforced_is_undetermined_when_http_never_answered(monkeypatch):
+    """Whether http redirects is unanswerable if http did not answer. Saying
+    "your site may not load" on that basis is a guess dressed as a finding."""
+    import httpx
+
+    monkeypatch.setattr(checks.httpx, "get",
+                        lambda *a, **k: (_ for _ in ()).throw(httpx.ConnectError("no")))
+    result = checks.https_enforced("acme.example", timeout=1)
+    assert result.status == "skip"
+    assert "undetermined" in result.operator_text
+
+
+def test_a_reachable_site_that_stays_on_http_still_fails(monkeypatch):
+    """The real finding must survive the retry logic."""
+    class Response:
+        url = "http://acme.example/"
+        status_code = 200
+
+    monkeypatch.setattr(checks.httpx, "get", lambda *a, **k: Response())
+    result = checks.https_enforced("acme.example", timeout=1)
+    assert result.status == "fail"
+    assert "without redirecting" in result.operator_text

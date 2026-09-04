@@ -330,14 +330,32 @@ def www_redirect(domain: str, timeout: float = 8.0) -> CheckResult:
     business's customers see an error."""
     if is_platform_domain(domain):
         return _not_their_domain("www_redirect", domain)
-    try:
-        response = httpx.get(f"https://www.{domain}", follow_redirects=True,
-                             timeout=timeout)
-    except httpx.HTTPError as exc:
-        return CheckResult("www_redirect", "fail",
-                           f"www.{domain} did not respond: {type(exc).__name__}.",
-                           "Customers who type www before your address will not reach "
-                           "your site.", resolver="https")
+    response = None
+    last: Exception | None = None
+    for _ in range(2):
+        try:
+            response = httpx.get(f"https://www.{domain}", follow_redirects=True,
+                                 timeout=timeout)
+            break
+        except httpx.HTTPError as exc:
+            last = exc
+
+    if response is None:
+        # Two different answers wearing the same exception. If www does not
+        # resolve at all then customers really cannot reach it, which is the
+        # finding. If it resolves and the request did not complete, that is the
+        # network on the day, and reporting it as a failure is how an audit
+        # across a dozen clients teaches people to ignore it (D20).
+        if not query(f"www.{domain}", "A") and not query(f"www.{domain}", "AAAA") \
+                and not query(f"www.{domain}", "CNAME"):
+            return CheckResult("www_redirect", "fail",
+                               f"www.{domain} does not resolve.",
+                               "Customers who type www before your address will not "
+                               "reach your site.", resolver="https")
+        return CheckResult("www_redirect", "skip",
+                           f"www.{domain} resolves but did not answer twice: "
+                           f"{type(last).__name__}. Undetermined rather than failing.",
+                           "", resolver="https", detail={"reason": "unreachable"})
     if response.status_code < 400:
         return CheckResult("www_redirect", "pass",
                            f"www.{domain} reaches the site ({response.status_code}).",
@@ -351,13 +369,25 @@ def www_redirect(domain: str, timeout: float = 8.0) -> CheckResult:
 
 def https_enforced(domain: str, timeout: float = 8.0) -> CheckResult:
     """Plain http must end up on https, or a browser shows 'Not secure'."""
-    try:
-        response = httpx.get(f"http://{domain}", follow_redirects=True, timeout=timeout)
-    except httpx.HTTPError as exc:
-        return CheckResult("https_enforced", "fail",
-                           f"http://{domain} did not respond: {type(exc).__name__}.",
-                           "Your site may not load for visitors who arrive without https.",
-                           resolver="http")
+    response = None
+    last: Exception | None = None
+    for _ in range(2):
+        try:
+            response = httpx.get(f"http://{domain}", follow_redirects=True,
+                                 timeout=timeout)
+            break
+        except httpx.HTTPError as exc:
+            last = exc
+
+    if response is None:
+        # Whether http redirects to https is unanswerable if http never
+        # answered. Saying "your site may not load" on that basis is a guess
+        # dressed as a finding, and an audit repeats it across every client.
+        return CheckResult("https_enforced", "skip",
+                           f"http://{domain} did not answer twice: "
+                           f"{type(last).__name__}. Whether it redirects is "
+                           f"undetermined rather than failing.",
+                           "", resolver="http", detail={"reason": "unreachable"})
     if str(response.url).startswith("https://"):
         return CheckResult("https_enforced", "pass", "Plain http redirects to https.",
                            "Visitors always arrive on the secure version of your site.",
