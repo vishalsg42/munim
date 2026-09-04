@@ -64,6 +64,16 @@ class KeychainBackend:
         except keyring.errors.KeyringError:
             return None
 
+    def forget(self, client: str, provider: str) -> bool:
+        """Remove a stored key. True if there was one."""
+        try:
+            if keyring.get_password(f"{self._prefix}:{provider}", client) is None:
+                return False
+            keyring.delete_password(f"{self._prefix}:{provider}", client)
+            return True
+        except keyring.errors.KeyringError:
+            return False
+
     def set(self, client: str, provider: str, secret: str) -> None:
         """Writes still raise. Silently not storing a credential the operator
         just pasted would be worse than failing in front of them."""

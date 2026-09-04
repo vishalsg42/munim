@@ -157,3 +157,26 @@ async def test_connecting_is_allowed_to_change_the_account():
     source = inspect.getsource(connect_and_identify)
     assert "verify=False" in source, \
         "connecting goes through the guard and cannot rebind a wrong account"
+
+
+def test_forgetting_a_session_removes_everything_about_it():
+    """A registration left behind is a client the provider still knows, and a
+    remembered account left behind would be compared against the next session
+    and refuse it."""
+    ring = Ring()
+    store = KeychainTokenStorage("c_1", "cloudflare", ring)
+    ring.set_password(store._service("tokens"), "c_1", '{"access_token": "t"}')
+    ring.set_password(store._service("client"), "c_1", '{"client_id": "x"}')
+    store.remember_account("Theirs")
+    store.remember_endpoint("https://x.test/mcp/secret/message")
+
+    gone = store.forget()
+
+    assert set(gone) == {"tokens", "client", "account", "endpoint"}
+    assert store._read("tokens") is None
+    assert store.account() is None
+    assert store.endpoint() is None
+
+
+def test_forgetting_what_was_never_there_removes_nothing():
+    assert KeychainTokenStorage("c_nobody", "cloudflare", Ring()).forget() == []

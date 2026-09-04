@@ -119,6 +119,23 @@ class KeychainTokenStorage(TokenStorage):
         except keyring.errors.KeyringError:
             return None
 
+    def forget(self) -> list[str]:
+        """Remove this client's session with this provider. Returns what went.
+
+        Everything, not just the token: a registration left behind is a client
+        the provider still knows, and a remembered account left behind would be
+        compared against the next session and refuse it.
+        """
+        gone = []
+        for kind in ("client", "tokens", "account", "endpoint"):
+            if self._backend.get_password(self._service(kind), self._client):
+                try:
+                    self._backend.delete_password(self._service(kind), self._client)
+                    gone.append(kind)
+                except Exception:
+                    pass
+        return gone
+
     def move_to(self, client: str) -> "KeychainTokenStorage":
         """Re-file this session under another client name.
 

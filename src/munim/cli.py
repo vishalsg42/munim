@@ -44,6 +44,108 @@ def _client_id(provider: str) -> tuple[str, str]:
 PROVISIONAL = "…connecting"
 
 
+def disconnect(client: str | None, provider: str | None, everything: bool) -> int:
+    """Remove stored credentials. Nothing else is touched.
+
+    Clients, domains and run logs stay: this removes what can act on somebody's
+    account and leaves what says who they are. Reconnecting is a browser
+    window, so the cost of being wrong here is minutes rather than data.
+    """
+    from munim.container import KeychainBackend
+    from munim.remote.servers import all_servers
+    from munim.remote.storage import KeychainTokenStorage
+
+    registry = _registry()
+    if everything:
+        records = registry.clients()
+    else:
+        try:
+            records = [registry.get(client)]
+        except UnknownClient as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+
+    providers = [provider] if provider else sorted(
+        {*all_servers(), "cloudflare", "vercel", "resend", "supabase"})
+
+    backend = KeychainBackend()
+    removed = []
+    for record in records:
+        for name in providers:
+            if backend.forget(record.id, name):
+                removed.append(f"{record.name}: {name} key")
+            gone = KeychainTokenStorage(record.id, name).forget()
+            if gone:
+                removed.append(f"{record.name}: {name} session")
+            # Credentials filed under the label, from before the identity split.
+            backend.forget(record.name, name)
+            KeychainTokenStorage(record.name, name).forget()
+
+    if everything:
+        removed += _sweep_orphans({r.id for r in records}, providers)
+
+    if not removed:
+        print("Nothing was stored.", file=sys.stderr)
+        return 0
+
+    for line in removed:
+        print(f"  removed {line}", file=sys.stderr)
+    print(f"{len(removed)} credential(s) gone. Clients and their domains are "
+          f"still here; reconnect with `munim connect <provider>`.",
+          file=sys.stderr)
+    return 0
+
+
+def _sweep_orphans(known: set[str], providers: list[str]) -> list[str]:
+    """Credentials filed under ids no client has any more.
+
+    These should not exist, and 36 of them did: a bug minted a fresh client id
+    on every read and the migration copied a real key under each one, so every
+    command left another copy of a live credential behind. The bug is fixed and
+    the copies are not, and a credential nothing can name is one nobody will
+    ever think to remove.
+
+    `keyring` has no way to list what it holds, so this shells out to the macOS
+    keychain. Elsewhere it says so rather than pretending the sweep happened.
+    """
+    import platform
+    import subprocess
+
+    from munim.container import KeychainBackend
+    from munim.remote.storage import KeychainTokenStorage
+
+    if platform.system() != "Darwin":
+        print("  (orphan sweep only works on macOS: keyring cannot list what "
+              "it holds, so there is nothing to enumerate elsewhere)",
+              file=sys.stderr)
+        return []
+
+    try:
+        dump = subprocess.run(["security", "dump-keychain"], capture_output=True,
+                              text=True, timeout=60).stdout
+    except Exception:
+        return []
+
+    found: set[str] = set()
+    account = None
+    for line in dump.splitlines():
+        if '"acct"' in line and '="' in line:
+            account = line.split('="', 1)[1].rstrip('"')
+        elif "munim" in line and account and account.startswith("c_"):
+            found.add(account)
+
+    orphans = found - known
+    backend = KeychainBackend()
+    removed = []
+    for orphan in sorted(orphans):
+        for provider in providers:
+            if backend.forget(orphan, provider):
+                removed.append(f"orphan {orphan}: {provider} key")
+            if KeychainTokenStorage(orphan, provider).forget():
+                removed.append(f"orphan {orphan}: {provider} session")
+    return removed
+
+
 def add_server(name: str, url: str) -> int:
     """Point Munim at any MCP server and record what it needs.
 
@@ -519,6 +621,12 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("old")
     r.add_argument("new")
 
+    d = sub.add_parser("disconnect", help="remove stored credentials")
+    d.add_argument("client", nargs="?")
+    d.add_argument("provider", nargs="?")
+    d.add_argument("--all", action="store_true", dest="everything",
+                   help="every client and every provider")
+
     a = sub.add_parser("add-server", help="point Munim at any MCP server")
     a.add_argument("name")
     a.add_argument("url")
@@ -555,6 +663,11 @@ def main(argv: list[str] | None = None) -> int:
         else:
             parser.error(f"unknown provider {args.client!r}. Choose from: "
                          + ", ".join(sorted({*PROVIDERS, "resend", *all_servers()})))
+
+    if args.command == "disconnect":
+        if not args.everything and not args.client:
+            parser.error("name a client, or pass --all")
+        return disconnect(args.client, args.provider, args.everything)
 
     if args.command == "add-server":
         return add_server(args.name, args.url)
