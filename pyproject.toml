@@ -1,6 +1,6 @@
 [project]
 name = "munim"
-version = "0.2.0"
+version = "0.2.1"
 description = "One MCP server holding a live session with every client's account at once."
 readme = "README.md"
 requires-python = ">=3.10"
