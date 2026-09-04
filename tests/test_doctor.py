@@ -40,11 +40,25 @@ def test_every_finding_that_is_not_ok_carries_a_fix(monkeypatch, tmp_path):
             assert finding.fix, f"{finding.what} reports a problem with no fix"
 
 
-def test_resend_is_reported_as_not_applicable_not_as_missing():
-    """It publishes no OAuth endpoint, so 'not registered' would be misleading."""
+def test_resend_is_reported_as_reachable_now_that_it_runs_an_mcp_server():
+    """This used to assert "not applicable", and that was right while Resend
+    published no OAuth endpoint of its own. It runs an MCP server, which does,
+    so the honest report is that it is ready rather than exempt."""
     resend = [f for f in doctor._oauth_apps() if "resend" in f.what][0]
     assert resend.status == doctor.OK
-    assert "not applicable" in resend.detail
+    assert "MCP server" in resend.detail
+
+
+def test_a_provider_with_an_mcp_server_is_never_told_to_register_an_app():
+    """Nobody registers an application for a provider that registers a client
+    on demand. Telling them to is worse than saying nothing."""
+    from munim.remote.servers import SERVERS
+
+    for finding in doctor._oauth_apps():
+        provider = finding.what.split(":", 1)[1].strip()
+        if provider in SERVERS:
+            assert finding.status == doctor.OK, provider
+            assert not finding.fix, f"{provider} is told to register an app"
 
 
 def test_an_unconnected_client_is_a_warning_with_the_command(tmp_path):

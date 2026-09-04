@@ -125,3 +125,62 @@ def test_the_agent_is_built_with_printing_turned_off():
     source = inspect.getsource(agent_module.explain)
     assert "callback_handler=None" in source, \
         "Agent must be constructed with callback_handler=None"
+
+
+async def test_the_agent_gets_provider_tools_for_connected_providers(tmp_path, monkeypatch):
+    """Built and unreachable is this project's recurring fault: the whole
+    Strands agent was that way this morning. A toolset module nothing calls is
+    the same bug waiting."""
+    import munim.remote.storage as storage_mod
+    import munim.remote.toolsets as toolsets_mod
+
+    connected = {("acme", "cloudflare")}
+    monkeypatch.setattr(
+        storage_mod.KeychainTokenStorage, "_read",
+        lambda self, kind: {"access_token": "t"} if (self._client, self._provider) in connected else None)
+
+    built = []
+    monkeypatch.setattr(toolsets_mod, "toolset_for",
+                        lambda c, p, **k: built.append((c, p)) or _Stub(p))
+    monkeypatch.setattr(agent_module, "build_model", lambda: (object(), "fake"))
+
+    captured = {}
+
+    class Recording(_FakeAgent):
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+            super().__init__(**kwargs)
+
+    monkeypatch.setattr(agent_module, "Agent", Recording)
+
+    server, _ = _server(tmp_path)
+    await server.call_tool("check", {"target": "acme"})
+
+    assert built == [("acme", "cloudflare")], \
+        "only the connected provider should have a toolset built"
+    names = [getattr(t, "_prefix", None) for t in captured["tools"]]
+    assert "cloudflare" in names, f"the agent did not receive it: {names}"
+
+
+async def test_an_unconnected_provider_does_not_open_a_browser(tmp_path, monkeypatch):
+    """Building a toolset for a provider the client has not connected would
+    start an OAuth flow in the middle of a diagnosis."""
+    import munim.remote.storage as storage_mod
+    import munim.remote.toolsets as toolsets_mod
+
+    monkeypatch.setattr(storage_mod.KeychainTokenStorage, "_read",
+                        lambda self, kind: None)
+    built = []
+    monkeypatch.setattr(toolsets_mod, "toolset_for",
+                        lambda c, p, **k: built.append((c, p)) or _Stub(p))
+    monkeypatch.setattr(agent_module, "build_model", lambda: (object(), "fake"))
+    monkeypatch.setattr(agent_module, "Agent", _FakeAgent)
+
+    server, _ = _server(tmp_path)
+    await server.call_tool("check", {"target": "acme"})
+    assert built == [], "a toolset was built for a provider with no session"
+
+
+class _Stub:
+    def __init__(self, prefix):
+        self._prefix = prefix

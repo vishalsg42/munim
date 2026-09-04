@@ -68,6 +68,40 @@ def _tools(domain: str, log: RunLog, client: str):
     return [look_up]
 
 
+def _connected_toolsets(client: str, log: RunLog) -> list:
+    """This client's provider tools, from the providers' own MCP servers.
+
+    Only where a session already exists. Building a toolset for a provider the
+    client has not connected would open a browser in the middle of a diagnosis,
+    which is not a thing an agent gets to decide to do.
+
+    Failures here are logged and dropped rather than raised: the checks have
+    already run and the findings stand, so losing a provider's tools costs the
+    agent some evidence, not the operator their answer.
+    """
+    from munim.remote.servers import SERVERS
+    from munim.remote.storage import KeychainTokenStorage
+    from munim.remote.toolsets import toolset_for
+
+    ready = []
+    for provider in sorted(SERVERS):
+        try:
+            if KeychainTokenStorage(client, provider)._read("tokens") is None:
+                continue
+            ready.append(toolset_for(client, provider))
+        except Exception as exc:  # a provider being unreachable is not fatal
+            log.append(client=client, stage="diagnose", kind="observation",
+                       human_text=f"{provider} tools unavailable this run",
+                       detail={"provider": provider,
+                               "error": f"{type(exc).__name__}: {exc}"})
+    if ready:
+        log.append(client=client, stage="diagnose", kind="observation",
+                   human_text=f"{len(ready)} provider toolset(s) available "
+                              f"for {client}",
+                   detail={"providers": [t._prefix for t in ready]})
+    return ready
+
+
 async def run_checks(domain: str, client: str, log: RunLog,
                      dkim_selector: str = "resend") -> list[CheckResult]:
     """Deterministic. Each result is written to the run log as it lands."""
@@ -114,7 +148,8 @@ async def explain(domain: str, client: str, failures: list[CheckResult],
         # no redirect in between. Left at the default this agent interleaves
         # prose with the protocol and the coding agent's connection dies. It
         # did not, in the first run over stdio, purely on timing.
-        agent = Agent(model=model, tools=_tools(domain, log, client),
+        tools = _tools(domain, log, client) + _connected_toolsets(client, log)
+        agent = Agent(model=model, tools=tools,
                       system_prompt=SYSTEM, callback_handler=None)
         log.append(client=client, stage="diagnose", kind="stage_start",
                    human_text=f"Working out what to tell {client}",

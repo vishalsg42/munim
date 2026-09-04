@@ -70,32 +70,69 @@ def _clients(registry: Registry) -> list[Finding]:
     if not records:
         return [Finding(WARN, "Clients", "none registered yet",
                         fix='ask your agent: check <a domain you look after>')]
+    from munim.remote.servers import SERVERS
+    from munim.remote.storage import KeychainTokenStorage
+
     backend = KeychainBackend()
     out = [Finding(OK, "Clients", f"{len(records)} registered")]
     for record in records:
         container = Container(record.name, backend)
-        connected = [p for p in PROVIDERS if container.has(p)]
-        if connected:
-            out.append(Finding(OK, f"  {record.name}", ", ".join(connected)))
+        # Two ways a client can be connected, and they are not the same thing:
+        # a stored API credential this tool calls with, or a session with the
+        # provider's own MCP server. Reporting only the first hid the second.
+        keys = [p for p in PROVIDERS if container.has(p)]
+        sessions = [p for p in sorted(SERVERS)
+                    if KeychainTokenStorage(record.name, p)._read("tokens")]
+
+        parts = []
+        if keys:
+            parts.append(", ".join(keys))
+        if sessions:
+            parts.append(", ".join(f"{p} (mcp)" for p in sessions))
+
+        if parts:
+            out.append(Finding(OK, f"  {record.name}", " · ".join(parts)))
         else:
-            out.append(Finding(WARN, f"  {record.name}", "nothing connected",
-                               fix=f'munim connect "{record.name}" cloudflare'))
+            out.append(Finding(
+                WARN, f"  {record.name}", "nothing connected",
+                fix=f'munim connect "{record.name}" cloudflare --via-mcp'))
     return out
 
 
 def _oauth_apps() -> list[Finding]:
+    """Whether a provider can be logged in to, and by which of the two routes.
+
+    A registered application is no longer the only way in. Every provider that
+    runs its own MCP server registers a client on demand, so `--via-mcp` needs
+    nothing set up at all, and telling someone to go and register an
+    application when they do not have to is worse than saying nothing.
+    """
+    from munim.remote.servers import SERVERS
+
     out = []
     for provider in sorted(OAUTH_PROVIDERS):
         client_id = os.environ.get(f"{provider.upper()}_OAUTH_CLIENT_ID")
+        has_mcp = provider in SERVERS
         if client_id:
-            out.append(Finding(OK, f"OAuth app: {provider}", "registered"))
+            out.append(Finding(OK, f"Login: {provider}",
+                               "registered application"))
+        elif has_mcp:
+            out.append(Finding(
+                OK, f"Login: {provider}",
+                "ready, through the provider's own MCP server"))
         else:
             out.append(Finding(
-                WARN, f"OAuth app: {provider}", "not registered, but key entry still works",
+                WARN, f"Login: {provider}", "no application, and no MCP server",
                 fix=f"register an app with redirect {REDIRECT_URI}, then set "
-                    f"{provider.upper()}_OAUTH_CLIENT_ID in .env"))
-    out.append(Finding(OK, "OAuth app: resend",
-                       "not applicable: Resend publishes no OAuth endpoint"))
+                    f"{provider.upper()}_OAUTH_CLIENT_ID in .env, or paste a "
+                    f"key with `munim connect <client> {provider} --token`"))
+
+    if "resend" in SERVERS:
+        out.append(Finding(OK, "Login: resend",
+                           "ready, through the provider's own MCP server"))
+    else:
+        out.append(Finding(OK, "Login: resend",
+                           "key only: Resend publishes no OAuth endpoint"))
     return out
 
 
