@@ -74,3 +74,55 @@ def test_the_skip_sentence_agrees_with_its_subject():
     assert "DNS belongs" in by_name["ns_delegated"].operator_text
     assert "the web address belongs" in by_name["www_redirect"].operator_text
     assert "mail settings belong to" in by_name["spf_single"].operator_text
+
+
+def test_an_unreachable_host_is_not_a_broken_certificate(monkeypatch):
+    """Found by auditing a dozen clients at once: a transient timeout was
+    reported as a broken certificate on a domain whose certificate had 84 days
+    left. A check that cries wolf is worth less than no check (D20)."""
+    import socket
+
+    def refuse(*a, **k):
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(socket, "create_connection", refuse)
+    result = checks.cert_valid("acme.example", timeout=1, attempts=2)
+    assert result.status == "skip", "a timeout was reported as a failure"
+    assert "undetermined" in result.operator_text
+
+
+def test_a_certificate_that_does_not_verify_is_a_failure(monkeypatch):
+    """The other half. Retrying a rejected certificate does not change it."""
+    import ssl
+
+    class Ctx:
+        def wrap_socket(self, sock, server_hostname=None):
+            raise ssl.SSLCertVerificationError("certificate has expired")
+
+    monkeypatch.setattr(ssl, "create_default_context", lambda: Ctx())
+    monkeypatch.setattr("socket.create_connection", lambda *a, **k: _Sock())
+    result = checks.cert_valid("acme.example", timeout=1)
+    assert result.status == "fail"
+    assert "does not verify" in result.operator_text
+
+
+class _Sock:
+    def __enter__(self): return self
+    def __exit__(self, *a): return False
+
+
+def test_a_bad_certificate_is_not_retried(monkeypatch):
+    """Retrying it wastes the operator's time and changes nothing."""
+    import ssl
+
+    tries = []
+
+    class Ctx:
+        def wrap_socket(self, sock, server_hostname=None):
+            tries.append(1)
+            raise ssl.SSLCertVerificationError("certificate has expired")
+
+    monkeypatch.setattr(ssl, "create_default_context", lambda: Ctx())
+    monkeypatch.setattr("socket.create_connection", lambda *a, **k: _Sock())
+    checks.cert_valid("acme.example", timeout=1, attempts=3)
+    assert len(tries) == 1, f"retried a rejected certificate {len(tries)} times"

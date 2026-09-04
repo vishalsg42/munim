@@ -138,6 +138,7 @@ else is in the repository.
 | `list_clients` | every client and what each is connected to |
 | `find_across_clients` | one deterministic question over all of them at once |
 | `ask_across_clients` | one open question over all of them, using their own accounts, read-only |
+| `audit_all_clients` | the whole catalogue against every client, silent when they all pass |
 | `check` | the 13-check catalogue against a client or a bare domain |
 | `client_status` | what is known about one client |
 | `add_client` | register one |

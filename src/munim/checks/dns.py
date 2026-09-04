@@ -367,18 +367,44 @@ def https_enforced(domain: str, timeout: float = 8.0) -> CheckResult:
                        "of your site.", evidence=str(response.url), resolver="http")
 
 
-def cert_valid(domain: str, days: int = 14, timeout: float = 8.0) -> CheckResult:
-    """A certificate that expires unnoticed replaces the site with a warning."""
+def cert_valid(domain: str, days: int = 14, timeout: float = 8.0,
+               attempts: int = 2) -> CheckResult:
+    """A certificate that expires unnoticed replaces the site with a warning.
+
+    A rejected certificate and an unreachable host are different answers and
+    used to be the same one. Auditing a dozen clients at once made the
+    difference visible: a transient timeout was reported as a broken
+    certificate on a domain whose certificate had 84 days left. A check that
+    cries wolf is worth less than no check (D20), so a handshake that could not
+    be completed is now reported as not determined rather than as a failure.
+    """
     context = ssl.create_default_context()
-    try:
-        with socket.create_connection((domain, 443), timeout=timeout) as sock:
-            with context.wrap_socket(sock, server_hostname=domain) as tls:
-                cert = tls.getpeercert()
-    except (OSError, ssl.SSLError) as exc:
-        return CheckResult("cert_valid", "fail",
-                           f"Could not complete a TLS handshake with {domain}: {exc}.",
-                           "Visitors may see a security warning instead of your site.",
-                           resolver="tls")
+    last: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            with socket.create_connection((domain, 443), timeout=timeout) as sock:
+                with context.wrap_socket(sock, server_hostname=domain) as tls:
+                    cert = tls.getpeercert()
+            break
+        except ssl.SSLCertVerificationError as exc:
+            # The host answered and the certificate is not acceptable. That is
+            # the failure this check exists to find, and retrying will not
+            # change it.
+            return CheckResult("cert_valid", "fail",
+                               f"{domain} presented a certificate that does not "
+                               f"verify: {getattr(exc, 'verify_message', None) or exc}.",
+                               "Visitors see a security warning instead of your site.",
+                               resolver="tls")
+        except (OSError, ssl.SSLError) as exc:
+            last = exc
+    else:
+        return CheckResult("cert_valid", "skip",
+                           f"Could not complete a TLS handshake with {domain} "
+                           f"after {attempts} attempts: {last}. Not the same as "
+                           f"a bad certificate, so this is undetermined rather "
+                           f"than failing.",
+                           "", resolver="tls",
+                           detail={"reason": "unreachable"})
     expires = datetime.strptime(cert["notAfter"], "%b %d %H:%M:%S %Y %Z").replace(
         tzinfo=timezone.utc)
     left = (expires - datetime.now(timezone.utc)).days

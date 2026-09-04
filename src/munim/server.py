@@ -21,6 +21,7 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 
 from munim.agent.launch import launch
+from munim.checks.dns import run_all_async, run_reachability_async
 from munim.connect.oauth import PROVIDERS as OAUTH_PROVIDERS
 from munim.connect.token import TokenConnector
 from munim.container import Container, KeychainBackend, UnknownClient
@@ -41,7 +42,8 @@ MUTATING = {"connect_provider", "plan_mail_setup", "apply_mail_setup"}
 # Tools that span more than one client's container. None of them may mutate, and
 # the set is named here rather than inferred, so adding one is a decision
 # somebody makes rather than a thing that happens.
-CROSS_CLIENT = {"find_across_clients", "ask_across_clients"}
+CROSS_CLIENT = {"find_across_clients", "ask_across_clients",
+                "audit_all_clients"}
 
 PROVIDERS = ("cloudflare", "vercel", "resend")
 
@@ -160,6 +162,75 @@ def build_server(backend=None, registry=None, runs_dir=None,
             "clients_read": reachable,
             "clients_registered": len(records),
             "answer": answer,
+        }
+
+    @server.tool()
+    async def audit_all_clients(dkim_selector: str = "resend") -> dict:
+        """Check every client at once and report only what needs attention.
+
+        The thing an operator actually wants running: silent when everything
+        passes, and a list when it does not. Nobody runs thirteen checks by
+        hand on a dozen clients, which is why the failures that break nothing
+        visible survive for weeks.
+
+        Read-only across every client, like `find_across_clients`. It answers
+        the whole catalogue rather than one question, and it names the client
+        beside every finding, because a finding without one is useless to
+        somebody looking after a dozen.
+        """
+        records = [r for r in registry.clients() if r.domain]
+        if not records:
+            return {"checked": 0, "clients": [],
+                    "note": "no client has a domain yet, so there is nothing to "
+                            "audit. Ask about a domain and it registers itself."}
+
+        log = RunLog(new_run_id(), runs)
+        log.append(client="all clients", stage="verify", kind="stage_start",
+                   human_text=f"Auditing {len(records)} clients")
+
+        async def audit(record):
+            results = await run_all_async(record.domain, dkim_selector=dkim_selector)
+            results += await run_reachability_async(record.domain)
+            return record, results
+
+        done = await asyncio.gather(*(audit(r) for r in records),
+                                    return_exceptions=True)
+
+        needs_attention, unreachable, clean = [], [], []
+        for outcome in done:
+            if isinstance(outcome, BaseException):
+                unreachable.append({"error": f"{type(outcome).__name__}: {outcome}"})
+                continue
+            record, results = outcome
+            failures = [r for r in results if r.status == "fail"]
+            if not failures:
+                clean.append(record.name)
+                continue
+            for failure in failures:
+                needs_attention.append({
+                    "client": record.name, "domain": record.domain,
+                    "check": failure.check, "says": failure.human_text,
+                    "evidence": failure.evidence, "resolver": failure.resolver,
+                })
+                log.append(client=record.name, stage="verify", kind="finding",
+                           human_text=failure.human_text or failure.operator_text,
+                           detail={"check": failure.check,
+                                   "evidence": failure.evidence,
+                                   "resolver": failure.resolver})
+
+        log.append(client="all clients", stage="verify", kind="run_done",
+                   human_text=(f"{len(clean)} of {len(records)} clients clean"
+                               if not needs_attention else
+                               f"{len(needs_attention)} thing(s) need attention "
+                               f"across {len(records) - len(clean)} client(s)"))
+
+        return {
+            "checked": len(records),
+            "clean": clean,
+            "needs_attention": needs_attention,
+            "unreachable": unreachable,
+            "run_id": log.run_id,
+            "report": f"http://127.0.0.1:8977/reports/{log.run_id}",
         }
 
     # ---- repair ----------------------------------------------------------
