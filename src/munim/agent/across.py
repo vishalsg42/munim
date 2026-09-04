@@ -1,114 +1,74 @@
-"""One question, answered over every client at once.
+"""One question, answered across every client at once.
 
-This is the capability that does not exist today. Every provider dashboard is
-single-account, so "which of my clients has a domain expiring this quarter?"
-cannot be asked from anywhere - not because it is hard, but because there is no
-place to stand that can see all of them.
+This is the capability D15 says nothing else does, and until now it was a
+deterministic DNS sweep: useful, but it could only answer questions the check
+catalogue already asked. With a session per client against the providers' own
+MCP servers, the same shape answers questions nobody wrote a check for, because
+the provider's own tools are there.
 
-**On not using a Strands Graph here.** Graph runs its nodes concurrently
-(`asyncio.create_task` + `gather`), and one agent node per client would look
-impressive in an architecture diagram. It would also be wrong. The per-client
-work is deterministic DNS lookups that need no model at all, so a graph of
-twelve agents would make twelve model calls to do work that needs zero. That is
-feature-counting, not engineering.
-
-What genuinely needs to be concurrent is the **I/O**, and the first attempt got
-even that wrong. Fanning out one thread per client left each client doing
-thirteen sequential lookups inside it, and measured *slower* than serial: 0.9x.
-The concurrency was at the wrong level.
-
-Fanning out at the level of the lookups, and deduplicating the ones several
-checks share, measures:
-
-    6 clients, cold  : 5.33s serial → 2.61s concurrent   (2.0x)
-    4 clients, warm  : 1.23s serial → 2.26s concurrent   (0.5x)
-
-Both numbers are worth keeping. Against a warm resolver cache a lookup costs
-microseconds and thread overhead dominates, so concurrency loses. The case that
-matters is the cold one - an operator asking a question across a dozen clients
-they have not touched today - and there it halves the wait.
-
-Exactly one model call turns the result into an answer for a person. The model
-is used where judgement is needed and nowhere else (D7).
+The safety property is structural, not instructed. Every toolset here is built
+read-only, so a tool that changes anything is not present to be called. "Read
+across, write within" (D5) stops depending on the model doing as it is told.
 """
 
-import asyncio
-from dataclasses import dataclass
+from strands import Agent
 
-from munim.checks.dns import CheckResult, run_all_async
-from munim.registry import ClientRecord, Registry
+from munim.agent.model import build_model
+from munim.remote.servers import SERVERS
+from munim.remote.storage import KeychainTokenStorage
+from munim.remote.toolsets import toolsets_for
 
-# What a question maps to. Deterministic, so the model cannot widen a question
-# into checks the operator did not ask about.
-QUESTIONS: dict[str, tuple[str, ...]] = {
-    "email_unprotected": ("spf_single", "dkim_present", "dkim_chunking"),
-    "no_dmarc": ("dmarc_present", "dmarc_policy"),
-    "domain_unreachable": ("apex_resolves", "ns_delegated"),
-    "certificate_risk": ("caa_allows",),
-    "everything": (),  # every failing check
-}
+SYSTEM = """You answer one question about several clients at once.
 
+You have each client's own tools, named with that client's prefix. A tool named
+acme_ltd_* acts on Acme Ltd's account and no other. Never assume two clients
+share anything.
 
-@dataclass
-class Hit:
-    client: str
-    domain: str
-    check: str
-    says: str
-    operator_text: str
+Every tool you have is read-only. If answering would require changing something,
+say what would have to change and which client it belongs to. Do not claim you
+changed it.
+
+Name the client beside every fact. A finding without a client attached is
+useless to someone who looks after a dozen of them.
+
+Be brief. No preamble."""
 
 
-async def _for_client(record: ClientRecord, wanted: tuple[str, ...]) -> list[Hit]:
-    if not record.domain:
-        return []
-    # Fans out at the lookup level, which is where the time actually goes.
-    results: list[CheckResult] = await run_all_async(record.domain)
-    return [
-        Hit(client=record.name, domain=record.domain, check=r.check,
-            says=r.human_text, operator_text=r.operator_text)
-        for r in results
-        if r.status == "fail" and (not wanted or r.check in wanted)
-    ]
+def connected_clients(clients: list[str], provider: str, backend=None) -> list[str]:
+    """Those with a session for this provider. Asking about the rest would open
+    a browser, which is not a thing a question gets to do."""
+    def has_session(client: str) -> bool:
+        store = (KeychainTokenStorage(client, provider, backend) if backend
+                 else KeychainTokenStorage(client, provider))
+        return store._read("tokens") is not None
+
+    return [c for c in clients if has_session(c)]
 
 
-async def scan(registry: Registry, question: str = "everything") -> list[Hit]:
-    """Fan out across every client concurrently and collect what is failing."""
-    if question not in QUESTIONS:
-        raise ValueError(
-            f"unknown question {question!r}; try one of {', '.join(sorted(QUESTIONS))}"
-        )
-    wanted = QUESTIONS[question]
-    clients = [c for c in registry.clients() if c.domain]
-    if not clients:
-        return []
-
-    batches = await asyncio.gather(
-        *(_for_client(record, wanted) for record in clients),
-        return_exceptions=True,
-    )
-    hits: list[Hit] = []
-    for batch in batches:
-        # One client's DNS being unreachable must not lose the other eleven.
-        if isinstance(batch, BaseException):
+async def ask(question: str, clients: list[str], *, backend=None) -> str:
+    """Answer `question` using every connected client's read-only tools."""
+    toolsets = []
+    reached: dict[str, list[str]] = {}
+    for provider in sorted(SERVERS):
+        present = connected_clients(clients, provider, backend)
+        if not present:
             continue
-        hits.extend(batch)
-    return hits
+        reached[provider] = present
+        toolsets += toolsets_for(present, provider, backend=backend,
+                                 read_only=True)
 
+    if not toolsets:
+        return ("No client has a session with a provider yet, so there is "
+                "nothing to read across. Connect one with "
+                "`munim connect \"<client>\" cloudflare --via-mcp`.")
 
-def summarise(hits: list[Hit]) -> str:
-    """A plain answer without a model call, for when one is not warranted.
+    model, _ = build_model()
+    agent = Agent(model=model, tools=toolsets, system_prompt=SYSTEM,
+                  callback_handler=None)
 
-    Most cross-client questions have a factual answer: these clients, this
-    problem. Spending a model call to restate a list is the kind of thing that
-    makes an agent feel slow and adds nothing.
-    """
-    if not hits:
-        return "Nothing failing across any client."
-    by_client: dict[str, list[Hit]] = {}
-    for hit in hits:
-        by_client.setdefault(hit.client, []).append(hit)
-    lines = []
-    for client, items in sorted(by_client.items()):
-        problems = ", ".join(sorted({h.check for h in items}))
-        lines.append(f"{client} ({items[0].domain}): {problems}")
-    return "\n".join(lines)
+    roster = "\n".join(f"- {p}: {', '.join(cs)}" for p, cs in sorted(reached.items()))
+    reply = await agent.invoke_async(
+        f"Clients and the providers each is connected to:\n{roster}\n\n"
+        f"Question: {question}"
+    )
+    return str(reply)

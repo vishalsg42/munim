@@ -9,7 +9,7 @@ that actually matters instead: anything that *mutates* names its client.
 
 import pytest
 
-from munim.server import MUTATING, build_server
+from munim.server import CROSS_CLIENT, MUTATING, build_server
 from munim.registry import ClientRecord, Registry
 
 
@@ -35,13 +35,31 @@ async def test_every_mutating_tool_names_its_client(tmp_path):
         assert "client" in required, f"{name} mutates without naming a client"
 
 
-async def test_the_only_cross_client_tool_is_read_only(tmp_path):
-    """Read across, write within (D5). If a tool spans containers it must not
-    be able to change anything."""
+async def test_no_cross_client_tool_can_change_anything(tmp_path):
+    """Read across, write within (D5). A tool that spans containers must not be
+    able to mutate.
+
+    Named after the set rather than after one tool. The earlier version
+    asserted `find_across_clients` specifically, so when a second cross-client
+    tool landed it kept passing without covering it: the exact failure this
+    file's docstring warns about."""
     server, _, _ = _server(tmp_path)
     names = {t.name for t in await server.list_tools()}
-    assert "find_across_clients" in names
-    assert "find_across_clients" not in MUTATING
+
+    assert CROSS_CLIENT <= names, f"declared but not registered: {CROSS_CLIENT - names}"
+    for tool in CROSS_CLIENT:
+        assert tool not in MUTATING, f"{tool} spans clients and mutates"
+
+
+async def test_a_new_across_tool_has_to_be_declared(tmp_path):
+    """So the rule above cannot be escaped by adding a tool and not telling it."""
+    server, _, _ = _server(tmp_path)
+    looks_cross_client = {t.name for t in await server.list_tools()
+                          if "across" in t.name or "all_clients" in t.name}
+    undeclared = looks_cross_client - CROSS_CLIENT
+    assert not undeclared, (
+        f"{undeclared} span clients by their name but are not in CROSS_CLIENT, "
+        "so nothing checks they are read-only")
 
 
 async def test_no_tool_advertises_returning_a_credential(tmp_path):

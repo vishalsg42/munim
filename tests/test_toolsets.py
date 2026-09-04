@@ -80,3 +80,39 @@ def test_each_client_authenticates_as_itself():
     assert b.context.client_metadata.client_name == "Munim (Kloudfirst)"
     # and their stores do not share a key
     assert a.context.storage._client != b.context.storage._client
+
+
+class _Tool:
+    def __init__(self, read_only=None, destructive=None, annotated=True):
+        from types import SimpleNamespace
+        annotations = (SimpleNamespace(readOnlyHint=read_only,
+                                       destructiveHint=destructive)
+                       if annotated else None)
+        self.mcp_tool = SimpleNamespace(annotations=annotations)
+
+
+def test_only_provably_read_only_tools_cross_clients():
+    """Default deny. "Read across, write within" has to be a property of which
+    tools exist, not an instruction the model is asked to follow: an
+    instruction is not a boundary."""
+    from munim.remote.toolsets import _is_read_only
+
+    assert _is_read_only(_Tool(read_only=True)) is True
+    assert _is_read_only(_Tool(read_only=False)) is False
+    assert _is_read_only(_Tool(annotated=False)) is False, \
+        "an unannotated tool is not provably read-only"
+    assert _is_read_only(_Tool(read_only=None)) is False
+
+
+def test_a_destructive_tool_is_excluded_even_if_it_claims_read_only():
+    from munim.remote.toolsets import _is_read_only
+
+    assert _is_read_only(_Tool(read_only=True, destructive=True)) is False
+
+
+def test_a_cross_client_toolset_carries_the_filter_and_a_single_client_does_not():
+    """Write within: naming one client is what unlocks its writes."""
+    across = toolset_for("Acme", "cloudflare", backend=FakeKeyring(), read_only=True)
+    within = toolset_for("Acme", "cloudflare", backend=FakeKeyring())
+    assert across._tool_filters is not None
+    assert within._tool_filters is None

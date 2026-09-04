@@ -33,6 +33,11 @@ from munim.runlog import RunLog, all_runs, new_run_id
 # explicit `client`; adding a mutating tool without it fails the build.
 MUTATING = {"connect_provider"}
 
+# Tools that span more than one client's container. None of them may mutate, and
+# the set is named here rather than inferred, so adding one is a decision
+# somebody makes rather than a thing that happens.
+CROSS_CLIENT = {"find_across_clients", "ask_across_clients"}
+
 PROVIDERS = ("cloudflare", "vercel", "resend")
 
 
@@ -124,6 +129,32 @@ def build_server(backend=None, registry=None, runs_dir=None,
                     hits.append({"client": record.name, "domain": record.domain,
                                  "check": result.check, "says": result.human_text})
         return hits
+
+    @server.tool()
+    async def ask_across_clients(question: str) -> dict:
+        """Ask one question about every client at once, using their own accounts.
+
+        Where `find_across_clients` answers the questions the check catalogue
+        already asks, this reaches each client's provider account through that
+        provider's own MCP server, so it can answer ones nobody wrote a check
+        for. Only clients with a session are included.
+
+        Read-only by construction: every tool it holds is filtered to those the
+        provider marks read-only, so a tool that changes anything is not
+        present to be called. Naming one client is what unlocks writes (D5).
+        """
+        from munim.agent.across import ask, connected_clients
+        from munim.remote.servers import SERVERS
+
+        names = [r.name for r in registry.clients()]
+        reachable = sorted({c for p in SERVERS for c in connected_clients(names, p)})
+        answer = await ask(question, names)
+        return {
+            "question": question,
+            "clients_read": reachable,
+            "clients_registered": len(names),
+            "answer": answer,
+        }
 
     # ---- registry --------------------------------------------------------
 
