@@ -58,20 +58,26 @@ def _is_read_only(tool, **_) -> bool:
 
 
 def toolset_for(client: str, provider: str, *, backend=None,
-                read_only: bool = False) -> MCPClient:
-    """One client's tools from one provider, ready to hand to an Agent."""
+                read_only: bool = False, label: str | None = None) -> MCPClient:
+    """One client's tools from one provider, ready to hand to an Agent.
+
+    `client` is the identity, because that is how credentials are filed.
+    `label` is what the tools are named after, because a prefix is read by a
+    model and `c_6d7900c3e0e99c16_dns_update` tells it nothing about whose
+    account it is about.
+    """
     server = server_for(provider)
     if server is None:
         raise NoRemoteServer(f"{provider} runs no MCP server")
     return MCPClient(
         url=server.url,
         auth_provider=auth_for(client, provider, backend=backend),
-        prefix=prefix_for(client),
+        prefix=prefix_for(label or client),
         tool_filters={"allowed": [_is_read_only]} if read_only else None,
     )
 
 
-def toolsets_for(clients: list[str], provider: str, *, backend=None,
+def toolsets_for(clients, provider: str, *, backend=None,
                  read_only: bool = False) -> list[MCPClient]:
     """Every client's tools from one provider, for a single agent.
 
@@ -79,14 +85,20 @@ def toolsets_for(clients: list[str], provider: str, *, backend=None,
     prefix means one of them silently answers for the other, and a mutation on
     the wrong account is the failure this project exists to prevent (D5).
     """
+    # Accepts client records or bare names. A record carries both the identity
+    # to file credentials under and the label to name tools after; a bare name
+    # has to be both, which is what the identity split exists to end.
+    pairs = [(getattr(c, "id", c), getattr(c, "name", c)) for c in clients]
+
     seen: dict[str, str] = {}
-    for client in clients:
-        prefix = prefix_for(client)
+    for _, label in pairs:
+        prefix = prefix_for(label)
         if prefix in seen:
             raise ValueError(
-                f"{client!r} and {seen[prefix]!r} both become {prefix!r}, so a "
+                f"{label!r} and {seen[prefix]!r} both become {prefix!r}, so a "
                 "tool call could not say which account it meant. Rename one."
             )
-        seen[prefix] = client
-    return [toolset_for(c, provider, backend=backend, read_only=read_only)
-            for c in clients]
+        seen[prefix] = label
+    return [toolset_for(cid, provider, backend=backend, read_only=read_only,
+                        label=label)
+            for cid, label in pairs]

@@ -146,13 +146,14 @@ def build_server(backend=None, registry=None, runs_dir=None,
         from munim.agent.across import ask, connected_clients
         from munim.remote.servers import SERVERS
 
-        names = [r.name for r in registry.clients()]
-        reachable = sorted({c for p in SERVERS for c in connected_clients(names, p)})
-        answer = await ask(question, names)
+        records = registry.clients()
+        reachable = sorted({c.name for p in SERVERS
+                            for c in connected_clients(records, p)})
+        answer = await ask(question, records)
         return {
             "question": question,
             "clients_read": reachable,
-            "clients_registered": len(names),
+            "clients_registered": len(records),
             "answer": answer,
         }
 

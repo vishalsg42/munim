@@ -34,12 +34,17 @@ useless to someone who looks after a dozen of them.
 Be brief. No preamble."""
 
 
-def connected_clients(clients: list[str], provider: str, backend=None) -> list[str]:
+def connected_clients(clients, provider: str, backend=None) -> list:
     """Those with a session for this provider. Asking about the rest would open
-    a browser, which is not a thing a question gets to do."""
-    def has_session(client: str) -> bool:
-        store = (KeychainTokenStorage(client, provider, backend) if backend
-                 else KeychainTokenStorage(client, provider))
+    a browser, which is not a thing a question gets to do.
+
+    Takes client records, not names: the session is filed under the identity,
+    and looking it up by label found nothing at all once the two were split.
+    """
+    def has_session(client) -> bool:
+        key = getattr(client, "id", client)
+        store = (KeychainTokenStorage(key, provider, backend) if backend
+                 else KeychainTokenStorage(key, provider))
         return store._read("tokens") is not None
 
     return [c for c in clients if has_session(c)]
@@ -66,7 +71,9 @@ async def ask(question: str, clients: list[str], *, backend=None) -> str:
     agent = Agent(model=model, tools=toolsets, system_prompt=SYSTEM,
                   callback_handler=None)
 
-    roster = "\n".join(f"- {p}: {', '.join(cs)}" for p, cs in sorted(reached.items()))
+    roster = "\n".join(
+        f"- {p}: {', '.join(getattr(c, 'name', str(c)) for c in cs)}"
+        for p, cs in sorted(reached.items()))
     reply = await agent.invoke_async(
         f"Clients and the providers each is connected to:\n{roster}\n\n"
         f"Question: {question}"
