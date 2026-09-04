@@ -113,6 +113,16 @@ def render(log: RunLog, *, domain: str, business: str) -> str:
     for e in outstanding:
         items.append(f'<li class="no">{_e(e.human_text)}</li>')
 
+    # The report used to look identical whether the agent explained the
+    # findings or never ran, because its cards are built from the deterministic
+    # check text either way. With agents off by default that silence would be
+    # the normal case, so the report says which half of the run it is.
+    skipped = any(e.kind == "observation" and e.detail.get("agents") == "off"
+                  for e in events)
+    note = ('<p class="note">These findings come from live lookups. The '
+            'plain-English explanation is switched off, so this report has the '
+            'facts and not the interpretation.</p>') if skipped else ""
+
     when = datetime.now(timezone.utc).strftime("%d %B %Y")
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -123,6 +133,7 @@ def render(log: RunLog, *, domain: str, business: str) -> str:
   <p class="eyebrow">{_e(when)}</p>
   <h1>{_e(headline)}</h1>
   <p class="sub">{_e(sub)}</p>
+  {note}
   {"".join(cards) if cards else ""}
   {f'<h2>Everything we looked at</h2><ul class="checks">{"".join(items)}</ul>' if items else ""}
   <footer>

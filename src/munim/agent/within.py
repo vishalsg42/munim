@@ -17,7 +17,7 @@ somebody else's account.
 
 from strands import Agent
 
-from munim.agent.model import build_model
+from munim.agent.model import agents_off, build_model
 from munim.remote.servers import SERVERS
 from munim.remote.storage import KeychainTokenStorage
 from munim.remote.toolsets import toolset_for
@@ -49,6 +49,14 @@ def connected_providers(client_id: str, backend=None) -> list[str]:
 async def work_on(client_id: str, label: str, request: str, log: RunLog, *,
                   backend=None) -> dict:
     """Carry out `request` inside one client's accounts."""
+    # Before the keychain is touched and before any MCPClient is built. This
+    # function is importable, so a guard living only in the MCP tool would miss
+    # other callers, and doing the credential reads first to then refuse would
+    # be work nobody asked for.
+    off = agents_off()
+    if off is not None:
+        return {"client": label, "did": None, **off}
+
     providers = connected_providers(client_id, backend)
     if not providers:
         return {
@@ -60,7 +68,7 @@ async def work_on(client_id: str, label: str, request: str, log: RunLog, *,
     toolsets = [toolset_for(client_id, provider, backend=backend, label=label)
                 for provider in providers]
 
-    model, model_label = build_model()
+    model, model_label = build_model(backend)
     log.append(client=label, stage="work", kind="stage_start",
                human_text=f"Working on {label}",
                detail={"providers": providers, "model": model_label,

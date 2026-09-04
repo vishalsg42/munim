@@ -39,9 +39,17 @@ munim disconnect --all                       # drop every credential
 
 ```bash
 munim doctor                                 # what is missing, and the fix for each
-munim config set gmail --client-id ...       # the secret is prompted, never an argument
-munim config list                            # what is set, and where it came from
-munim config unset gmail
+munim config                                 # everything: applications and agents
+munim config app set gmail --client-id ...   # the secret is prompted, never an argument
+munim config app list                        # what is set, and where it came from
+munim config app unset gmail
+
+munim config ai                              # agents on or off, host, model, keys
+munim config ai on | off                     # off by default; Munim is local
+munim config ai host gemini                  # auto | bedrock | gemini | anthropic
+munim config ai model gemini gemini-2.5-pro  # per host, so switching cannot mismatch
+munim config ai key gemini                   # prompts, goes to your keychain
+munim config ai unset gemini
 ```
 
 There is no wrong order. Write a client down first and connect later, or
@@ -67,3 +75,31 @@ munim-room --runs DIR --reports DIR     # serve a different set of runs
 ```
 
 ---
+
+
+## Agents are off by default
+
+`check`, `work_on_client` and `ask_across_clients` can explain what they find,
+and that needs a model host. It is switched off until you ask for it, so a key
+sitting in a file is not the same as deciding to use one. Everything else in
+Munim is deterministic and unaffected: the thirteen checks, `audit_all_clients`,
+`find_across_clients` and the mail plan all work with no key and no model call.
+
+`munim config ai on` takes effect on the next tool call. There is no need to
+reconnect your coding agent: the setting is read when a tool runs, not when the
+server starts.
+
+The old spellings still work. `munim config set gmail --client-id ...` and
+`munim config list` were published in 0.1.0 and are rewritten to the `app` form
+rather than broken.
+
+Two things worth knowing about where the switch is read from:
+
+- `MUNIM_AI` in a `.env` file is ignored. Values from a file are written into
+  the process environment permanently, and the MCP server loads once at startup,
+  so a switch set that way would go sticky and silently beat every later
+  `munim config ai on`. `munim doctor` reports one if it finds it.
+- `export MUNIM_AI=1` in your shell changes what `munim doctor` reports and not
+  what the MCP server does, because the server is a subprocess and does not
+  inherit your shell. `doctor` says so rather than letting the two disagree
+  quietly.

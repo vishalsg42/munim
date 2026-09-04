@@ -29,10 +29,19 @@ Never logs a value.
 import os
 from pathlib import Path
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values
 
 # Beside registry.json, runs/ and reports/. One place for everything Munim keeps.
 CONFIG_HOME = Path.home() / ".munim" / ".env"
+
+# Read from the real environment only, never from a file. python-dotenv writes
+# into os.environ permanently, and the MCP server loads once at startup, so a
+# MUNIM_AI sitting in a .env would go sticky for the life of that process and
+# silently beat every later `munim config ai on`. The command would report
+# success while the running server stayed off, which is the two-commands-
+# disagree failure this project has hit before. `doctor` reports a file that
+# carries one, because somebody will try it.
+NOT_FROM_A_FILE = ("MUNIM_AI",)
 
 
 def candidates(start: Path | None = None) -> list[Path]:
@@ -64,9 +73,39 @@ def sources(start: Path | None = None) -> list[tuple[Path, bool]]:
 
 
 def load(start: Path | None = None) -> Path | None:
-    """Load the first configuration file that exists. Returns the file used."""
+    """Load the first configuration file that exists. Returns the file used.
+
+    Sets rather than overrides: a value already exported is a deliberate act and
+    CI sets these. Everything in NOT_FROM_A_FILE is skipped, which is why this
+    parses the file itself instead of calling load_dotenv.
+    """
     for candidate in candidates(start):
         if candidate.is_file():
-            load_dotenv(candidate, override=False)
+            for name, value in dotenv_values(candidate).items():
+                if value is None or name in NOT_FROM_A_FILE:
+                    continue
+                os.environ.setdefault(name, value)
             return candidate
     return None
+
+
+def ignored_in(start: Path | None = None) -> list[tuple[Path, str]]:
+    """Settings found in a config file that a config file cannot carry.
+
+    `doctor` prints these. Putting MUNIM_AI in .env and watching nothing happen
+    is exactly the kind of silence this project keeps deciding is worse than a
+    sentence.
+    """
+    found = []
+    for candidate in candidates(start):
+        if not candidate.is_file():
+            continue
+        try:
+            values = dotenv_values(candidate)
+        except OSError:
+            continue
+        for name in NOT_FROM_A_FILE:
+            if name in values:
+                found.append((candidate, name))
+        break
+    return found
