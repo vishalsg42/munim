@@ -63,8 +63,11 @@ def _model() -> Finding:
     if os.environ.get("AWS_PROFILE") or os.environ.get("AWS_ACCESS_KEY_ID"):
         return Finding(WARN, "Model host", "AWS credentials present; Bedrock untested",
                        fix="munim doctor --probe-model")
+    from munim.env import CONFIG_HOME
     return Finding(BAD, "Model host", "none configured",
-                   fix="put GEMINI_API_KEY=... in .env (any Strands provider works)")
+                   fix=f"echo 'GEMINI_API_KEY=...' >> {CONFIG_HOME}  (any "
+                       f"Strands provider works, and that file is read from "
+                       f"any directory)")
 
 
 def _mcp_registered() -> Finding:
@@ -182,13 +185,14 @@ def _oauth_apps() -> list[Finding]:
                     f"{provider}  (it uses a project you already have and "
                     f"never creates one). By hand: {server.register_at}, "
                     f"Desktop app, redirect {REDIRECT_URI}, then "
-                    f"{provider.upper()}_OAUTH_CLIENT_ID and _SECRET in .env"))
+                    f"`munim config set {provider} --client-id ...`, which "
+                    f"prompts for the secret and stores both in your keychain"))
         else:
             out.append(Finding(
                 WARN, f"Login: {provider}", "no application, and no MCP server",
-                fix=f"register an app with redirect {REDIRECT_URI}, then set "
-                    f"{provider.upper()}_OAUTH_CLIENT_ID in .env, or paste a "
-                    f"key with `munim connect <client> {provider} --token`"))
+                fix=f"register an app with redirect {REDIRECT_URI}, then "
+                    f"`munim config set {provider} --client-id ...`, or paste "
+                    f"a key with `munim connect <client> {provider} --token`"))
 
     # Resend publishes no OAuth authorization endpoint of its own, so it is not
     # in OAUTH_PROVIDERS and would otherwise go unmentioned. It runs an MCP
