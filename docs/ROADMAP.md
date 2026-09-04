@@ -54,6 +54,15 @@ merge are tested, including partial-failure behaviour, but have not been run
 against a real zone. That is the last claim in this project still resting on
 tests alone.
 
+**Open-ended cross-client reads on providers that do not annotate.** A
+cross-client toolset is default-deny on `readOnlyHint`. Cloudflare's `execute`
+both reads and writes, so it carries no hint and is refused, which leaves
+`ask_across_clients` with documentation search and no access to live account
+data. The filter is right; the gap is that a provider offering one
+read-and-write tool cannot participate in an open cross-client question at all.
+Fixing it properly means a way to prove a call is a read before making it, which
+is a per-provider judgement and not a flag.
+
 **A wrong-account guard that survives a token refresh.** Every session verifies
 which account it belongs to before use. What is not proven is the behaviour when
 a refresh token silently returns a session for a different account, which should
