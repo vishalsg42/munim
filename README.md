@@ -105,6 +105,7 @@ it, which is what keeps a name and an account from drifting apart:
 
 ```bash
 munim connect cloudflare                    # browser login; the account names the client
+munim connect "Balaji Roofings" zoho --url https://…   # Zoho: the URL is the credential
 munim connect "Balaji Roofings" vercel      # or name it yourself
 munim rename "<account name>" "Balaji Roofings"
 munim merge "<account name>" "Balaji Roofings"   # if they were added twice
@@ -148,7 +149,7 @@ the server, and there are three answers it can give.
 |---|---|---|
 | **registers** | issues a client on demand (RFC 7591) | nothing. `munim connect acme` opens a browser |
 | **app** | no registration endpoint, wants a secret | register an application once, put its id and secret in `.env` |
-| **url** | answered without credentials | either it is open, or the URL carries the credential. Treat it as a secret |
+| **url** | answered without credentials | either it is open, or the URL carries the credential. Pass it with `connect --url`; it goes to your keychain, never to a file here, and is never printed whole |
 
 All three were found by probing real servers rather than reading about them.
 Cloudflare, Vercel and Resend register on demand. Google's servers, which is

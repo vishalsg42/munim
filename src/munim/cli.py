@@ -178,6 +178,61 @@ def forget(client: str) -> int:
     return 0
 
 
+def _redacted(url: str) -> str:
+    """A URL that carries a credential, safe to print.
+
+    Zoho's endpoints look like
+    https://<service>-<org>.zohomcp.in/mcp/<32 hex>/message, and the hex is the
+    secret. Printing it into a terminal that gets pasted into a bug report is
+    how a credential leaves a machine, so the host stays and the path goes.
+    """
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    return f"{parsed.scheme}://{parsed.netloc}/…"
+
+
+def connect_by_url(client: str, provider: str, url: str) -> int:
+    """Connect a provider that identifies a client by their own endpoint.
+
+    There is no OAuth here and nothing to open a browser for: the address is
+    the credential. It is stored per client in the keychain rather than in
+    servers.json, because that file lists servers and this is one client's
+    secret.
+    """
+    import asyncio
+
+    from munim.remote.discover import NotAnMcpServer, probe
+    from munim.remote.storage import KeychainTokenStorage
+
+    registry = _registry()
+    try:
+        record = registry.get(client)
+    except UnknownClient:
+        record = ClientRecord(name=client)
+        registry.add(record)
+        print(f"{client!r} was not registered yet. Added it.", file=sys.stderr)
+
+    try:
+        found = asyncio.run(probe(url, provider))
+    except NotAnMcpServer as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    if found.auth != "url":
+        print(f"{_redacted(url)} wants {found.auth} authentication, not a "
+              f"credential in the URL. Connect it with: munim connect "
+              f"{client!r} {provider}", file=sys.stderr)
+        return 2
+
+    KeychainTokenStorage(record.id, provider).remember_endpoint(url)
+    print(f"Connected {provider} for {record.name} at {_redacted(url)}",
+          file=sys.stderr)
+    print("  The path carries the credential, so it is in your keychain and "
+          "not in any file this repository holds.", file=sys.stderr)
+    return 0
+
+
 def connect_via_mcp(client: str | None, provider: str) -> int:
     """Connect through the provider's own MCP server.
 
@@ -396,6 +451,10 @@ def main(argv: list[str] | None = None) -> int:
     # because a flag that was documented and then removed is a dead end for
     # whoever copied the line.
     c.add_argument("--via-mcp", action="store_true", help=argparse.SUPPRESS)
+    c.add_argument("--url", metavar="URL",
+                   help="for a provider that identifies a client by their own "
+                        "endpoint, such as Zoho. The path carries the "
+                        "credential, so it goes to your keychain")
 
     ls = sub.add_parser("clients", help="list registered clients")
     ls.add_argument("--verbose", action="store_true")
@@ -490,6 +549,12 @@ def main(argv: list[str] | None = None) -> int:
     # set up. Sending someone to register an application when they do not have
     # to was the friction this project set out to remove, and it was ours.
     from munim.remote.servers import server_for
+
+    if getattr(args, "url", None):
+        if args.client is None:
+            parser.error("--url needs a client name: the URL identifies which "
+                         "client it belongs to, so it cannot name itself")
+        return connect_by_url(args.client, args.provider, args.url)
 
     # `--token` never reaches here: it is handled above and stores a pasted key.
     if not args.via_app and server_for(args.provider) is not None:

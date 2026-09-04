@@ -120,6 +120,29 @@ def auth_for(client: str, provider: str, *, backend=None,
     )
 
 
+def endpoint_for(client: str, provider: str, backend=None) -> str:
+    """Where this client's server is.
+
+    Usually the provider's one address for everybody. For a provider whose URL
+    carries the credential, it is per client and comes from the keychain, which
+    is also why it is not in servers.json: that file lists servers, and this is
+    one client's secret.
+    """
+    server = server_for(provider)
+    if server is None:
+        raise NoRemoteServer(f"{provider} runs no MCP server")
+    if server.auth != "url":
+        return server.url
+
+    stored = KeychainTokenStorage(client, provider, backend).endpoint()
+    if not stored:
+        raise NoRemoteServer(
+            f"{provider} identifies a client by their own endpoint URL, and "
+            f"none is stored for this one. Add it with: "
+            f"munim connect \"<client>\" {provider} --url <their URL>")
+    return stored
+
+
 @asynccontextmanager
 async def session_for(client: str, provider: str, *, backend=None, on_url=None):
     """Open one client's session with one provider's MCP server."""
@@ -127,8 +150,19 @@ async def session_for(client: str, provider: str, *, backend=None, on_url=None):
     if server is None:
         raise NoRemoteServer(f"{provider} runs no MCP server")
 
+    url = endpoint_for(client, provider, backend)
+
+    if server.auth == "url":
+        # The address is the credential, so there is nothing to authenticate
+        # with and nothing to open a browser for.
+        async with streamablehttp_client(url) as (read, write, _):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                yield session
+        return
+
     auth = auth_for(client, provider, backend=backend, on_url=on_url)
-    async with streamablehttp_client(server.url, auth=auth) as (read, write, _):
+    async with streamablehttp_client(url, auth=auth) as (read, write, _):
         async with ClientSession(read, write) as session:
             await session.initialize()
             yield session

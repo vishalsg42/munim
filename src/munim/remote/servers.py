@@ -71,6 +71,19 @@ SERVERS: dict[str, RemoteServer] = {
              "it supports only clients it has reviewed; whether that rejects a "
              "dynamically registered one at token exchange is still unverified",
     ),
+    # No single address: each installation gets its own, and the path carries
+    # the credential. The URL is therefore per client and lives in the keychain,
+    # not here. `munim connect "<client>" zoho --url <their URL>`.
+    "zoho": RemoteServer(
+        provider="zoho",
+        url="",
+        public_client=False,
+        auth="url",
+        note="confirmed: per-installation endpoint of the shape "
+             "https://<service>-<org>.zohomcp.in/mcp/<32 hex>/message, which "
+             "answers a tool call with no credentials because the path is the "
+             "credential",
+    ),
     "resend": RemoteServer(
         provider="resend",
         url="https://mcp.resend.com/mcp",
@@ -104,13 +117,6 @@ NOT_YET_WIRED: dict[str, RemoteServer] = {
         register_at="https://console.cloud.google.com/apis/credentials",
         note="15 tools, 5 annotated readOnlyHint. Same authorization server as "
              "gmail and the same consequence",
-    ),
-    "zoho": RemoteServer(
-        provider="zoho", url="", public_client=False, auth="url",
-        note="per-installation endpoint of the shape "
-             "https://<service>-<org>.zohomcp.in/mcp/<32 hex>/message. The path "
-             "carries the credential, so there is no OAuth and the URL is the "
-             "secret: it must be stored per client and never logged",
     ),
 }
 

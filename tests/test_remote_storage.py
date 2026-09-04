@@ -91,9 +91,17 @@ def test_every_recorded_server_says_whether_it_needs_a_secret():
     """Because that decides whether registration can be silent, and a wrong
     answer here means a secret in a config file."""
     for provider, server in SERVERS.items():
-        assert server.url.startswith("https://"), provider
         assert isinstance(server.public_client, bool), provider
         assert server.note, f"{provider} records no evidence for its entry"
+        if server.auth == "url":
+            # No single address: each installation gets its own and the path
+            # carries the credential, so the URL is per client and lives in the
+            # keychain rather than in this table.
+            assert server.url == "", (
+                f"{provider} identifies clients by their own endpoint, so a "
+                f"shared URL here would be one client's secret in the source")
+        else:
+            assert server.url.startswith("https://"), provider
 
 
 def test_the_consent_screen_names_the_client():

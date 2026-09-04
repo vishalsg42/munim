@@ -58,6 +58,23 @@ class KeychainTokenStorage(TokenStorage):
         data = self._read("client")
         return OAuthClientInformationFull(**data) if data else None
 
+    def remember_endpoint(self, url: str) -> None:
+        """Where this client's server lives, when the URL is the credential.
+
+        Zoho issues a per-installation endpoint whose path carries a secret, so
+        there is no token to store and no OAuth to run: the address is the
+        thing to keep. It goes in the keychain beside the tokens rather than in
+        servers.json, because that file is a list of servers and this is a
+        credential belonging to one client.
+        """
+        self._backend.set_password(self._service("endpoint"), self._client, url)
+
+    def endpoint(self) -> str | None:
+        try:
+            return self._backend.get_password(self._service("endpoint"), self._client)
+        except keyring.errors.KeyringError:
+            return None
+
     def remember_account(self, account: str) -> None:
         """Record which provider account this session turned out to be.
 
@@ -84,11 +101,11 @@ class KeychainTokenStorage(TokenStorage):
         that fails before costs the session.
         """
         moved = KeychainTokenStorage(client, self._provider, self._backend)
-        for kind in ("client", "tokens", "account"):
+        for kind in ("client", "tokens", "account", "endpoint"):
             raw = self._backend.get_password(self._service(kind), self._client)
             if raw is not None:
                 self._backend.set_password(moved._service(kind), client, raw)
-        for kind in ("client", "tokens", "account"):
+        for kind in ("client", "tokens", "account", "endpoint"):
             try:
                 self._backend.delete_password(self._service(kind), self._client)
             except Exception:
