@@ -52,3 +52,25 @@ def test_a_skip_explains_itself_in_the_right_terms():
     assert "mail settings" not in by_name["www_redirect"].operator_text
     assert "mail settings" not in by_name["apex_resolves"].operator_text
     assert "mail settings" not in by_name["cert_valid"].operator_text
+
+
+def test_the_skip_sentence_agrees_with_its_subject():
+    """"DNS belong" is the same fault as "2 things needs your attention".
+
+    Only the checks that actually short-circuit on a platform domain are
+    asserted here: apex_resolves, caa_allows, https_enforced and cert_valid
+    carry no platform guard, because those questions are still worth answering
+    about a vercel.app address.
+    """
+    results = checks.run_all(PLATFORM) + checks.run_reachability(PLATFORM)
+    skipped = [r for r in results if r.status == "skip"]
+    assert skipped, "nothing skipped, so this asserts nothing"
+    for r in skipped:
+        says = r.operator_text
+        assert (" belong to the platform" in says
+                or " belongs to the platform" in says), f"{r.check}: {says}"
+
+    by_name = {r.check: r for r in skipped}
+    assert "DNS belongs" in by_name["ns_delegated"].operator_text
+    assert "the web address belongs" in by_name["www_redirect"].operator_text
+    assert "mail settings belong to" in by_name["spf_single"].operator_text

@@ -68,23 +68,27 @@ def is_platform_domain(domain: str) -> bool:
 # Which part of the setup a check speaks for, so a skip explains itself in the
 # right terms. "mail settings belong to the platform" is wrong about whether www
 # reaches the site.
+# The verb travels with the subject: "DNS belong" and "the certificate belong"
+# are the same fault as "2 things needs your attention".
 _SUBJECT = {
-    "spf_single": "mail settings", "spf_lookups": "mail settings",
-    "dkim_present": "mail settings", "dkim_chunking": "mail settings",
-    "dmarc_present": "mail settings", "dmarc_policy": "mail settings",
-    "mx_present": "mail settings",
-    "ns_delegated": "DNS", "apex_resolves": "DNS", "caa_allows": "DNS",
-    "www_redirect": "the web address", "https_enforced": "the web address",
-    "cert_valid": "the certificate",
+    "spf_single": "mail settings belong", "spf_lookups": "mail settings belong",
+    "dkim_present": "mail settings belong", "dkim_chunking": "mail settings belong",
+    "dmarc_present": "mail settings belong", "dmarc_policy": "mail settings belong",
+    "mx_present": "mail settings belong",
+    "ns_delegated": "DNS belongs", "apex_resolves": "DNS belongs",
+    "caa_allows": "DNS belongs",
+    "www_redirect": "the web address belongs",
+    "https_enforced": "the web address belongs",
+    "cert_valid": "the certificate belongs",
 }
 
 
 def _not_their_domain(check: str, domain: str) -> CheckResult:
     platform = next(s for s in PLATFORM_SUFFIXES if domain.lower().endswith(s))
-    subject = _SUBJECT.get(check, "these settings")
+    subject = _SUBJECT.get(check, "these settings belong")
     return CheckResult(
         check, "skip",
-        f"{domain} is a {platform.lstrip('.')} address, so {subject} belong to "
+        f"{domain} is a {platform.lstrip('.')} address, so {subject} to "
         "the platform, not to this business.",
         "", detail={"reason": "platform_domain"})
 
