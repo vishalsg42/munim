@@ -119,3 +119,24 @@ def test_connecting_an_unregistered_name_registers_it(world, monkeypatch):
 
     record = registry.get("Acme")
     assert KeychainTokenStorage(record.id, "cloudflare", ring)._read("tokens")
+
+
+async def test_the_consent_screen_shows_the_label_not_the_id():
+    """The id is for storage. A consent screen naming "Munim (c_6d79...)"
+    tells the operator nothing, and telling them which client they are
+    authorising is the entire job of that line."""
+    from munim.remote.session import auth_for
+
+    auth = auth_for("c_6d7900c3e0e99c16", "cloudflare",
+                    label="Balaji Roofings", backend=Ring())
+
+    assert auth.context.client_metadata.client_name == "Munim (Balaji Roofings)"
+
+
+async def test_without_a_label_the_key_is_used():
+    """Callers that never had a separate label keep working."""
+    from munim.remote.session import auth_for
+
+    auth = auth_for("Acme", "cloudflare", backend=Ring())
+
+    assert auth.context.client_metadata.client_name == "Munim (Acme)"

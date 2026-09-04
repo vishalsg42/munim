@@ -439,7 +439,8 @@ def connect_via_mcp(client: str | None, provider: str) -> int:
               f"\"Munim ({client})\".", file=sys.stderr)
 
     try:
-        tools, account = asyncio.run(connect_and_identify(working_key, provider))
+        tools, account = asyncio.run(
+            connect_and_identify(working_key, provider, label=client or PROVISIONAL))
     except NoRemoteServer as exc:
         print(str(exc), file=sys.stderr)
         return 2

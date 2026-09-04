@@ -74,8 +74,17 @@ def _registered_application(provider: str) -> tuple[str, str] | None:
 
 
 def auth_for(client: str, provider: str, *, backend=None,
-             on_url=None) -> OAuthClientProvider:
-    """The OAuth client for one (client, provider), storing to the keychain."""
+             on_url=None, label: str | None = None) -> OAuthClientProvider:
+    """The OAuth client for one (client, provider), storing to the keychain.
+
+    `client` is the identity credentials are filed under, so it is an id.
+    `label` is what a person should read: it goes on the consent screen and in
+    the sign-in prompt. They were the same string until the id became the
+    storage key, at which point every human-facing line started rendering
+    "Munim (c_6d7900c3e0e99c16)" and the consent screen stopped saying which
+    client was being authorised, which is the one thing it is there to say.
+    """
+    label = label or client
     server = server_for(provider)
     if server is None:
         raise NoRemoteServer(
@@ -102,7 +111,7 @@ def auth_for(client: str, provider: str, *, backend=None,
             # The caller may not have a name yet: connecting without one uses a
             # provisional key until the provider says which account it was, and
             # printing that key reads as gibberish.
-            whose = f"{client}'s " if not client.startswith("…") else ""
+            whose = f"{label}'s " if not label.startswith("…") else ""
             print(f"Sign in to the {whose}{provider} account:\n{url}", flush=True)
             webbrowser.open(url)
 
@@ -127,10 +136,10 @@ def auth_for(client: str, provider: str, *, backend=None,
     if not server.public_client:
         # Registration issues the secret; it is stored beside the tokens and
         # never becomes a value here. Only the auth method differs.
-        meta = _metadata(client).model_copy(
+        meta = _metadata(label).model_copy(
             update={"token_endpoint_auth_method": "client_secret_post"})
     else:
-        meta = _metadata(client)
+        meta = _metadata(label)
 
     if server.auth == "app":
         # Nothing to register against, so an application has to already exist.
@@ -220,7 +229,7 @@ async def _verify_account(session, client: str, provider: str, backend=None) -> 
 
 @asynccontextmanager
 async def session_for(client: str, provider: str, *, backend=None, on_url=None,
-                      verify: bool = True):
+                      verify: bool = True, label: str | None = None):
     """Open one client's session with one provider's MCP server."""
     server = server_for(provider)
     if server is None:
@@ -237,7 +246,8 @@ async def session_for(client: str, provider: str, *, backend=None, on_url=None,
                 yield session
         return  # a url-authenticated server has no account to drift
 
-    auth = auth_for(client, provider, backend=backend, on_url=on_url)
+    auth = auth_for(client, provider, backend=backend, on_url=on_url,
+                    label=label)
     try:
         async with streamablehttp_client(url, auth=auth) as (read, write, _):
             async with ClientSession(read, write) as session:
@@ -269,7 +279,8 @@ async def tools_for(client: str, provider: str, **kwargs) -> list[str]:
         return [t.name for t in (await session.list_tools()).tools]
 
 
-async def connect_and_identify(client: str, provider: str,
+async def connect_and_identify(client: str, provider: str, *,
+                               label: str | None = None,
                                **kwargs) -> tuple[list[str], str | None]:
     """Open the session and ask the provider which account it belongs to.
 
@@ -284,6 +295,7 @@ async def connect_and_identify(client: str, provider: str,
     # change: a guard that refuses here would block the only remedy for having
     # been bound to the wrong one. The caller records what it landed on, which
     # is what every later session is then checked against.
-    async with session_for(client, provider, verify=False, **kwargs) as session:
+    async with session_for(client, provider, verify=False, label=label,
+                           **kwargs) as session:
         tools = [t.name for t in (await session.list_tools()).tools]
         return tools, await identity_of(session, provider)
