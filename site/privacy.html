@@ -30,16 +30,20 @@ operator of Munim who can see your data.</p>
 <div class="box">
 <strong>The short version.</strong> Your credentials stay in your operating
 system's keychain. Data from the services you connect goes between your computer
-and those services directly. If you use the features that reason about that
-data, it is also sent to the AI model provider you choose and configure. Nothing
-is ever sent to the authors of Munim.
+and those services directly. Munim runs as an MCP server inside a coding agent,
+so what its tools return reaches whichever model that agent runs on. Munim's own
+reasoning features are switched off by default and send nothing to a model host
+until you turn them on. Nothing is ever sent to the authors of Munim.
 </div>
 
 <h2>What Munim handles</h2>
 <ul>
 <li><strong>Credentials.</strong> When you connect a service, the resulting
 OAuth token or API key is stored in your operating system's keychain, filed
-under an identifier for the client it belongs to. Munim's code never returns a
+under an identifier for the client it belongs to. Two kinds belong to the
+installation rather than to any client, and are filed under a reserved name
+instead: the OAuth application credential for Gmail and Stitch, and the API key
+for a model host if you configure one. Munim's code never returns a
 raw credential to the code that uses it; adapters receive an already
 authenticated connection.</li>
 <li><strong>Service data.</strong> Whatever the service returns while you are
@@ -54,14 +58,26 @@ and drafts your instructions cause it to write.</li>
 <p><strong>To the service itself.</strong> Munim talks directly from your
 computer to each provider's own endpoint. Nothing is proxied.</p>
 
-<p><strong>To the AI model provider you configure.</strong> This is the part
-worth reading twice. Munim's checking and reasoning features build an agent
-using the Strands Agents SDK, and that agent runs on a model host you choose:
-Amazon Bedrock, Google Gemini, Anthropic, OpenAI or a local model through
-Ollama. When you invoke those features, the data the agent is working with is
-sent to that provider under your own API key and their terms. If Gmail is
-connected and you ask the agent to work with mail, mail content reaches that
-provider. Choosing a locally hosted model keeps it on your machine.</p>
+<p><strong>To the coding agent you run Munim inside, always.</strong> Munim is
+an MCP server. Your coding agent calls its tools and places the results into its
+own model's context, so whatever a tool returns reaches whichever model provider
+that agent uses, under that agent's terms rather than Munim's. This is true of
+every tool and of every result: the list of clients, the DNS findings, anything
+a provider hands back. It is a property of how MCP works and Munim cannot switch
+it off. If that matters for a particular client's data, the decision is which
+coding agent you run, not which Munim settings you choose.</p>
+
+<p><strong>To a model host of your own, only if you turn it on.</strong> Munim
+can also build its own agent using the Strands Agents SDK, for the tools that
+explain a finding rather than measure one. <strong>This is off by default.</strong>
+Until you run <code>munim config ai on</code>, Munim constructs no model client
+and sends nothing to any model host, and the checks, the audit and the mail plan
+all still work, because they are deterministic and never needed one. When you do
+turn it on, it runs on a host you choose and configure: Amazon Bedrock, or
+Google Gemini or Anthropic with the matching optional install. The data that
+agent is working with is sent to that provider under your own API key and their
+terms. If Gmail is connected and you ask it to work with mail, mail content
+reaches that provider.</p>
 
 <p><strong>Nowhere else.</strong> Munim contains no analytics, no telemetry, no
 crash reporting and no update check. It sends nothing to its authors. You can
@@ -71,15 +87,20 @@ confirm this by reading the source.</p>
 <p>Munim's use of information received from Google APIs adheres to the
 <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including the Limited Use requirements.</p>
 <p>Specifically: Google user data is used only to provide the features you
-invoke. It is not sold, not transferred to anyone except the AI model provider
-you configure in order to perform those features, not used for advertising, and
-not used to train any model by Munim. Munim's authors have no access to it.</p>
+invoke. It is not sold, not transferred to anyone except the coding agent you
+run Munim inside and, if you have turned Munim's own reasoning on, the model
+provider you configured for it, in order to perform those features. It is not
+used for advertising and not used to train any model by Munim. Munim's authors have no access to it.</p>
 
 <h2>Keeping and removing it</h2>
 <p>Everything lives on your computer for as long as you leave it there.</p>
 <ul>
 <li><code>munim disconnect "&lt;client&gt;" &lt;service&gt;</code> removes one stored credential.</li>
-<li><code>munim disconnect --all</code> removes every stored credential.</li>
+<li><code>munim disconnect --all</code> removes every client's stored credentials.</li>
+<li><code>munim config ai unset &lt;host&gt;</code> removes a stored model API key, and
+<code>munim config app unset &lt;provider&gt;</code> removes a stored OAuth application
+credential. These belong to the installation rather than to a client, so
+<code>disconnect</code> does not touch them.</li>
 <li>Deleting <code>~/.munim</code> removes the run logs, reports and the client list.</li>
 <li>Revoking Munim's access at the provider, for example at
 <a href="https://myaccount.google.com/permissions">Google account permissions</a>,

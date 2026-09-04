@@ -25,12 +25,52 @@ def test_the_policy_claim_of_no_telemetry_is_true():
     assert not offenders, f"the privacy policy claims no telemetry: {offenders}"
 
 
-def test_the_policy_names_the_model_host_disclosure():
-    """The least obvious thing Munim does, and the one a reader most needs: the
-    agent sends provider data to whichever model host is configured."""
+def test_the_policy_discloses_the_mcp_transport():
+    """The thing this page never said, and the one a reader most needs.
+
+    Munim is an MCP server. The coding agent calls its tools and puts the
+    results in its own model's context, so every tool result reaches that
+    agent's model provider, on every run, whatever Munim's own settings say.
+    The page listed the providers and Munim's own model host and then said
+    "Nowhere else", which was not true of the transport it runs on.
+    """
     policy = (SITE / "privacy.html").read_text()
-    assert "model provider you configure" in policy
-    assert "Ollama" in policy, "the local-model escape hatch is part of the disclosure"
+    assert "MCP server" in policy
+    assert "coding agent" in policy
+
+
+def test_the_policy_says_munims_own_reasoning_is_off_by_default():
+    """Opt-in is the claim that makes the disclosure above bearable, so it has
+    to be on the page rather than only in the README."""
+    policy = (SITE / "privacy.html").read_text()
+    assert "off by default" in policy
+    assert "munim config ai on" in policy
+
+
+def test_the_documents_only_name_model_hosts_that_can_be_built():
+    """Rule-shaped, and covering the README as well as the policy.
+
+    The policy offered "OpenAI or a local model through Ollama", and a previous
+    version of this file asserted the Ollama sentence was present, so the test
+    was pinning the overclaim in place. build_model wires three hosts. Scoped to
+    one file this fixes one of the two documents that got it wrong.
+    """
+    from munim import settings
+
+    known = {h.capitalize() for h in settings.ORDER} | {"Gemini", "Bedrock", "Anthropic"}
+    never = {"Ollama", "OpenAI", "Mistral", "LiteLLM", "Llama"}
+
+    for name in ("privacy.html",):
+        text = (SITE / name).read_text()
+        offenders = sorted(w for w in never if w in text)
+        assert not offenders, \
+            f"{name} offers model hosts Munim cannot build: {offenders}"
+
+    readme = (SITE.parent / "README.md").read_text()
+    offenders = sorted(w for w in never if w in readme)
+    assert not offenders, f"README offers model hosts Munim cannot build: {offenders}"
+    assert "Any Strands-supported host works" not in readme, \
+        "Strands supports more hosts than Munim wires, so this overclaims"
 
 
 def test_the_policy_carries_googles_required_limited_use_wording():
@@ -46,7 +86,7 @@ def test_the_deletion_instructions_name_real_commands():
     import subprocess
     import sys
     policy = (SITE / "privacy.html").read_text()
-    named = set(re.findall(r"munim (disconnect|connect|clients|doctor)", policy))
+    named = set(re.findall(r"munim (disconnect|connect|clients|doctor|config)", policy))
     help_text = subprocess.run(["munim", "--help"], capture_output=True,
                                text=True).stdout
     for command in named:
