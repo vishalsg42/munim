@@ -1,10 +1,46 @@
 # Munim
 
-**A multi-account MCP server for people who look after other people's infrastructure.**
+**One MCP server holding a live session with every client's account at once.**
 
-A *munim* is the steward a business owner trusts to keep their books and handle their
-affairs without being asked each time. That is what this does for a dozen small
-businesses at once.
+A coding agent can be logged in to one Cloudflare account. One Vercel. One Resend. Connect
+a second client and the first one goes away. So the person looking after a dozen small
+businesses runs a dozen agent sessions, and no single one of them can answer a question
+about more than one client.
+
+Munim holds them all. Each client gets its own registration with the provider, its own
+token and its own namespace in the tool list, so one agent can read across every client
+and write inside the one you named.
+
+```
+Kloudfirst       -> Kloudfirst@gmail.com's Account          (3 tools)
+Balaji Roofings  -> Tech.bajajiroofing@gmail.com's Account  (3 tools)
+
+both sessions opened concurrently, one process, no logout
+```
+
+That is a real run against two real Cloudflare accounts, not a diagram. Reproduce it with
+your own two accounts: `scripts/cross_account_probe.py`.
+
+### Why this is not just credential switching
+
+The nearest prior work, [`mcpwarden`](https://github.com/ibhugeloo/mcpwarden), registers N
+copies of a provider's MCP server in your coding agent, one per account, and its own
+description calls them *"exclusive context profiles"*: one active at a time. That removes
+the re-login and leaves the isolation. It cannot answer a question that spans two accounts,
+because nothing sees across two entries in a tool list.
+
+Isolation is the easy half. Twelve clients across four providers is 48 entries in your tool
+list and still no vantage point. Munim is one entry holding 48 sessions, which is what
+makes *"which of my clients has a domain expiring this quarter?"* a question you can ask.
+
+Nothing is registered by hand. Cloudflare, Vercel and Resend each run their own MCP server
+and each issues a client on demand, so connecting is a browser window and nothing else, and
+there is no client secret anywhere in this repository.
+
+---
+
+*A munim is the steward a business owner trusts to keep their books and handle their affairs
+without being asked each time.*
 
 ---
 
@@ -91,6 +127,29 @@ uv run munim-room                        # http://127.0.0.1:8977
 uv run munim-room --port 8986            # if 8977 is taken
 uv run munim-room --runs DIR --reports DIR   # serve a different set of runs
 ```
+
+## The tools your agent gets
+
+Eight, and this is the whole surface. Anything not listed here is not reachable, whatever
+else is in the repository.
+
+| Tool | |
+|---|---|
+| `list_clients` | every client and what each is connected to |
+| `find_across_clients` | one deterministic question over all of them at once |
+| `ask_across_clients` | one open question over all of them, using their own accounts, read-only |
+| `check` | the 13-check catalogue against a client or a bare domain |
+| `client_status` | what is known about one client |
+| `add_client` | register one |
+| `connect_provider` | store a pasted key, for providers with nothing better |
+| `launch_status` | read a run back |
+
+**Repair is not exposed yet, and the code for it exists.** `agent/mail.py:set_up_mail` does
+the Resend-to-Cloudflare handoff and `agent/launch.py:fix_spf` does the approval-gated SPF
+merge, both tested, and neither has a caller outside its own module. They are written and
+unreachable, which is worth saying plainly rather than leaving someone to find out: a
+capability that cannot be invoked is not a capability, and `docs/VIDEO.md` currently scripts
+one of them.
 
 ## What is implemented
 

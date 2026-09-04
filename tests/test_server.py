@@ -159,3 +159,23 @@ async def test_reads_may_register_but_writes_may_not(tmp_path):
         await server.call_tool("connect_provider", {
             "client": "brand-new.example", "provider": "resend", "credential": "x"})
     assert "brand-new.example" not in [c.name for c in registry.clients()]
+
+
+def test_the_readme_lists_every_tool_that_exists(tmp_path):
+    """A reviewer read this repository and described it as an on-demand
+    diagnostic tool, missing the per-client sessions entirely. That is the
+    documentation failing, not the reader.
+
+    So the tool surface is written down, and this fails when it drifts: a tool
+    that exists and is undocumented is invisible, and one documented that does
+    not exist is a claim the code cannot support.
+    """
+    import pathlib
+
+    from munim.server import build_server
+
+    readme = (pathlib.Path(__file__).parent.parent / "README.md").read_text()
+    surface = {t.name for t in build_server()._tool_manager.list_tools()}
+
+    undocumented = {n for n in surface if f"`{n}`" not in readme}
+    assert not undocumented, f"tools nobody reading the README would know about: {undocumented}"

@@ -161,8 +161,16 @@ the providers' own MCP servers (`mcp.cloudflare.com`, `mcp.vercel.com`,
 
 ## What is left
 
-Vercel and Resend write operations. They are absent from the tool list rather
-than present and inert.
+**Repair is written and not exposed.** `agent/mail.py:set_up_mail` performs the
+Resend-to-Cloudflare handoff and `agent/launch.py:fix_spf` performs the
+approval-gated SPF merge. Both are tested and neither has a caller outside its
+own module, so neither is reachable through the MCP tools. Said plainly because
+an external reviewer found it before we did, and because the video script
+demonstrates one of them: a capability that cannot be invoked is not a
+capability, and filming it would be showing something a judge cannot reproduce.
+
+Vercel write operations. Resuming an interrupted launch from the run log. Both
+absent rather than present and inert.
 
 The check catalogue is complete at thirteen, all of which need no provider
 account: they read public DNS and make a public HTTPS request. Anyone can run
