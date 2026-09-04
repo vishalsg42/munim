@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Munim - one MCP server, every client's account</title>
+<meta name="description" content="An open source MCP server that holds a live session with every client's account at once. Read across every client, write inside the one you named.">
+<style>
+:root{--ink:#17191c;--soft:#57534e;--line:#e7e5e4}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#fbfaf8;color:var(--ink);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:56px 24px}
+main{max-width:44rem;margin:0 auto}
+h1{font-size:36px;letter-spacing:-.03em}
+.lede{font-size:19px;color:var(--soft);margin:8px 0 28px}
+h2{font-size:18px;margin:36px 0 10px;letter-spacing:-.01em}
+p,li{margin-bottom:12px}
+ul{padding-left:22px}
+pre{background:#fff;border:1px solid var(--line);border-radius:8px;padding:16px;overflow-x:auto;font:13px/1.6 ui-monospace,"SF Mono",monospace;margin:16px 0}
+code{font:13px ui-monospace,"SF Mono",monospace}
+a{color:#1d4ed8}
+footer{margin-top:48px;padding-top:18px;border-top:1px solid var(--line);color:var(--soft);font-size:14px}
+</style>
+</head>
+<body><main>
+<h1>Munim</h1>
+<p class="lede">One MCP server holding a live session with every client's account
+at once.</p>
+
+<p>A coding agent can be logged in to one Cloudflare account. One Vercel. One
+Resend. Connect a second client and the first goes away. So the person looking
+after a dozen small businesses runs a dozen agent sessions, and none of them can
+answer a question about more than one client.</p>
+
+<p>Munim holds them all. Each client gets its own registration with the
+provider, its own token and its own namespace in the tool list, so one agent can
+<strong>read across every client and write inside the one you named</strong>.</p>
+
+<pre>uv tool install munim
+claude mcp add munim -- munim-mcp
+munim connect cloudflare</pre>
+
+<p>Then, in your coding agent: <em>which of my clients has a domain expiring
+this quarter?</em></p>
+
+<h2>Where your credentials live</h2>
+<p>In your operating system's keychain, on your machine. Munim is a local
+program: there is no Munim server, no account to create, and nothing is sent to
+its authors. Eleven providers are supported and most need no setup at all,
+because they issue a client on demand.</p>
+
+<h2>Open source</h2>
+<p>MIT licensed, and the reasoning behind every design decision is written down,
+including the ones that were wrong first time.</p>
+<ul>
+<li><a href="https://github.com/vishalsg42/munim">Source on GitHub</a></li>
+<li><a href="https://pypi.org/project/munim/">munim on PyPI</a></li>
+<li><a href="https://github.com/vishalsg42/munim/blob/main/docs/ROADMAP.md">What is not done, and why</a></li>
+</ul>
+
+<footer>
+<a href="/privacy.html">Privacy Policy</a> &middot;
+<a href="/terms.html">Terms of Service</a> &middot;
+<a href="https://github.com/vishalsg42/munim">Source</a> &middot; MIT licensed
+</footer>
+</main></body></html>

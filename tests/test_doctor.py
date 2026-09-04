@@ -49,14 +49,22 @@ def test_resend_is_reported_as_reachable_now_that_it_runs_an_mcp_server():
     assert "MCP server" in resend.detail
 
 
-def test_a_provider_with_an_mcp_server_is_never_told_to_register_an_app():
-    """Nobody registers an application for a provider that registers a client
-    on demand. Telling them to is worse than saying nothing."""
+def test_a_provider_that_registers_on_demand_is_never_told_to_register_an_app():
+    """Nobody registers an application for a provider that issues a client on
+    demand. Telling them to is worse than saying nothing.
+
+    The condition is `ready`, not "is in the table". Gmail and Stitch are in the
+    table and cannot register on demand: accounts.google.com publishes no
+    registration endpoint, so an application by hand is the only way in and
+    doctor has to say so. This asserted "in SERVERS" and so demanded silence
+    about the two providers that most need a word.
+    """
     from munim.remote.servers import SERVERS
 
     for finding in doctor._oauth_apps():
         provider = finding.what.split(":", 1)[1].strip()
-        if provider in SERVERS:
+        server = SERVERS.get(provider)
+        if server is not None and server.ready:
             assert finding.status == doctor.OK, provider
             assert not finding.fix, f"{provider} is told to register an app"
 
