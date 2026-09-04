@@ -9,8 +9,12 @@ it as Server-Sent Events. Nothing here talks to a provider, holds a credential,
 or mutates anything: the room is a window, not an interface (D18).
 """
 
+import argparse
 import asyncio
+import errno
 import json
+import os
+import socket
 from pathlib import Path
 
 import uvicorn
@@ -136,12 +140,52 @@ def build_app(runs_dir: Path | None = None) -> Starlette:
     return app
 
 
-def main() -> None:
-    import os
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Flags, not just environment variables.
 
-    port = int(os.environ.get("MUNIM_ROOM_PORT", "8977"))
-    print(f"control room → http://127.0.0.1:{port}", flush=True)
-    uvicorn.run(build_app(), host="127.0.0.1", port=port, log_level="warning")
+    Someone whose 8977 is already taken reaches for `--port` before they reach
+    for the source. Without a parser argparse never sees it, unknown arguments
+    are silently dropped, and the room binds 8977 anyway and dies on
+    EADDRINUSE - having been told exactly how to avoid that.
+    """
+    parser = argparse.ArgumentParser(
+        prog="munim-room",
+        description="Watch a launch as it happens.")
+    parser.add_argument(
+        "--port", type=int, default=int(os.environ.get("MUNIM_ROOM_PORT", "8977")),
+        help="port to serve on (default: 8977, or $MUNIM_ROOM_PORT)")
+    parser.add_argument(
+        "--runs", type=Path, default=None, metavar="DIR",
+        help=f"directory of run logs (default: {RUNS_DIR})")
+    return parser.parse_args(argv)
+
+
+def main() -> None:
+    args = parse_args()
+
+    # Bind the socket here rather than letting uvicorn do it. uvicorn catches
+    # EADDRINUSE itself, logs `[errno 48] address already in use` and exits, so
+    # a try/except around uvicorn.run() never fires - it just looks like it
+    # would. Owning the socket also removes the race a pre-flight check leaves.
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        sock.bind(("127.0.0.1", args.port))
+    except OSError as exc:
+        sock.close()
+        if exc.errno != errno.EADDRINUSE:
+            raise
+        raise SystemExit(
+            f"Port {args.port} is already in use, most likely by a control room "
+            f"you already have open.\n"
+            f"Either use that one, or start this on another port:\n"
+            f"    munim-room --port {args.port + 1}"
+        ) from exc
+    sock.listen()
+
+    print(f"control room → http://127.0.0.1:{args.port}", flush=True)
+    config = uvicorn.Config(build_app(args.runs), log_level="warning")
+    uvicorn.Server(config).run(sockets=[sock])
 
 
 if __name__ == "__main__":
