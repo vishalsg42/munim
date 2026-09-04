@@ -173,6 +173,7 @@ else is in the repository.
 | `add_client` | register one |
 | `connect_provider` | store a pasted key, for providers with nothing better |
 | `launch_status` | read a run back |
+| `work_on_client` | do something inside one client's accounts, using their own provider tools |
 | `plan_mail_setup` | what setting up email for a client would change, touching no DNS |
 | `apply_mail_setup` | carry out a plan, with approval required to replace a record somebody put there |
 

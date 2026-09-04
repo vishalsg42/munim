@@ -37,7 +37,8 @@ from munim.runlog import RunLog, all_runs, new_run_id
 # is here despite changing no DNS: it creates a sending domain in the operator's
 # Resend account, and a tool that creates anything belongs on this list rather
 # than in an argument about whether it counts.
-MUTATING = {"connect_provider", "plan_mail_setup", "apply_mail_setup"}
+MUTATING = {"connect_provider", "plan_mail_setup", "apply_mail_setup",
+            "work_on_client"}
 
 # Tools that span more than one client's container. None of them may mutate, and
 # the set is named here rather than inferred, so adding one is a decision
@@ -232,6 +233,26 @@ def build_server(backend=None, registry=None, runs_dir=None,
             "run_id": log.run_id,
             "report": f"http://127.0.0.1:8977/reports/{log.run_id}",
         }
+
+    @server.tool()
+    async def work_on_client(client: str, request: str) -> dict:
+        """Do something inside one client's accounts, using their own tools.
+
+        The other half of read across, write within. `ask_across_clients` spans
+        every client and can only read; this is one client and can act, and
+        naming them is what unlocks it.
+
+        The agent is built with that client's sessions and no others, so a
+        request needing a second account has nothing to reach with rather than
+        a rule telling it not to. Every change is written to the run log as it
+        happens: open the control room to watch, or read it back afterwards.
+        """
+        from munim.agent.within import work_on
+
+        record = registry.get(client)
+        log = RunLog(new_run_id(), runs)
+        result = await work_on(record.id, record.name, request, log)
+        return {**result, "run_id": log.run_id}
 
     # ---- repair ----------------------------------------------------------
 

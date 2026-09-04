@@ -13,7 +13,7 @@ import pytest
 
 import munim.agent.launch as agent_module
 from munim.registry import ClientRecord, Registry
-from munim.server import build_server
+from munim.server import CROSS_CLIENT, MUTATING, build_server
 
 
 class _Keychain:
@@ -184,3 +184,56 @@ async def test_an_unconnected_provider_does_not_open_a_browser(tmp_path, monkeyp
 class _Stub:
     def __init__(self, prefix):
         self._prefix = prefix
+
+
+async def test_work_on_client_is_given_that_client_and_no_other(tmp_path, monkeypatch):
+    """"Write within" has to be a property of what the agent holds, not a rule
+    it is asked to follow. A request needing a second account should have
+    nothing to reach with."""
+    import munim.agent.within as within
+
+    monkeypatch.setattr(within, "connected_providers", lambda cid, backend=None: ["cloudflare"])
+    built = []
+    monkeypatch.setattr(within, "toolset_for",
+                        lambda cid, provider, **kw: built.append((cid, kw.get("label")))
+                        or _Stub(provider))
+    monkeypatch.setattr(within, "build_model", lambda: (object(), "fake"))
+
+    captured = {}
+
+    class Recording(_FakeAgent):
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+            super().__init__(**kwargs)
+
+    monkeypatch.setattr(within, "Agent", Recording)
+
+    server, registry = _server(tmp_path)
+    await server.call_tool("work_on_client",
+                           {"client": "acme", "request": "list the zones"})
+
+    acme = registry.get("acme")
+    assert built == [(acme.id, "acme")], "built a toolset for somebody else"
+    assert len(captured["tools"]) == 1, "the agent was given more than one client"
+
+
+async def test_a_client_with_nothing_connected_is_told_so(tmp_path, monkeypatch):
+    """Rather than an agent with no tools quietly inventing an answer."""
+    import munim.agent.within as within
+
+    monkeypatch.setattr(within, "connected_providers", lambda cid, backend=None: [])
+    server, _ = _server(tmp_path)
+    result = await server.call_tool("work_on_client",
+                                    {"client": "acme", "request": "anything"})
+    text = str(result)
+    assert "no provider connected" in text
+    assert "munim connect" in text, "a refusal with no next step is a complaint"
+
+
+async def test_working_on_one_client_is_declared_mutating(tmp_path):
+    server, _ = _server(tmp_path)
+    tools = {t.name: t for t in await server.list_tools()}
+    assert "work_on_client" in MUTATING
+    assert "client" in tools["work_on_client"].inputSchema.get("required", [])
+    assert "work_on_client" not in CROSS_CLIENT, \
+        "a tool that can write must never be allowed to span clients"
