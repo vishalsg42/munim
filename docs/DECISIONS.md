@@ -610,3 +610,51 @@ providers that is the mix-up attack it exists to prevent.
 so its id cannot ship and each operator registers their own integration. That
 asymmetry is a property of Vercel's flow, not a preference, and it is recorded
 here so nobody tries to "fix" it by committing a secret.
+
+---
+
+## D25: Wrapping the providers' own MCP servers, and why it was never considered
+
+**Open, not settled.** Recorded because "why not wrap Cloudflare's MCP server?"
+is the first question a sharp reader asks, and the honest answer starts with an
+admission.
+
+**It was never evaluated.** Twenty-four decisions, a spec and a plan, and the
+option appears in none of them. Worse, it was in front of us: D15 describes
+`mcpwarden` as "N namespaced MCP servers, one per account, a local registry
+holding secret references, and a launcher that resolves each secret at spawn".
+That is the wrapper approach. It was studied, four gaps were written down, and
+the gaps were used to justify building adapters instead of building on it, when
+three of the four (cross-client reads, the agent, the cross-account handoff) sit
+above the transport and could have been built on top.
+
+**The actual miss:** nobody asked whether the providers ship their own MCP
+servers. For a project whose entire premise is MCP that is a first-principles
+question, and it costs five minutes. Cloudflare has run OAuth-authenticated
+remote MCP servers throughout, including the one the operator already had
+connected while this was being built.
+
+**What the check found, 2026-09-04:**
+
+- `mcp.cloudflare.com/mcp` exposes 2,500+ endpoints through a search/execute
+  Code Mode pair. DNS writes are reachable.
+- Authentication is OAuth against Cloudflare, who are the client. **The
+  registration step disappears**, along with the shipped-client-id question D24
+  answers.
+- `dns-analytics.mcp.cloudflare.com/mcp` is read-only, so there is no typed,
+  narrower alternative for writes.
+- Resend publishes no MCP server and Vercel's story is the integration flow
+  already built, so any wrapper design is a hybrid rather than a replacement.
+
+**What wrapping does not buy.** The adapter is not valuable for making HTTP
+calls. It is valuable because `upsert` refuses to append beside existing
+duplicates, `merge_spf` deletes before it writes so a partial failure leaves one
+working policy rather than two ignored ones, and it reads the records back
+instead of trusting two HTTP 200s. A generic `execute` tool will post a third
+SPF record without complaint, which is the first item in this project's own
+catalogue. Wrapping replaces the lines that make the call and keeps every line
+that decides which call to make.
+
+**Unverified and load-bearing:** whether two OAuth sessions to the same remote
+MCP server can coexist in one client. That is the whole multi-account claim, and
+it is what `mcpwarden` solves by spawning N named servers rather than N sessions.
