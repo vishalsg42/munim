@@ -129,10 +129,18 @@ uv run munim-room --port 8986            # if 8977 is taken
 uv run munim-room --runs DIR --reports DIR   # serve a different set of runs
 ```
 
-## Any MCP server, not just these three
+## Any MCP server
 
-Cloudflare, Vercel and Resend are built in because they are what one operator
-needed. They are not the product. The product is a session per client against
+Ten providers are built in, and only the first needed any code. The rest are
+table entries: a URL and the answer probing gave when asked how the server wants
+to be authenticated. That is what the design is for. A provider stops being work
+and becomes a row.
+
+| ready, nothing to set up | needs an application | needs a URL |
+|---|---|---|
+| Cloudflare, Vercel, Resend, Netlify, Linear, Notion, Sentry | Gmail, Stitch | Zoho |
+
+They are not the product either. The product is a session per client against
 something that speaks MCP, and there is no reason it has to be a server somebody
 else chose.
 

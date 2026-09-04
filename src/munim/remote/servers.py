@@ -84,6 +84,32 @@ SERVERS: dict[str, RemoteServer] = {
              "answers a tool call with no credentials because the path is the "
              "credential",
     ),
+    # These four needed no code. Cloudflare has an adapter because it came
+    # first, before there was a way to ask a server how it wants to be
+    # authenticated. Everything below is a table entry with the answer probing
+    # gave, which is what the wrapper design is for: a provider stops being
+    # work and becomes a row.
+    "netlify": RemoteServer(
+        provider="netlify", url="https://netlify-mcp.netlify.app/mcp",
+        public_client=True, auth="registers",
+        note="confirmed: registers clients at "
+             "https://netlify-mcp.netlify.app/oauth-server/reg",
+    ),
+    "linear": RemoteServer(
+        provider="linear", url="https://mcp.linear.app/mcp",
+        public_client=True, auth="registers",
+        note="confirmed: registers clients at https://mcp.linear.app/register",
+    ),
+    "notion": RemoteServer(
+        provider="notion", url="https://mcp.notion.com/mcp",
+        public_client=True, auth="registers",
+        note="confirmed: registers clients at https://mcp.notion.com/register",
+    ),
+    "sentry": RemoteServer(
+        provider="sentry", url="https://mcp.sentry.dev/mcp",
+        public_client=True, auth="registers",
+        note="confirmed: registers clients at https://mcp.sentry.dev/oauth/register",
+    ),
     "resend": RemoteServer(
         provider="resend",
         url="https://mcp.resend.com/mcp",

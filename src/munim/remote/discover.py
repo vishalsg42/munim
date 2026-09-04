@@ -11,6 +11,8 @@ without credentials and read the challenge. Everything here is a GET or an
 unauthenticated call, so probing a server changes nothing on it.
 """
 
+import json
+
 import httpx
 
 from munim.remote.servers import RemoteServer
@@ -24,8 +26,34 @@ HEADERS = {"Accept": "application/json, text/event-stream",
            "Content-Type": "application/json"}
 
 
+# Which tool the probe actually called, so a claim about the server can name
+# the evidence behind it.
+_tried: list[str] = []
+
+
 class NotAnMcpServer(Exception):
     """Whatever is at that URL did not answer like an MCP server."""
+
+
+def _payload(response: httpx.Response) -> dict | None:
+    """The JSON-RPC body, however the transport framed it.
+
+    Streamable HTTP may answer as plain JSON or as an SSE stream, and both are
+    normal. Reading only the first meant a server replying in frames looked
+    like one that had answered nothing, and the classifier then called it
+    credential-free: the least safe way to be wrong.
+    """
+    try:
+        return response.json()
+    except ValueError:
+        pass
+    for line in response.text.splitlines():
+        if line.startswith("data:"):
+            try:
+                return json.loads(line[5:].strip())
+            except ValueError:
+                continue
+    return None
 
 
 async def _challenge(http: httpx.AsyncClient, url: str) -> str:
@@ -48,16 +76,39 @@ async def _challenge(http: httpx.AsyncClient, url: str) -> str:
                              json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
     if listed.status_code == 401:
         return listed.headers.get("www-authenticate", "")
-    try:
-        tools = listed.json()["result"]["tools"]
-    except Exception:
-        return ""
+    body = _payload(listed)
+    tools = ((body or {}).get("result") or {}).get("tools") or []
     if not tools:
         return ""
+    # Prefer a tool that looks like it touches an account. Servers often expose
+    # one or two public helpers, and judging the whole server by the first tool
+    # in the list called GoDaddy credential-free on the strength of a domain
+    # name suggester.
+    def account_shaped(tool: dict) -> bool:
+        name = tool["name"].lower()
+        return any(word in name for word in
+                   ("list", "get", "read", "account", "domains_list", "me"))
+
+    candidates = [t for t in tools if account_shaped(t)] or tools
+    _tried.clear()
+    _tried.append(candidates[0]["name"])
+
     called = await http.post(url, headers=headers, json={
         "jsonrpc": "2.0", "id": 3, "method": "tools/call",
-        "params": {"name": tools[0]["name"], "arguments": {}}})
-    return called.headers.get("www-authenticate", "") if called.status_code == 401 else ""
+        "params": {"name": candidates[0]["name"], "arguments": {}}})
+    if called.status_code == 401:
+        return called.headers.get("www-authenticate", "")
+
+    # A server may refuse inside the body rather than with a status. That is
+    # still a refusal, and treating it as "needs nothing" is the least safe way
+    # to be wrong.
+    body = _payload(called) or {}
+    text = json.dumps(body).lower()
+    if any(word in text for word in
+           ("unauthorized", "unauthenticated", "not authenticated",
+            "missing api key", "invalid token", "forbidden")):
+        return "in-body"
+    return ""
 
 
 async def probe(url: str, name: str = "") -> RemoteServer:
@@ -77,13 +128,25 @@ async def probe(url: str, name: str = "") -> RemoteServer:
 
         challenge = await _challenge(http, url)
 
+        if challenge == "in-body":
+            return RemoteServer(
+                provider=provider, url=url, public_client=False, auth="app",
+                note="refused a tool call in the response body rather than with "
+                     "a 401, so it wants a credential this could not discover. "
+                     "Check its own documentation for what")
+
         if not challenge:
-            # It answered a tool call without credentials. Either it is open, or
-            # the credential is already in the URL, which is how Zoho works.
+            # One tool answered without credentials. That is not the same as the
+            # server needing none: many expose a public helper or two beside
+            # everything else. Say which tool was tried so the claim can be
+            # checked rather than believed.
+            tried = _tried[0] if _tried else "a tool"
             return RemoteServer(
                 provider=provider, url=url, public_client=True, auth="url",
-                note="answered a tool call unauthenticated, so either it needs "
-                     "nothing or the URL carries the credential")
+                note=f"{tried!r} answered without credentials. Either the server "
+                     f"needs none, the URL carries the credential, or that one "
+                     f"tool is public while the rest are not: only using it "
+                     f"will say which")
 
         if 'resource_metadata="' not in challenge:
             return RemoteServer(
