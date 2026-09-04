@@ -34,6 +34,17 @@ from munim.remote.storage import (
 LOGIN_TIMEOUT = 300.0
 
 
+class NeedsLogin(Exception):
+    """Opening this session would mean authorising, and the caller said no.
+
+    A read-only script that reaches for a browser is not read-only. The
+    cross-account probe did exactly that once a Cloudflare token expired: it
+    opened a browser, printed an authorize URL, and blocked for five minutes
+    waiting for a callback that nobody was there to complete. Anything running
+    unattended wants a legible refusal instead.
+    """
+
+
 class NoRemoteServer(Exception):
     """This provider runs no MCP server, so there is nothing to connect to."""
 
@@ -45,6 +56,16 @@ def _metadata(client: str) -> OAuthClientMetadata:
     what appears on the consent screen and on the provider's list of authorised
     applications. Connecting the wrong account is the one failure a person has
     to catch, and this is where they can see it.
+
+    No scope is set here, and setting one would be theatre. The MCP spec
+    defines a Scope Selection Strategy and the SDK implements it: the scope
+    comes from the WWW-Authenticate challenge, else the resource's
+    scopes_supported, else the authorization server's, and whatever the client
+    put in its metadata is overwritten before the authorize request is built.
+
+    So on this route the provider chooses. RemoteServer.scopes records what
+    Munim would ask for and is honoured on the application route, which builds
+    its own authorize URL.
     """
     return OAuthClientMetadata(
         client_name=f"Munim ({client})",
@@ -77,7 +98,8 @@ def _registered_application(provider: str) -> tuple[str, str] | None:
 
 
 def auth_for(client: str, provider: str, *, backend=None,
-             on_url=None, label: str | None = None) -> OAuthClientProvider:
+             on_url=None, label: str | None = None,
+             allow_login: bool = True) -> OAuthClientProvider:
     """The OAuth client for one (client, provider), storing to the keychain.
 
     `client` is the identity credentials are filed under, so it is an id.
@@ -105,6 +127,14 @@ def auth_for(client: str, provider: str, *, backend=None,
     pending: dict[str, str | None] = {}
 
     async def redirect(url: str) -> None:
+        if not allow_login:
+            # Raised before the browser opens, not after: the point is that
+            # nothing appears on screen and nothing waits.
+            raise NeedsLogin(
+                f"{client} has no usable {provider} session, and opening one "
+                f"means signing in. Run: munim connect \"{label or client}\" "
+                f"{provider}"
+            )
         query = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
         pending["state"] = query.get("state", [None])[0]
         if on_url is not None:
@@ -232,7 +262,8 @@ async def _verify_account(session, client: str, provider: str, backend=None) -> 
 
 @asynccontextmanager
 async def session_for(client: str, provider: str, *, backend=None, on_url=None,
-                      verify: bool = True, label: str | None = None):
+                      verify: bool = True, label: str | None = None,
+                      allow_login: bool = True):
     """Open one client's session with one provider's MCP server."""
     server = server_for(provider)
     if server is None:
@@ -250,7 +281,7 @@ async def session_for(client: str, provider: str, *, backend=None, on_url=None,
         return  # a url-authenticated server has no account to drift
 
     auth = auth_for(client, provider, backend=backend, on_url=on_url,
-                    label=label)
+                    label=label, allow_login=allow_login)
     try:
         async with streamablehttp_client(url, auth=auth) as (read, write, _):
             async with ClientSession(read, write) as session:
@@ -260,11 +291,13 @@ async def session_for(client: str, provider: str, *, backend=None, on_url=None,
                 yield session
     except BaseExceptionGroup as group:
         # The transport runs inside an anyio task group, so anything raised in
-        # here comes back wrapped. A caller cannot catch WrongAccount through a
-        # group, and this is the one exception they most need to catch.
-        wrong = [e for e in _flatten(group) if isinstance(e, WrongAccount)]
-        if wrong:
-            raise wrong[0] from None
+        # here comes back wrapped. A caller cannot catch these through a group,
+        # and they are the two a caller most needs: the wrong account, and a
+        # session that would have to prompt for a login.
+        surfaced = [e for e in _flatten(group)
+                    if isinstance(e, (WrongAccount, NeedsLogin))]
+        if surfaced:
+            raise surfaced[0] from None
         raise
 
 

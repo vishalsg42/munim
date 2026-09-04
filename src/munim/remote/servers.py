@@ -41,6 +41,22 @@ class RemoteServer:
     auth: str = "registers"
     # Set for `app` providers: what has to be registered, and where.
     register_at: str = ""
+    # What to ask this provider for, on the routes where the ask is ours to
+    # make. That is the application route in connect/oauth.py, which builds its
+    # own authorize URL.
+    #
+    # It is NOT the MCP route. The spec defines a Scope Selection Strategy and
+    # the SDK implements it in mcp/client/auth/utils.py: the scope comes from
+    # the WWW-Authenticate challenge, else the resource's scopes_supported,
+    # else the authorization server's, and whatever the client set is
+    # discarded. So on that route the provider decides, and connecting Supabase
+    # asks for database:write and storage:write for a tool that has never
+    # written to Supabase.
+    #
+    # Recorded here anyway, because it is where the intent belongs and because
+    # the app route is exactly where the providers that most need narrowing end
+    # up: Gmail cannot register a client on demand, so it goes that way.
+    scopes: tuple[str, ...] = ()
 
     def __post_init__(self):
         if self.auth not in AUTH_KINDS:
@@ -63,13 +79,37 @@ SERVERS: dict[str, RemoteServer] = {
         provider="vercel",
         url="https://mcp.vercel.com",
         public_client=True,
-        note="registration confirmed: HTTP 201, token_endpoint_auth_method none, "
-             "no secret, despite the authorization server metadata omitting "
-             "`none` from token_endpoint_auth_methods_supported. Asked for "
-             "client_secret_post and was given a public client, so the metadata "
-             "understates it and only registering finds that out. Vercel states "
-             "it supports only clients it has reviewed; whether that rejects a "
-             "dynamically registered one at token exchange is still unverified",
+        # Public, and the metadata says otherwise twice over. Vercel serves two
+        # authorization server documents that disagree with each other:
+        #
+        #   mcp.vercel.com/.well-known/oauth-authorization-server -> ['none']
+        #   vercel.com/.well-known/oauth-authorization-server
+        #       -> ['client_secret_basic', 'client_secret_post', ...]
+        #
+        # RFC 9728 says the resource picks its authorization server and it
+        # picks vercel.com, so reading the spec correctly gives the answer that
+        # is wrong in practice. Registering against either endpoint returns
+        # HTTP 201, token_endpoint_auth_method 'none' and no secret.
+        #
+        # Recorded here because the wrong answer is the well-reasoned one, and
+        # this entry has already been changed to `False` once on the strength
+        # of the metadata before a registration put it back.
+        note="confirmed by registering, not by reading: both "
+             "api.vercel.com/login/oauth/register and "
+             "vercel.com/api/login/oauth/register answer HTTP 201 with "
+             "token_endpoint_auth_method 'none' and no client_secret. The two "
+             "authorization server documents disagree, and the one RFC 9728 "
+             "selects is the one that understates what registration does. "
+             "Connected live: 37 tools, which also answers the question this "
+             "entry used to leave open, whether Vercel rejects a dynamically "
+             "registered client at token exchange. It does not",
+        # offline_access is not decoration. Narrowing to "openid" alone, which
+        # is all the resource document advertises, produced a session with no
+        # refresh token that died in an hour and needed a full browser login to
+        # come back. The authorization server advertises offline_access even
+        # though the resource does not, and a scope list that omits it turns a
+        # long lived session into a one hour one without saying so.
+        scopes=("openid", "offline_access"),
     ),
     # No single address: each installation gets its own, and the path carries
     # the credential. The URL is therefore per client and lives in the keychain,
@@ -156,6 +196,17 @@ _GOOGLE = {
              "client_secret_basic, so an application must be registered by "
              "hand. Google's installed-application client type treats the "
              "secret as not confidential, which is how every CLI ships one",
+        # Not https://mail.google.com/, which Google also advertises here and
+        # which grants read, send and delete on the entire mailbox. Munim reads
+        # a domain's mail setup and, at most, changes records that serve it.
+        # `modify` covers labelling and drafting without granting hard delete;
+        # `readonly` covers everything the check catalogue needs.
+        #
+        # These are Google restricted scopes either way, so an application
+        # using them stays limited to its own test users until it passes
+        # Google verification. That is a reason to ask for less, not more.
+        scopes=("https://www.googleapis.com/auth/gmail.readonly",
+                "https://www.googleapis.com/auth/gmail.modify"),
     ),
     "stitch": RemoteServer(
         provider="stitch", url="https://stitch.googleapis.com/mcp",

@@ -48,7 +48,12 @@ async def _via_session(record, provider: str) -> set[str]:
     from munim.remote.identity import _first_named
     from munim.remote.session import session_for
 
-    async with session_for(record.id, provider, label=record.name) as session:
+    # allow_login=False on purpose. This script verifies a claim and changes
+    # nothing; a version of it that opens a browser and waits five minutes for
+    # a callback is not verifying anything. An expired token is reported as
+    # "reconnect this client", which is what it is.
+    async with session_for(record.id, provider, label=record.name,
+                           allow_login=False) as session:
         plan = _ACCOUNTS.get(provider)
         if plan is None:
             from munim.remote.identity import identity_of
@@ -87,9 +92,13 @@ async def _via_key(registry, record, provider: str) -> set[str]:
 
 
 async def _look(registry, record, provider: str, route: str):
-    if route == "session":
-        return record.name, await _via_session(record, provider)
-    return record.name, await _via_key(registry, record, provider)
+    from munim.remote.session import NeedsLogin
+    try:
+        if route == "session":
+            return record.name, await _via_session(record, provider)
+        return record.name, await _via_key(registry, record, provider)
+    except NeedsLogin as exc:
+        return record.name, exc
 
 
 async def main() -> int:
@@ -129,12 +138,27 @@ async def main() -> int:
     )
     elapsed = time.perf_counter() - started
 
+    from munim.remote.session import NeedsLogin
+
     seen: dict[str, set[str]] = {}
+    stale = []
     for client, found in results:
+        if isinstance(found, NeedsLogin):
+            stale.append((client, found))
+            print(f"{client}: session expired")
+            continue
         seen[client] = found
         print(f"{client}: {len(found)} account(s)/project(s)")
         for item in sorted(found):
             print(f"    {item}")
+
+    if stale:
+        print(file=sys.stderr)
+        for client, exc in stale:
+            print(f"  {exc}", file=sys.stderr)
+        print("\nA client whose session has expired proves nothing either way.",
+              file=sys.stderr)
+        return 2
 
     print(f"\nread concurrently in {elapsed:.2f}s, no logout between them")
 
