@@ -3,6 +3,8 @@ __pycache__/
 *.pyc
 .env
 .env.*
+# ...but the template is the only record of which variables exist.
+!.env.example
 *.token
 fixtures/real/
 .pytest_cache/
