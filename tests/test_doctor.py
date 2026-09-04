@@ -9,20 +9,60 @@ from munim import doctor
 from munim.registry import ClientRecord, Registry
 
 
-def test_a_missing_model_host_is_broken_not_merely_improvable(monkeypatch):
-    for key in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY",
-                "AWS_PROFILE", "AWS_ACCESS_KEY_ID"):
-        monkeypatch.delenv(key, raising=False)
+def test_no_model_host_is_not_broken_when_agents_are_off(monkeypatch):
+    """This used to assert BAD, under the name
+    `test_a_missing_model_host_is_broken_not_merely_improvable`, and that was
+    right while having a key was how you consented to using one.
+
+    Agents are opt-in now, so no model host is the default and intended state.
+    A fresh install reporting itself broken for behaving exactly as designed is
+    how people learn to ignore the report.
+    """
     monkeypatch.setattr(doctor, "load_env", lambda: None)
-    finding = doctor._model()
-    assert finding.status == doctor.BAD
-    assert "GEMINI_API_KEY" in finding.fix
+    findings = doctor._agents()
+    assert all(f.status != doctor.BAD for f in findings), \
+        [f.detail for f in findings]
+    assert any("off" in f.detail for f in findings)
+    assert any("munim config ai on" in f.fix for f in findings)
 
 
-def test_a_configured_model_host_passes(monkeypatch):
+def test_agents_on_with_no_usable_host_is_broken(monkeypatch):
+    """The other direction, which is what makes the test above mean something.
+
+    Asserting only that nothing is BAD would pass just as well if `_agents`
+    never reported anything at all.
+    """
+    from munim import settings
+
+    monkeypatch.setattr(doctor, "load_env", lambda: None)
+    monkeypatch.setenv("MUNIM_AI", "1")
+    monkeypatch.setattr(settings, "installed", lambda host: False)
+    findings = doctor._agents()
+    assert any(f.status == doctor.BAD for f in findings), \
+        [f.detail for f in findings]
+
+
+def test_a_usable_host_passes(monkeypatch):
+    from munim import settings
+
+    monkeypatch.setattr(doctor, "load_env", lambda: None)
+    monkeypatch.setenv("MUNIM_AI", "1")
+    monkeypatch.setenv("MUNIM_AI_HOST", "gemini")
+    monkeypatch.setenv("GEMINI_API_KEY", "x")
+    monkeypatch.setattr(settings, "installed", lambda host: True)
+    findings = doctor._agents()
+    assert any(f.status == doctor.OK and "gemini" in f.detail for f in findings), \
+        [f.detail for f in findings]
+
+
+def test_a_key_with_agents_off_is_pointed_out(monkeypatch):
+    """The upgrade case. Somebody on 0.2.1 had a key and got explanations; after
+    this they do not, and the prose would otherwise just quietly stop."""
     monkeypatch.setattr(doctor, "load_env", lambda: None)
     monkeypatch.setenv("GEMINI_API_KEY", "x")
-    assert doctor._model().status == doctor.OK
+    findings = doctor._agents()
+    assert any(f.status == doctor.WARN and "unused" in f.detail
+               for f in findings), [f.detail for f in findings]
 
 
 def test_every_finding_that_is_not_ok_carries_a_fix(monkeypatch, tmp_path):
@@ -33,8 +73,8 @@ def test_every_finding_that_is_not_ok_carries_a_fix(monkeypatch, tmp_path):
                 "AWS_PROFILE", "AWS_ACCESS_KEY_ID"):
         monkeypatch.delenv(key, raising=False)
     registry = Registry(tmp_path / "r.json")
-    findings = [doctor._model(), doctor._room(), *doctor._oauth_apps(),
-                *doctor._clients(registry)]
+    findings = [*doctor._agents(), doctor._room(), doctor._settings_file(),
+                *doctor._oauth_apps(), *doctor._clients(registry)]
     for finding in findings:
         if finding.status != doctor.OK:
             assert finding.fix, f"{finding.what} reports a problem with no fix"

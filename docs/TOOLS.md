@@ -10,13 +10,28 @@ whatever else is in the repository.
 | `add_client` | register one |
 | `connect_provider` | store a pasted key, for providers with nothing better |
 | `find_across_clients` | one deterministic question over all of them at once |
-| `ask_across_clients` | one open question over all of them, read-only (see the note below) |
+| `ask_across_clients` | one open question over all of them, read-only (needs agents on) |
 | `audit_all_clients` | the whole catalogue against every client, silent when they all pass |
-| `check` | the 13-check catalogue against a client or a bare domain |
-| `work_on_client` | do something inside one client's accounts, using their own provider tools |
+| `check` | the 13-check catalogue against a client or a bare domain (agents on adds the explanation) |
+| `work_on_client` | do something inside one client's accounts, using their own provider tools (needs agents on) |
 | `plan_mail_setup` | what setting up email would change, touching no DNS |
 | `apply_mail_setup` | carry out a plan, with approval required to replace a record |
 | `launch_status` | read a run back |
+
+**Three of these need agents turned on, and they are off by default.**
+`ask_across_clients` and `work_on_client` are agent loops end to end: with agents
+off they answer with the command to turn them on rather than doing anything.
+`check` is different, because its thirteen checks are deterministic and are the
+half that matters: it runs them all either way and skips only the plain-English
+explanation, saying so in its result and in the report.
+
+They stay listed rather than disappearing when agents are off. A tool that has
+been switched off is not the same as one that was never built, and a coding agent
+that cannot see a tool cannot tell you the feature exists or how to enable it.
+The guarantee that nothing reaches a model host lives one layer down, in the
+function that builds the model, where it covers every caller.
+
+Everything else here is deterministic and never touches a model at all.
 
 **Repair is deliberately two calls rather than one.** A tool call returns once, so
 there is nowhere for a mid-flight question to go. `plan` reads what is there and

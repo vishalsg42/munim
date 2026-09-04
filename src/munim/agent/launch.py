@@ -20,7 +20,8 @@ from dataclasses import asdict
 from strands import Agent, tool
 
 from munim.adapters.cloudflare import Cloudflare
-from munim.agent.model import build_model
+from munim import settings
+from munim.agent.model import AgentsDisabled, build_model
 from munim.agent.spf import merge_spf, within_lookup_limit
 from munim.checks.dns import (CheckResult, query, run_all_async,
                              run_reachability_async, spf_single)
@@ -136,6 +137,21 @@ async def explain(domain: str, client: str, failures: list[CheckResult],
         for r in failures
     )
 
+    # Agents off is a setting, not a fault. It used to land in the same
+    # `escalated` branch as a broken host, so a deliberate local run read as
+    # something going wrong. `observation` rather than a new kind because
+    # runlog.Kind is a closed Literal and LaunchEvent forbids extras, so adding
+    # one would mean touching the room reducer and the report filters for a line
+    # of text. No "check" key in the detail: report.py pulls those into the
+    # owner-facing checklist.
+    if not settings.ai().enabled:
+        log.append(client=client, stage="diagnose", kind="observation",
+                   human_text="Agents are off, so these findings have no "
+                              "plain-English explanation. Munim is local by "
+                              "default: turn them on with `munim config ai on`.",
+                   detail={"agents": "off"})
+        return ""
+
     # The checks are deterministic and have already run. Losing the explanation
     # is worth saying out loud; losing the findings with it would be absurd. A
     # missing key and a stale one both land here: build_model only constructs
@@ -159,6 +175,14 @@ async def explain(domain: str, client: str, failures: list[CheckResult],
             "For each one, write the owner-facing explanation and say whether you "
             "can fix it or a person must decide."
         )
+    except AgentsDisabled:
+        # Only reachable if the setting changed between the check above and
+        # here. Still not a fault, so it does not escalate.
+        log.append(client=client, stage="diagnose", kind="observation",
+                   human_text="Agents were turned off while this run was in "
+                              "flight, so there is no explanation.",
+                   detail={"agents": "off"})
+        return ""
     except Exception as exc:
         log.append(client=client, stage="diagnose", kind="escalated",
                    human_text="The findings below stand, but no model host "

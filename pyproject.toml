@@ -1,6 +1,6 @@
 [project]
 name = "munim"
-version = "0.2.1"
+version = "0.3.0"
 description = "One MCP server holding a live session with every client's account at once."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -31,6 +31,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Strands ships Gemini and Anthropic as extras, so a bare install has
+# strands.models.gemini on disk with no `google` package underneath it. Until
+# these existed, build_model raised ModuleNotFoundError for two of the three
+# hosts this project documents, while doctor reported them as fine.
+gemini = ["strands-agents[gemini]==1.54.0"]
+anthropic = ["strands-agents[anthropic]==1.54.0"]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "respx>=0.22"]
 
 [project.scripts]

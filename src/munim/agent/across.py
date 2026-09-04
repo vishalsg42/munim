@@ -13,7 +13,7 @@ across, write within" (D5) stops depending on the model doing as it is told.
 
 from strands import Agent
 
-from munim.agent.model import build_model
+from munim.agent.model import agents_off, build_model
 from munim.remote.servers import SERVERS
 from munim.remote.storage import KeychainTokenStorage
 from munim.remote.toolsets import toolsets_for
@@ -52,6 +52,15 @@ def connected_clients(clients, provider: str, backend=None) -> list:
 
 async def ask(question: str, clients: list[str], *, backend=None) -> str:
     """Answer `question` using every connected client's read-only tools."""
+    # Ahead of the per-provider keychain reads below, for the same reason as
+    # within.work_on: this is importable, and refusing after doing the work
+    # would be the same answer for more effort.
+    off = agents_off()
+    if off is not None:
+        # This one returns prose rather than a dict, so the command has to be
+        # folded into the sentence. A refusal with no next step is a complaint.
+        return f"{off['why']} Turn them on with: {off['fix']}"
+
     toolsets = []
     reached: dict[str, list[str]] = {}
     for provider in sorted(SERVERS):
@@ -67,7 +76,7 @@ async def ask(question: str, clients: list[str], *, backend=None) -> str:
                 "nothing to read across. Connect one with "
                 "`munim connect \"<client>\" cloudflare`.")
 
-    model, _ = build_model()
+    model, _ = build_model(backend)
     agent = Agent(model=model, tools=toolsets, system_prompt=SYSTEM,
                   callback_handler=None)
 

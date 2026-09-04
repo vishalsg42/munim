@@ -30,13 +30,27 @@ provider is concerned they are two applications and there is nothing shared to
 clobber. A coding agent holds one account per provider because one client id
 shares one token store.
 
-## Four decisions carry the design
+## Five decisions carry the design
 
 **Enumeration is deterministic; only judgement is model work.** The checks decide
 pass or fail from a DNS answer. The agent cannot contradict them, so it cannot
 invent a record or argue a failing check into passing. What it does is the part a
 rule engine is bad at: working out *why* something failed, and saying it to
 someone non-technical.
+
+**Policy and construction are separate, and the gate is where data leaves.**
+`settings.py` decides whether Munim may think, on which host, with which model
+and key. `agent/model.py` does the construction and refuses when policy says no.
+Deciding should not require the ability to build, and `doctor` and the CLI both
+need the answer without importing Strands. The refusal lives in `build_model`
+because that is the only place in `src/` a model is constructed, so one check
+covers every caller including ones written later. Agents are off by default:
+having a key is not the same as deciding to use one (D27).
+
+That switch controls Munim's own model host and nothing else. Munim is an MCP
+server, so every tool result also reaches whichever model the coding agent runs
+on. That is a property of the transport rather than a setting, and the privacy
+policy says so.
 
 **The run log is the one source of truth.** The MCP server speaks JSON-RPC over
 stdout, so it cannot print progress there without corrupting the protocol, and

@@ -18,6 +18,7 @@ from munim.connected import connections
 from munim.container import KeychainBackend
 from munim.env import load as load_env
 from munim.registry import Registry
+from munim.settings import read as read_settings
 
 
 OK, WARN, BAD = "ok", "warn", "bad"
@@ -54,20 +55,96 @@ def _config() -> Finding:
                        f"run from. Looked in {looked} and further up")
 
 
-def _model() -> Finding:
+def _settings_file() -> Finding:
+    """The other config file, named for the same reason as the first.
+
+    `_config` reports the .env and used to be the only answer to "where does
+    Munim read from". Since the agent settings landed there are two files, and a
+    doctor that names one while silently reading two is the mystery this whole
+    pair of findings exists to prevent.
+    """
+    from munim.settings import _path
+
+    path = _path()
+    home = Path.home()
+    shown = f"~/{path.relative_to(home)}" if path.is_relative_to(home) else str(path)
+    if not path.is_file():
+        return Finding(OK, "Settings", f"{shown} (none yet, so defaults)",
+                       fix="")
+    _, problem = read_settings()
+    if problem:
+        return Finding(WARN, "Settings", problem,
+                       fix=f"fix or delete {shown}. Agents stay off until it "
+                           f"parses, which is the safe way round")
+    return Finding(OK, "Settings", shown)
+
+
+def _agents() -> list[Finding]:
+    """Whether Munim may think, on what, and what is stopping it.
+
+    Replaces `_model`, which asked only "is a key set" and answered OK for
+    Gemini whenever GEMINI_API_KEY existed, without checking the backend could
+    be imported. It could not, on a bare install: Strands ships Gemini and
+    Anthropic as extras. So doctor reported a working host for something that
+    raised ModuleNotFoundError at the first call.
+
+    "No model host" is no longer BAD. Off is the default and the intended state,
+    and a fresh install reporting itself broken for behaving as designed teaches
+    people to ignore the report.
+    """
+    from munim import settings
+    from munim.env import ignored_in
+
     load_env()
-    if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
-        return Finding(OK, "Model host", "Gemini")
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        return Finding(OK, "Model host", "Anthropic")
-    if os.environ.get("AWS_PROFILE") or os.environ.get("AWS_ACCESS_KEY_ID"):
-        return Finding(WARN, "Model host", "AWS credentials present; Bedrock untested",
-                       fix="munim doctor --probe-model")
-    from munim.env import CONFIG_HOME
-    return Finding(BAD, "Model host", "none configured",
-                   fix=f"echo 'GEMINI_API_KEY=...' >> {CONFIG_HOME}  (any "
-                       f"Strands provider works, and that file is read from "
-                       f"any directory)")
+    state = settings.ai()
+    out: list[Finding] = []
+
+    # Anything that made a setting unreadable. Each is already phrased as a
+    # sentence by settings.ai, because it knows which value was wrong.
+    for problem in state.problems:
+        out.append(Finding(WARN, "Agents", problem,
+                           fix="munim config ai  shows what is set"))
+
+    for path, name in ignored_in():
+        out.append(Finding(WARN, "Agents",
+                           f"{name} is set in {path}, and a file cannot carry it",
+                           fix=f"remove it and use: munim config ai on"))
+
+    # A shell variable changes what this command reports and not what the MCP
+    # server does: the server is a subprocess and does not inherit this shell.
+    if os.environ.get("MUNIM_AI") is not None:
+        out.append(Finding(WARN, "Agents",
+                           f"MUNIM_AI is set in this shell, so it decides what "
+                           f"this command reports",
+                           fix="the MCP server does not inherit this shell, so "
+                               "it reads settings.json. Use: munim config ai on"))
+
+    if not state.enabled:
+        out.append(Finding(OK, "Agents", "off, so Munim is local",
+                           fix="munim config ai on  to let check, "
+                               "work_on_client and ask_across_clients reason"))
+        # The upgrade case: somebody on 0.2.1 had a key and got explanations.
+        # Without this the prose just quietly stops appearing.
+        holding = [h for h in settings.ORDER
+                   if settings.HOSTS[h].keys and settings.resolve_key(h)[0]]
+        if holding:
+            out.append(Finding(WARN, "Agents",
+                               f"a {', '.join(holding)} key is configured but "
+                               f"agents are off, so it is unused",
+                               fix="munim config ai on, or munim config ai "
+                                   f"unset {holding[0]} to remove the key"))
+        return out
+
+    chosen = state.chosen()
+    if chosen:
+        out.append(Finding(OK, "Agents",
+                           f"on, {chosen} {settings.model_for(chosen)}"))
+        return out
+
+    from munim.agent.model import _why_nothing_is_usable
+    out.append(Finding(BAD, "Agents", "on, but no model host can be built",
+                       fix=_why_nothing_is_usable(state)))
+    return out
 
 
 def _mcp_registered() -> Finding:
@@ -218,8 +295,8 @@ def _room() -> Finding:
 
 def run(registry: Registry | None = None) -> int:
     registry = registry or Registry(Path.home() / ".munim" / "registry.json")
-    findings = [_config(), _model(), _mcp_registered(), _room(), _keychain(),
-                *_oauth_apps(), *_clients(registry)]
+    findings = [_config(), _settings_file(), *_agents(), _mcp_registered(),
+                _room(), _keychain(), *_oauth_apps(), *_clients(registry)]
 
     width = max(len(f.what) for f in findings) + 2
     for f in findings:
