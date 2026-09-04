@@ -685,6 +685,39 @@ against it is narrower and worth stating without the padding:
 
 That is a real case, and it is a smaller one than "nobody else has built this".
 
+### Measured, 2026-09-04, rather than read
+
+D24 concluded Cloudflare does not support Dynamic Client Registration, from
+`dash.cloudflare.com/.well-known/openid-configuration` having no
+`registration_endpoint`. That is the *dashboard's* authorization server. Each
+provider's **MCP server** runs a different one, and every one of them supports
+DCR. Third generalisation from a single check in one day.
+
+Probed by following the MCP discovery chain from an unauthenticated request:
+
+| Provider | MCP server | Registration endpoint | CIMD | `none` auth |
+|---|---|---|---|---|
+| Cloudflare | `mcp.cloudflare.com/mcp` | `/register`, **confirmed working** | yes | yes |
+| Vercel | `mcp.vercel.com` | `api.vercel.com/login/oauth/register` | no | no |
+| Resend | `mcp.resend.com/mcp` | `api.resend.com/oauth/register` | yes | yes |
+
+Cloudflare's was not read about but exercised: one unauthenticated POST returned
+a `client_id` bound to `http://localhost:8976/oauth/callback` with
+`token_endpoint_auth_method: none` and no secret. No human, no dashboard, no
+shipped id.
+
+Vercel requires a client secret, which DCR issues at registration time and the
+client stores locally, so that is not an obstacle and certainly not a reason to
+put a secret in the repository.
+
+**What this costs the argument.** The friction that justified building adapters,
+that each operator would have to register an application per provider, does not
+exist on the MCP path. D24's shipped-client-id machinery answers a question the
+wrapper route never asks. What survives is only points 1 to 4 above, of which 2
+and 3 are real and 1 is unverified: whether Vercel's "reviewed and approved
+clients only" policy rejects a dynamically registered client is not something a
+discovery document answers.
+
 **What wrapping does not buy.** The adapter is not valuable for making HTTP
 calls. It is valuable because `upsert` refuses to append beside existing
 duplicates, `merge_spf` deletes before it writes so a partial failure leaves one
