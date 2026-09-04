@@ -140,3 +140,20 @@ async def test_the_refusal_says_how_to_fix_it():
     said = str(caught.value)
     assert "Nothing was read or changed" in said
     assert "munim connect" in said
+
+
+async def test_connecting_is_allowed_to_change_the_account():
+    """The guard must not block its own remedy.
+
+    Being bound to the wrong account is fixed by connecting again, and if that
+    path is verified against the account it is trying to replace, it refuses
+    forever. Connecting is the one moment the answer is allowed to change,
+    because it is the moment the operator is saying what it should be.
+    """
+    import inspect
+
+    from munim.remote.session import connect_and_identify
+
+    source = inspect.getsource(connect_and_identify)
+    assert "verify=False" in source, \
+        "connecting goes through the guard and cannot rebind a wrong account"

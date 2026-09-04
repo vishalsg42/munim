@@ -279,6 +279,11 @@ async def connect_and_identify(client: str, provider: str,
     """
     from munim.remote.identity import identity_of
 
-    async with session_for(client, provider, **kwargs) as session:
+    # verify=False on purpose. Connecting is how an operator says which account
+    # this client uses, so it is the one moment the answer is allowed to
+    # change: a guard that refuses here would block the only remedy for having
+    # been bound to the wrong one. The caller records what it landed on, which
+    # is what every later session is then checked against.
+    async with session_for(client, provider, verify=False, **kwargs) as session:
         tools = [t.name for t in (await session.list_tools()).tools]
         return tools, await identity_of(session, provider)

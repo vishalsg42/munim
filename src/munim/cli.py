@@ -374,7 +374,15 @@ def connect_via_mcp(client: str | None, provider: str) -> int:
     # now nothing compared them: a typo at the prompt stored a real token under
     # a name that had nothing to do with it.
     if account and not naming and current_id is not None:
-        KeychainTokenStorage(current_id, provider).remember_account(account)
+        store = KeychainTokenStorage(current_id, provider)
+        was = store.account()
+        store.remember_account(account)
+        if was and was != account:
+            # Said out loud rather than swapped quietly. Rebinding a client to
+            # a different account is sometimes the point and sometimes the
+            # accident that brought them here.
+            print(f"  This client was previously connected as {was!r}. "
+                  f"It is now {account!r}.", file=sys.stderr)
 
     where = f"\n  account: {account}" if account and not naming else ""
     print(f"Connected {provider} for {client}: {len(tools)} tools.{where}",
