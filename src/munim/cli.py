@@ -294,20 +294,32 @@ def _redacted(url: str) -> str:
     return f"{parsed.scheme}://{parsed.netloc}/…"
 
 
-def ask_which_client(registry, ask=input) -> str | None:
+ACCOUNT_NAMES_IT = "__account__"
+
+
+def ask_which_client(registry, ask=input, *, account_can_name=False) -> str | None:
     """Which client is this for.
 
     A URL that carries a credential cannot name itself the way an OAuth login
     can, so the choice has to come from somewhere. Refusing and telling the
     operator to type a name they already have on screen is worse than asking.
 
-    Returns a client id, a new name, or None if they backed out.
+    `account_can_name` is for the OAuth path, where a new client does not have
+    to be named by hand: sign in and the account supplies the name, which is
+    what keeps a label and an account from drifting apart. Offering only "type
+    a name" would have quietly removed that.
+
+    Returns a client id, a new name, ACCOUNT_NAMES_IT, or None if they backed
+    out.
     """
     records = sorted(registry.clients(), key=lambda r: r.name.lower())
     print("Which client is this for?", file=sys.stderr)
     for number, record in enumerate(records, 1):
         print(f"  {number}  {record.name}"
               + (f"   {record.domain}" if record.domain else ""), file=sys.stderr)
+    if account_can_name:
+        print("  a  a new client, named after the account I sign in to",
+              file=sys.stderr)
     print("  n  a client not listed", file=sys.stderr)
     print("> ", end="", file=sys.stderr, flush=True)
 
@@ -316,6 +328,9 @@ def ask_which_client(registry, ask=input) -> str | None:
     except (EOFError, KeyboardInterrupt):
         print(file=sys.stderr)
         return None
+
+    if account_can_name and answer.lower() == "a":
+        return ACCOUNT_NAMES_IT
 
     if answer.lower() == "n":
         print("Name for this client: ", end="", file=sys.stderr, flush=True)
@@ -747,6 +762,23 @@ def main(argv: list[str] | None = None) -> int:
                 print("Nothing connected.", file=sys.stderr)
                 return 2
         return connect_by_url(target, args.provider, args.url)
+
+    # Connecting a second provider for a client you already have is the common
+    # case after the first day, and with no name this went straight to "let the
+    # account name a new client", quietly making another one. The only way to
+    # avoid that was to retype a name already on screen.
+    #
+    # Not asked when there is nothing to choose from, because a prompt with one
+    # option is worse than the zero-setup path it replaces, and not asked
+    # without a terminal, because a prompt nobody can answer is a hang.
+    if args.client is None and sys.stdin.isatty():
+        if _registry().clients():
+            picked = ask_which_client(_registry(), account_can_name=True)
+            if picked is None:
+                print("Nothing connected.", file=sys.stderr)
+                return 2
+            # None keeps the old behaviour: authorise first, name after.
+            args.client = None if picked == ACCOUNT_NAMES_IT else picked
 
     # `--token` never reaches here: it is handled above and stores a pasted key.
     if not args.via_app and server_for(args.provider) is not None:

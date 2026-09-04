@@ -161,4 +161,20 @@ class KeychainTokenStorage(TokenStorage):
         # This carries the client secret for providers that require one. It goes
         # to the keychain for the same reason a provider token does, and it is
         # per client, because each client is a separate registration.
+        #
+        # A registration that issued a secret and named no auth method is the
+        # one combination that cannot be right, and it is what Supabase returns:
+        # 44 characters of client_secret and a null token_endpoint_auth_method.
+        # Stored as-is, the next token exchange reads that null, decides it is a
+        # public client, sends no secret, and Supabase answers
+        # `Required parameter: client_secret`. The secret was never missing.
+        #
+        # RFC 7591 says the default when the field is absent is
+        # client_secret_basic, so absent never means public for a client holding
+        # a secret. Only the absent case is filled in; a server that states a
+        # method is obeyed, and a public client is left alone because inventing
+        # a method for one would break a flow that works.
+        if info.client_secret and not info.token_endpoint_auth_method:
+            info = info.model_copy(
+                update={"token_endpoint_auth_method": "client_secret_basic"})
         self._write("client", info)
