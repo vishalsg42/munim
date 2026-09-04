@@ -155,8 +155,8 @@ the domain-expiry and mail-health questions actually run on.
 
 ## Any MCP server
 
-Ten providers are built in, and only the first needed any code. Point Munim at any
-other MCP server and it works out how that server authenticates:
+Eleven providers are built in, and only the first needed any code. Point Munim at
+any other MCP server and it works out how that server authenticates:
 
 ```bash
 munim add-server acme https://mcp.acme.com/mcp
@@ -164,9 +164,9 @@ munim connect "Acme Ltd" acme
 munim servers                       # what Munim knows about, and what each needs
 ```
 
-Built in: Cloudflare, Vercel, Resend, Netlify, Linear, Notion, Sentry (all zero
-setup, via dynamic client registration), Gmail and Stitch (need a registered
-application), Zoho (the endpoint URL is the credential).
+Built in: Cloudflare, Vercel, Resend, Netlify, Linear, Notion, Sentry, Supabase
+(all zero setup, via dynamic client registration), Gmail and Stitch (need a
+registered application), Zoho (the endpoint URL is the credential).
 
 ---
 
@@ -216,7 +216,7 @@ munim-room --runs DIR --reports DIR     # serve a different set of runs
 | Check catalogue, 13 checks, no credentials needed | ✅ |
 | **Two accounts on one provider, concurrently, one process** | ✅ **live against two real Cloudflare accounts** |
 | A session per client against the providers' own MCP servers | ✅ live |
-| Dynamic client registration, so nothing is registered by hand | ✅ 7 of 10 providers |
+| Dynamic client registration, so nothing is registered by hand | ✅ 8 of 11 providers |
 | Client named and verified by the account it was authorised as | ✅ |
 | Cross-client questions, writes structurally absent | ✅ |
 | Run log with replay, control room live over SSE | ✅ |

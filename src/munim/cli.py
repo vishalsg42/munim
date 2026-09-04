@@ -14,7 +14,7 @@ import sys
 from munim.connect.oauth import (PROVIDERS, SHIPPED_CLIENT_IDS,
                                  OAuthConnector)
 from munim.connect.token import TokenConnector
-from munim.container import KeychainBackend
+from munim.container import KEY_PROVIDERS, KeychainBackend
 from munim.env import load as load_env
 from munim.registry import ClientRecord, Registry, UnknownClient
 
@@ -51,7 +51,7 @@ def disconnect(client: str | None, provider: str | None, everything: bool) -> in
     account and leaves what says who they are. Reconnecting is a browser
     window, so the cost of being wrong here is minutes rather than data.
     """
-    from munim.container import KeychainBackend
+    from munim.container import KEY_PROVIDERS, KeychainBackend
     from munim.remote.servers import all_servers
     from munim.remote.storage import KeychainTokenStorage
 
@@ -66,7 +66,7 @@ def disconnect(client: str | None, provider: str | None, everything: bool) -> in
             return 2
 
     providers = [provider] if provider else sorted(
-        {*all_servers(), "cloudflare", "vercel", "resend", "supabase"})
+        {*all_servers(), *KEY_PROVIDERS})
 
     backend = KeychainBackend()
     removed = []
@@ -111,7 +111,7 @@ def _sweep_orphans(known: set[str], providers: list[str]) -> list[str]:
     import platform
     import subprocess
 
-    from munim.container import KeychainBackend
+    from munim.container import KEY_PROVIDERS, KeychainBackend
     from munim.remote.storage import KeychainTokenStorage
 
     if platform.system() != "Darwin":
@@ -203,7 +203,7 @@ def merge(source: str, target: str) -> int:
     client recorded twice, and picking a winner would silently drop a
     credential for a live account.
     """
-    from munim.container import KeychainBackend
+    from munim.container import KEY_PROVIDERS, KeychainBackend
     from munim.remote.servers import SERVERS
     from munim.remote.storage import KeychainTokenStorage
 
@@ -255,7 +255,7 @@ def merge(source: str, target: str) -> int:
 def forget(client: str) -> int:
     """Remove a client that holds nothing. Refuses otherwise: a row removed
     while a credential remains leaves one nothing can reach or name."""
-    from munim.container import KeychainBackend
+    from munim.container import KEY_PROVIDERS, KeychainBackend
     from munim.remote.servers import SERVERS
     from munim.remote.storage import KeychainTokenStorage
 
@@ -524,7 +524,7 @@ def rename(old: str, new: str) -> int:
     filed by client name too, and leaving them behind would silently
     disconnect a client that still looks connected.
     """
-    from munim.container import KeychainBackend
+    from munim.container import KEY_PROVIDERS, KeychainBackend
     from munim.remote.servers import SERVERS
     from munim.remote.storage import KeychainTokenStorage
 
@@ -616,7 +616,7 @@ def main(argv: list[str] | None = None) -> int:
     # Whatever is known, built in or added by the operator. A fixed list here
     # meant adding a server did not make it connectable.
     from munim.remote.servers import all_servers
-    known = sorted({*PROVIDERS, "resend", *all_servers()})
+    known = sorted({*all_servers(), *KEY_PROVIDERS})
     c.add_argument("provider", nargs="?", choices=known)
     c.add_argument("--token", action="store_true",
                    help="paste an API key instead of logging in")
@@ -677,11 +677,11 @@ def main(argv: list[str] | None = None) -> int:
     # first one. Shift it: a lone argument that names a provider is a provider.
     if args.command == "connect" and args.provider is None:
         from munim.remote.servers import all_servers
-        if args.client in {*PROVIDERS, "resend", *all_servers()}:
+        if args.client in {*all_servers(), *KEY_PROVIDERS}:
             args.client, args.provider = None, args.client
         else:
             parser.error(f"unknown provider {args.client!r}. Choose from: "
-                         + ", ".join(sorted({*PROVIDERS, "resend", *all_servers()})))
+                         + ", ".join(sorted({*all_servers(), *KEY_PROVIDERS})))
 
     if args.command == "disconnect":
         if not args.everything and not args.client:

@@ -89,6 +89,19 @@ SERVERS: dict[str, RemoteServer] = {
     # authenticated. Everything below is a table entry with the answer probing
     # gave, which is what the wrapper design is for: a provider stops being
     # work and becomes a row.
+    # Cut during planning as "a fifth provider with zero video value", and the
+    # cut left it half-present: `connect` offered it, `doctor` told everyone to
+    # register an OAuth application for it, and nothing could use the result.
+    # It turns out to run a hosted MCP server with dynamic client registration,
+    # so the honest fix was to finish it rather than remove it. Probed, not read.
+    "supabase": RemoteServer(
+        provider="supabase", url="https://mcp.supabase.com/mcp",
+        public_client=False, auth="registers",
+        note="confirmed: registers clients at "
+             "https://api.supabase.com/platform/oauth/apps/register, and issues "
+             "a secret, so the session authenticates with client_secret_post "
+             "rather than as a public client",
+    ),
     "netlify": RemoteServer(
         provider="netlify", url="https://netlify-mcp.netlify.app/mcp",
         public_client=True, auth="registers",

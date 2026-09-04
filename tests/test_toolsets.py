@@ -52,8 +52,10 @@ def test_two_clients_that_would_share_a_prefix_are_refused():
 
 
 def test_a_provider_with_no_mcp_server_is_refused():
+    """Named a real provider once, and that provider turned out to have a
+    server. A name that cannot acquire one keeps the assertion about the code."""
     with pytest.raises(NoRemoteServer):
-        toolset_for("Acme", "supabase", backend=FakeKeyring())
+        toolset_for("Acme", "a-provider-that-does-not-exist", backend=FakeKeyring())
 
 
 def test_two_toolsets_for_one_provider_are_told_apart_by_name():

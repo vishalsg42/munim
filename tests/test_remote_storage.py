@@ -82,8 +82,15 @@ async def test_nothing_is_returned_before_anything_is_stored():
 
 
 def test_a_provider_without_an_mcp_server_is_absent_not_guessed():
-    """Supabase has no entry. D11: absent, rather than a plausible URL."""
-    assert server_for("supabase") is None
+    """D11: absent, rather than a plausible URL.
+
+    This used to name supabase, which is exactly the trap the rule exists for:
+    supabase was assumed to have no MCP server because this table did not list
+    it, and the table was the thing that was wrong. It runs one at
+    mcp.supabase.com with dynamic client registration. A test asserting a real
+    provider's absence encodes that mistake, so it now asks about a name that
+    cannot acquire a server later."""
+    assert server_for("a-provider-that-does-not-exist") is None
     assert server_for("cloudflare").url == "https://mcp.cloudflare.com/mcp"
 
 
@@ -164,7 +171,7 @@ def test_a_provider_with_no_mcp_server_is_refused_at_construction():
     from munim.remote.session import NoRemoteServer, auth_for
 
     with pytest.raises(NoRemoteServer, match="Providers that do"):
-        auth_for("X", "supabase", backend=FakeKeyring())
+        auth_for("X", "a-provider-that-does-not-exist", backend=FakeKeyring())
 
 
 def test_both_flows_agree_on_the_redirect():
@@ -201,7 +208,19 @@ def test_a_provider_with_an_mcp_server_needs_no_setup_by_default(monkeypatch):
 
 
 def test_a_provider_without_one_falls_back_to_an_application(monkeypatch):
-    assert _routes(["connect", "Acme", "supabase"], monkeypatch) == "app"
+    """Every provider Munim knows now runs an MCP server, so this path has no
+    live example. That is a reason to construct the condition, not to delete
+    the test: the fallback is what a provider without one still gets, and it
+    should keep working when the next such provider arrives."""
+    import munim.remote.servers as servers
+
+    real = servers.server_for
+    monkeypatch.setattr(servers, "server_for",
+                        lambda p: None if p == "cloudflare" else real(p))
+
+    # cloudflare stays a valid choice because it is key-callable too, so the
+    # only thing that changes is whether an MCP server exists for it.
+    assert _routes(["connect", "Acme", "cloudflare"], monkeypatch) == "app"
 
 
 def test_via_app_opts_out(monkeypatch):

@@ -28,6 +28,13 @@ _AUTH: dict[str, tuple[str, str, str]] = {
 }
 
 
+# Providers this codebase can call with a pasted key. Derived from the auth
+# table rather than written out again, because the two lists drifted: supabase
+# was offered by `connect` and warned about by `doctor` while having no entry
+# here, so a key stored for it could not be used by anything.
+KEY_PROVIDERS = tuple(sorted(_AUTH))
+
+
 class UnknownCredential(Exception):
     """No credential is stored for this client and provider."""
 
