@@ -9,7 +9,7 @@ subprocess dies whenever the coding agent reconnects.
 Writing events to a file instead means:
   - the room survives an MCP restart, and can open mid-launch with full replay;
   - "one source, two consumers" is literally true rather than a claim;
-  - a launch interrupted halfway leaves a record to resume from, which is what
+  - a launch interrupted halfway leaves a record of what it changed, which is what
     stops a re-run re-adding an SPF record and causing the exact fault this
     product exists to catch.
 """
@@ -118,11 +118,6 @@ class RunLog:
                 continue  # a torn final line from a killed process
             if event.seq > after_seq:
                 yield event
-
-    def mutations(self) -> list[LaunchEvent]:
-        """What this run already changed. Resume reads this to avoid repeating
-        a mutation - the difference between resuming and re-breaking."""
-        return [e for e in self.read() if e.kind == "mutation"]
 
 
 def latest_run(runs_dir: Path | None = None) -> str | None:

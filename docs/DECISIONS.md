@@ -657,8 +657,33 @@ connected while this was being built.
   Deployments and Domains read-only, environment variables read/write and only
   their names and scopes. Wrapping would widen what a client's grant covers, not
   narrow it, which runs against the whole premise (D5, D6).
-- Resend publishes no MCP server, so any wrapper design is a hybrid rather than
-  a replacement whichever way the other two go.
+- **Second correction, same day, same fault.** This decision also said Resend
+  publishes no MCP server. It does: `https://mcp.resend.com/mcp`, remote, OAuth
+  or bearer token, with tools to create, list, update, verify and remove sender
+  domains. Twice in one document a provider's capability was asserted absent
+  from memory rather than checked, in the decision whose whole subject is
+  failing to check. Both were caught by the operator, not by the author.
+
+  The rule that follows: a capability is never recorded as absent without a
+  check in the same sitting, and the check is cited. "I do not believe X exists"
+  is not a finding.
+
+**So all three providers ship an MCP server**, which removes the argument that a
+wrapper design would be a hybrid whichever way it went. What actually remains
+against it is narrower and worth stating without the padding:
+
+1. **Vercel gates its clients.** "Vercel MCP only supports AI clients that have
+   been reviewed and approved by Vercel." A wrapper makes Munim the client.
+2. **Wrapping widens grants.** Vercel MCP gives "the same access as your Vercel
+   user account"; the registered integration is scoped to three read permissions
+   plus environment variable names and scopes. D5 and D6 both point the other
+   way.
+3. **Where you wrap decides whether the claim survives**, as set out above: at
+   the config level it is mcpwarden and the cross-client read is gone.
+4. **The judgement is ours either way.** A generic execute tool will post a
+   third SPF record; `merge_spf` is what refuses to.
+
+That is a real case, and it is a smaller one than "nobody else has built this".
 
 **What wrapping does not buy.** The adapter is not valuable for making HTTP
 calls. It is valuable because `upsert` refuses to append beside existing

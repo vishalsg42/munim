@@ -77,21 +77,33 @@ person must be involved. And saying it to a business owner in words they can act
 on, rather than in record syntax.
 
 It also has to survive its own duration. A launch that polls DNS outlives a
-single tool call, so every event is appended to a run log, progress is read from
-that file, and an interrupted run resumes from what it already did, which is
-what stops a re-run adding a second SPF record and causing the exact fault the
-tool exists to catch.
+single tool call, so every event is appended to a run log and progress is read
+from that file rather than held in memory: the control room can be opened
+mid-run, refreshed, or restarted, and the whole run replays.
+
+What stops a re-run adding a second SPF record is not resumption but
+idempotency. Every write reads what is there first and updates in place, and
+`merge_spf` deletes the leftovers before writing so a partial failure leaves one
+working policy rather than two ignored ones. Running the whole thing twice
+changes nothing the second time, and that is asserted by a test rather than
+claimed here. Resuming an interrupted launch from the log is not implemented.
 
 ### What is real
 
 Every DNS result comes from a live lookup with the resolver named and timestamped
-on screen. The demonstration runs against a domain the author owns, deliberately
-broken the way this actually breaks: a leftover policy from a previous mail
-provider with a second added beside it. Real client accounts appear nowhere: they
-did not consent to a public repository or video.
+on screen. Nothing here is a fixture: the findings shown were found, including a
+real one on the author's own `kloudfirst.com`, whose DMARC policy is set to
+monitor rather than act, verified against two resolvers.
 
-**Not implemented:** Vercel and Resend write operations. They are absent from the
-tool list rather than present and inert.
+The launch demonstration uses a domain the author owns, broken the way this
+actually breaks: a leftover policy from a previous mail provider with a second
+added beside it. A client's real accounts are read from, because that is the
+whole point, but their domains are not named and their records are not shown:
+they did not consent to a public repository or video.
+
+**Not implemented:** Vercel write operations, and resuming an interrupted launch
+from the run log. Both are absent rather than present and inert. Resend does
+write: it can create a domain and trigger verification.
 
 **Not deployed to AgentCore**, and the reason is worth stating: Bedrock is
 unreachable on this account because AWS Marketplace cannot bill AISPL customers
