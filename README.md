@@ -168,47 +168,19 @@ Built in: Cloudflare, Vercel, Resend, Netlify, Linear, Notion, Sentry, Supabase
 (all zero setup, via dynamic client registration), Gmail and Stitch (need a
 registered application), Zoho (the endpoint URL is the credential).
 
-### Providers that need an application
+### Setting one up
 
-Cloudflare, Vercel, Resend, Netlify, Linear, Notion, Sentry and Supabase all
-issue Munim a client on demand, so connecting them is a browser login and
-nothing else. **Gmail and Stitch cannot.** Both authenticate against
-`accounts.google.com`, which publishes no registration endpoint, so somebody has
-to register an application by hand once. It then serves every client you connect.
+Eight of the eleven need no setup at all. Three do, and each has a page with the
+steps and what connecting grants:
 
-```bash
-uv run python scripts/setup_google_oauth.py                     # gmail
-uv run python scripts/setup_google_oauth.py --provider stitch
-```
+| | |
+|---|---|
+| [Gmail](docs/providers/gmail.md) | An application registered by hand, once. About ten minutes |
+| [Stitch](docs/providers/stitch.md) | The same |
+| [Zoho](docs/providers/zoho.md) | No registration: the endpoint URL is the credential |
 
-It uses the Google Cloud project you already have, enables the API, and prints
-the one step Google exposes no API for. **It never creates a project**, because
-project ids are globally unique and a script that creates one per run leaves a
-trail behind. Rerunning it is safe: a client id already in `.env` means there is
-nothing to do.
-
-The manual step is creating an OAuth client of type **Desktop app**, and adding
-your own Google account under *Test users*. That last part is not optional:
-Gmail uses Google restricted scopes, so an unverified application only works for
-accounts on that list.
-
-**Nothing here ships a Google credential**, and that is deliberate. Publishing
-one would need Google verification and a security assessment, and it would put a
-shared secret in an open source package. Your client id and secret live in
-`.env`, which is gitignored.
-
-**A leaked client id does not expose a mailbox.** It identifies the application,
-not a user: Google's own guidance is that installed apps "cannot keep secrets"
-and that the secret is optional for desktop clients, which is why every CLI
-ships one. What it would let someone do is show a consent screen bearing your
-app's name. Reading mail still requires a person to consent, and on an
-unverified app only a test user you added can.
-
-**Cost: none today.** Google states "all standard use of the Gmail API is
-available at no additional cost", with a daily threshold of 80,000,000 quota
-units before billing applies. Munim's usage is a handful of reads. Google has
-said charges above the quota limits are planned later in 2026, with at least 90
-days' notice.
+**[docs/providers/](docs/providers/README.md) has a page for every provider**,
+including which have been connected live and which are only probed.
 
 ### What you are actually granting
 
@@ -222,20 +194,17 @@ Two that are worth knowing before you connect them:
 
 | | |
 |---|---|
-| **Gmail** | Grants `https://mail.google.com/` among others: read, send and delete across the whole mailbox. Munim reads mail *configuration* and never sends, but the grant does not know that. |
-| **Supabase** | Grants `database:write`, `storage:write`, `edge_functions:write`, `environment:write` and `secrets:read`. |
+| **[Gmail](docs/providers/gmail.md)** | Grants `https://mail.google.com/` among others: read, send and delete across the whole mailbox. Munim reads mail *configuration* and never sends, but the grant does not know that. |
+| **[Supabase](docs/providers/supabase.md)** | Grants `database:write`, `storage:write`, `edge_functions:write`, `environment:write` and `secrets:read`. |
 
 For a project whose subject is credential isolation this is the least
 comfortable thing in it, and pretending otherwise would be worse. It is a
 property of the specification rather than of this implementation, and it is
 recorded in [`docs/ROADMAP.md`](docs/ROADMAP.md) with what would have to change.
 
-Vercel had the opposite problem from the same cause, now fixed. Its resource
-advertises only `openid`, so `offline_access` was never requested and the
-session expired after an hour with no way to refresh. MCP SEP-2207 covers this:
-a resource should not advertise `offline_access`, and a client may add it when
-the authorization server does. Munim does, so a Vercel session now refreshes
-for 30 days instead of dying in an hour.
+The one exception is `offline_access`, which SEP-2207 explicitly permits a
+client to add and which Munim adds, so a Vercel session refreshes for 30 days
+instead of expiring in an hour.
 
 ---
 
@@ -329,6 +298,7 @@ which would make the claim vacuous.
 |---|---|
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | how it is built, and the four decisions that shape it |
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | every design decision and its reasoning, including the wrong ones |
+| [`docs/providers/`](docs/providers/README.md) | a page per provider: setup, what it grants, what is verified |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | what is not done, and why |
 
 ---

@@ -19,6 +19,12 @@ documentation says "this API cannot be used as a generic management API for all
 OAuth clients in your project". It creates Identity-Aware Proxy clients. There
 is no API for creating a Desktop-app OAuth client, so that step is the Console,
 by hand, for everyone.
+
+Nor the consent screen before it. A project that has never had one answers the
+create-client page with "you must first configure your consent screen", which
+is a four step wizard and also Console-only. This prints both, in order,
+because being sent to the second step first is how somebody concludes the
+instructions are wrong.
 """
 
 import argparse
@@ -116,6 +122,16 @@ def main() -> int:
     # Identity-Aware Proxy clients and says so.
     print(f"""
 The rest is by hand, because Google publishes no API for it.
+
+  0. If this project has never had an OAuth consent screen, do that first.
+     Creating a client without one fails with "you must first configure your
+     consent screen", and it is a one-time thing per project:
+
+       https://console.cloud.google.com/auth/overview/create?project={project}
+
+     App name: whatever should appear on the consent screen. Support and
+     contact email: your own. Audience: External, unless you have a Google
+     Workspace organisation. Then agree to the user data policy and Create.
 
   1. https://console.cloud.google.com/auth/clients/create?project={project}
   2. Application type: Desktop app
