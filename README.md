@@ -188,9 +188,12 @@ comfortable thing in it, and pretending otherwise would be worse. It is a
 property of the specification rather than of this implementation, and it is
 recorded in [`docs/ROADMAP.md`](docs/ROADMAP.md) with what would have to change.
 
-Vercel has the opposite problem from the same cause: its resource advertises
-only `openid`, so `offline_access` is never requested and **its session expires
-after an hour with no refresh token.** Reconnecting means signing in again.
+Vercel had the opposite problem from the same cause, now fixed. Its resource
+advertises only `openid`, so `offline_access` was never requested and the
+session expired after an hour with no way to refresh. MCP SEP-2207 covers this:
+a resource should not advertise `offline_access`, and a client may add it when
+the authorization server does. Munim does, so a Vercel session now refreshes
+for 30 days instead of dying in an hour.
 
 ---
 

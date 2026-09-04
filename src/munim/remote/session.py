@@ -22,6 +22,7 @@ from mcp.client.streamable_http import streamablehttp_client
 from mcp.shared.auth import OAuthClientMetadata
 
 from munim.connect.callback import redirect_uri, serve_until_callback
+from munim.remote.offline import with_offline_access
 from munim.remote.servers import SERVERS, server_for
 from munim.remote.storage import (
     CONFIDENTIAL_AUTH_METHOD,
@@ -97,6 +98,35 @@ def _registered_application(provider: str) -> tuple[str, str] | None:
     return client_id, os.environ.get(f"{prefix}_OAUTH_CLIENT_SECRET", "")
 
 
+def _apply_sep_2207() -> None:
+    """Teach the pinned SDK to ask for offline_access.
+
+    The SDK computes the scope in one function and then assigns it, so wrapping
+    that function is the whole change. Idempotent, because auth_for runs per
+    session and wrapping a wrapper would append the scope twice.
+
+    Remove this, and munim/remote/offline.py, once strands-agents allows
+    mcp>=2.0.0: the SDK does it there.
+    """
+    from mcp.client.auth import oauth2
+
+    if getattr(oauth2.get_client_metadata_scopes, "_munim_sep_2207", False):
+        return
+
+    original = oauth2.get_client_metadata_scopes
+
+    def wrapped(www_authenticate_scope, protected_resource_metadata,
+                authorization_server_metadata=None, *args, **kwargs):
+        chosen = original(www_authenticate_scope, protected_resource_metadata,
+                          authorization_server_metadata, *args, **kwargs)
+        return with_offline_access(
+            chosen, authorization_server_metadata,
+            grant_types=["authorization_code", "refresh_token"])
+
+    wrapped._munim_sep_2207 = True
+    oauth2.get_client_metadata_scopes = wrapped
+
+
 def auth_for(client: str, provider: str, *, backend=None,
              on_url=None, label: str | None = None,
              allow_login: bool = True) -> OAuthClientProvider:
@@ -110,6 +140,8 @@ def auth_for(client: str, provider: str, *, backend=None,
     client was being authorised, which is the one thing it is there to say.
     """
     label = label or client
+    _apply_sep_2207()
+
     server = server_for(provider)
     if server is None:
         raise NoRemoteServer(

@@ -102,7 +102,11 @@ SERVERS: dict[str, RemoteServer] = {
              "selects is the one that understates what registration does. "
              "Connected live: 37 tools, which also answers the question this "
              "entry used to leave open, whether Vercel rejects a dynamically "
-             "registered client at token exchange. It does not",
+             "registered client at token exchange. It does not. Its session "
+             "refreshes: the resource advertises only openid, so SEP-2207 "
+             "applies and offline_access is added from the authorization "
+             "server's list, which Vercel documents as issuing a refresh token "
+             "good for 30 days with rotation",
         # offline_access is not decoration. Narrowing to "openid" alone, which
         # is all the resource document advertises, produced a session with no
         # refresh token that died in an hour and needed a full browser login to

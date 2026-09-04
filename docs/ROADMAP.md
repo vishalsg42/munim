@@ -63,22 +63,14 @@ read-and-write tool cannot participate in an open cross-client question at all.
 Fixing it properly means a way to prove a call is a read before making it, which
 is a per-provider judgement and not a flag.
 
-**Vercel sessions expire after an hour and cannot refresh.** The token
-response carries no `refresh_token` and `expires_in` 3600, so recovering means
-a full browser login. It is not a bug here: Vercel's protected resource
-advertises `scopes_supported: ["openid"]`, and the MCP spec's Scope Selection
-Strategy takes the scope from the resource, so `offline_access` is never
-requested even though Vercel's authorization server advertises it. Setting a
-scope on the client has no effect, because the SDK overwrites it. Whether the
-application route can ask for `offline_access` and get a refresh token is being
-looked at.
-
 **Scopes on the MCP route are the provider's choice, not ours.** Same cause.
 Connecting Supabase grants `database:write`, `storage:write`,
 `edge_functions:write`, `environment:write` and `secrets:read`, because that is
 what its resource advertises, and nothing in a client can ask for less.
 `RemoteServer.scopes` records what Munim would ask for and is honoured on the
-application route, which builds its own authorize URL. For a tool whose subject
+application route, which builds its own authorize URL. The one exception is
+`offline_access`, which SEP-2207 explicitly permits a client to add and which
+`munim/remote/offline.py` does. For a tool whose subject
 is credential isolation this is the least comfortable thing in the project, and
 it is a property of the spec rather than of this implementation.
 
