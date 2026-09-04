@@ -19,6 +19,7 @@ import hashlib
 import http.server
 import secrets
 import threading
+import time
 import urllib.parse
 import webbrowser
 from dataclasses import dataclass, field
@@ -30,6 +31,9 @@ from munim.container import KeychainBackend
 CALLBACK_PORT = 8976
 REDIRECT_URI = f"http://localhost:{CALLBACK_PORT}/oauth/callback"
 
+# Vercel names the integration by its URL slug rather than by client id.
+VERCEL_SLUG = "munim"
+
 
 @dataclass(frozen=True)
 class Provider:
@@ -40,15 +44,29 @@ class Provider:
     # Some providers reject PKCE-only public clients and require the secret too.
     needs_client_secret: bool = False
     extra_authorize: dict = field(default_factory=dict)
+    # Vercel's integration install flow is not an OAuth authorization endpoint.
+    # The app is named by the slug in the path rather than a client_id
+    # parameter, the scopes live in the Integrations Console rather than the
+    # URL, and it rejects PKCE. Only `state` travels.
+    install_flow: bool = False
 
 
 PROVIDERS: dict[str, Provider] = {
     # Registered at vercel.com/dashboard/integrations - self-serve.
+    #
+    # This is the "external installation flow" for an Integration, NOT
+    # https://vercel.com/oauth/authorize. That endpoint belongs to "Sign in
+    # with Vercel" OAuth apps, whose client ids are prefixed `cl_`; handed an
+    # Integration's `oac_` id it answers "The app ID is invalid", and even on
+    # success it returns identity claims rather than access to a team's
+    # projects, domains and environment variables - which is the whole point.
+    # https://vercel.com/docs/integrations/create-integration/submit-integration
     "vercel": Provider(
         name="vercel",
-        authorize_url="https://vercel.com/oauth/authorize",
+        authorize_url=f"https://vercel.com/integrations/{VERCEL_SLUG}/new",
         token_url="https://api.vercel.com/v2/oauth/access_token",
         needs_client_secret=True,
+        install_flow=True,
     ),
     # Cloudflare's own MCP server reads a CLOUDFLARE_CLIENT_ID it was issued;
     # whether registration is self-serve is unconfirmed, so this is here and
@@ -80,7 +98,13 @@ def _pkce() -> tuple[str, str]:
 
 
 class _Callback(http.server.BaseHTTPRequestHandler):
-    """Receives the redirect once, then the server is torn down."""
+    """Receives the redirect, then the server is torn down.
+
+    Anything that is not the callback path gets a 404 and is ignored, because
+    the listener has to survive them: browsers speculatively fetch /favicon.ico
+    and probe localhost ports, and a single stray GET must not cost the operator
+    their login.
+    """
 
     result: dict = {}
 
@@ -117,6 +141,10 @@ class OAuthConnector:
     def authorize_url(self, provider: str, client_id: str, state: str,
                       challenge: str) -> str:
         spec = PROVIDERS[provider]
+        if spec.install_flow:
+            # Everything else is configured in the console, so sending it here
+            # is at best ignored and at worst rejected.
+            return f"{spec.authorize_url}?{urllib.parse.urlencode({'state': state})}"
         params = {
             "client_id": client_id,
             "redirect_uri": REDIRECT_URI,
@@ -150,8 +178,16 @@ class OAuthConnector:
 
         _Callback.result = {}
         server = http.server.HTTPServer(("127.0.0.1", CALLBACK_PORT), _Callback)
-        server.timeout = timeout
-        thread = threading.Thread(target=server.handle_request, daemon=True)
+        # Short per-request timeout so the loop below can re-check the deadline
+        # rather than blocking in accept() until someone connects.
+        server.timeout = 0.5
+        deadline = time.monotonic() + timeout
+
+        def serve_until_callback() -> None:
+            while not _Callback.result and time.monotonic() < deadline:
+                server.handle_request()
+
+        thread = threading.Thread(target=serve_until_callback, daemon=True)
         thread.start()
 
         url = self.authorize_url(provider, client_id, state, challenge)
@@ -162,7 +198,10 @@ class OAuthConnector:
 
         result = _Callback.result
         if not result:
-            raise TimeoutError("no callback received; the browser flow did not complete")
+            raise TimeoutError(
+                f"no callback on {REDIRECT_URI} within {timeout:.0f}s; "
+                "the browser flow did not complete"
+            )
         if result.get("state") != state:
             # Mismatched state means the response is not ours. Never exchange it.
             raise ValueError("state mismatch; discarding the authorization response")
@@ -174,8 +213,9 @@ class OAuthConnector:
             "code": result["code"],
             "redirect_uri": REDIRECT_URI,
             "client_id": client_id,
-            "code_verifier": verifier,
         }
+        if not spec.install_flow:
+            data["code_verifier"] = verifier
         if spec.needs_client_secret and client_secret:
             data["client_secret"] = client_secret
 

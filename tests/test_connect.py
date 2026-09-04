@@ -90,3 +90,65 @@ def test_two_clients_hold_grants_for_the_same_provider_at_once():
 def test_an_empty_credential_is_refused():
     with pytest.raises(ValueError):
         TokenConnector(FakeKeychain()).connect("acme", "resend", "   ")
+
+
+class _FakeResponse:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self._payload
+
+
+def test_a_stray_request_does_not_cost_the_login(monkeypatch):
+    """The listener has to survive traffic that is not the callback.
+
+    Browsers speculatively fetch /favicon.ico and probe localhost ports. When
+    the listener served exactly one request, the first of those consumed it and
+    the operator's login failed with "no callback received" - having received
+    one.
+    """
+    import contextlib
+    import urllib.request
+
+    from munim.connect import oauth
+
+    def browser(url):
+        query = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(url).query))
+        with contextlib.suppress(Exception):  # 404, and correctly ignored
+            urllib.request.urlopen(f"{oauth.REDIRECT_URI}/../favicon.ico", timeout=5)
+        urllib.request.urlopen(
+            f"{oauth.REDIRECT_URI}?code=abc&state={query['state']}", timeout=5
+        ).read()
+
+    monkeypatch.setattr(oauth.webbrowser, "open", browser)
+    monkeypatch.setattr(oauth.httpx, "post",
+                        lambda *a, **k: _FakeResponse({"access_token": "tok",
+                                                       "team_id": "team_x"}))
+
+    keychain = FakeKeychain()
+    account = OAuthConnector(keychain).connect("Acme", "vercel", "cid", "secret",
+                                               timeout=15)
+    assert keychain.get("Acme", "vercel") == "tok"
+    assert account == "team_x"
+
+
+def test_vercel_uses_the_integration_install_flow_not_sign_in_with_vercel():
+    """Two different Vercel systems, two different client id shapes.
+
+    `https://vercel.com/oauth/authorize` belongs to "Sign in with Vercel" OAuth
+    apps (`cl_...`). Handed an Integration's `oac_...` id it answers "The app ID
+    is invalid", and even on success it returns identity claims rather than
+    access to a team's projects, domains and environment variables.
+    """
+    url = OAuthConnector(FakeKeychain()).authorize_url(
+        "vercel", "oac_abc", "state-abc", "challenge-xyz")
+    assert url.startswith("https://vercel.com/integrations/")
+    assert "/oauth/authorize" not in url
+    params = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(url).query))
+    # The console holds the scopes and the slug names the app, so state is the
+    # only thing that legitimately travels in this URL.
+    assert params == {"state": "state-abc"}
