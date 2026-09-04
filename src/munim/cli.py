@@ -11,7 +11,8 @@ import argparse
 import os
 import sys
 
-from munim.connect.oauth import PROVIDERS, OAuthConnector
+from munim.connect.oauth import (PROVIDERS, SHIPPED_CLIENT_IDS,
+                                 OAuthConnector)
 from munim.connect.token import TokenConnector
 from munim.container import KeychainBackend
 from munim.env import load as load_env
@@ -26,14 +27,18 @@ def _registry() -> Registry:
 
 
 def _client_id(provider: str) -> tuple[str, str]:
-    """OAuth app credentials for a provider, from the environment.
+    """OAuth app credentials for a provider.
 
-    These identify *this tool* to the provider, not the client. One app
-    registration serves every client the operator connects.
+    These identify *this tool* to the provider, not the client: one
+    registration serves every client the operator connects. Where the provider
+    supports public PKCE clients, Munim ships an id so nobody has to register
+    anything, and the environment overrides it for anyone who would rather use
+    their own.
     """
     prefix = provider.upper()
-    return (os.environ.get(f"{prefix}_OAUTH_CLIENT_ID", ""),
-            os.environ.get(f"{prefix}_OAUTH_CLIENT_SECRET", ""))
+    client_id = (os.environ.get(f"{prefix}_OAUTH_CLIENT_ID")
+                 or SHIPPED_CLIENT_IDS.get(provider, ""))
+    return client_id, os.environ.get(f"{prefix}_OAUTH_CLIENT_SECRET", "")
 
 
 def connect(client: str, provider: str) -> int:

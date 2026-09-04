@@ -34,6 +34,21 @@ REDIRECT_URI = f"http://localhost:{CALLBACK_PORT}/oauth/callback"
 # Vercel names the integration by its URL slug rather than by client id.
 VERCEL_SLUG = "munim"
 
+# Client ids Munim ships with, so a browser login needs no registration errand
+# first. These identify *the tool* to a provider, never a client, and they are
+# only ever set for providers whose flow is a public PKCE client: such an id is
+# public by design, which is what makes committing one correct rather than a
+# leaked credential. A provider needing a secret cannot appear here, because a
+# secret in a public repository is not a shipped default, it is a mistake.
+#
+# Overridable with <PROVIDER>_OAUTH_CLIENT_ID for anyone who would rather see
+# their own application name on the consent screen.
+SHIPPED_CLIENT_IDS: dict[str, str] = {
+    # Registered once, at Manage Account > OAuth clients. Empty until then, and
+    # `munim doctor` says so rather than failing at the browser.
+    "cloudflare": "",
+}
+
 
 @dataclass(frozen=True)
 class Provider:
@@ -68,9 +83,18 @@ PROVIDERS: dict[str, Provider] = {
         needs_client_secret=True,
         install_flow=True,
     ),
-    # Cloudflare's own MCP server reads a CLOUDFLARE_CLIENT_ID it was issued;
-    # whether registration is self-serve is unconfirmed, so this is here and
-    # unused until a client id exists rather than guessed at.
+    # A public client: PKCE, no secret. Confirmed from Cloudflare's own
+    # discovery document at dash.cloudflare.com/.well-known/openid-configuration,
+    # which advertises `none` among token_endpoint_auth_methods_supported and
+    # S256 among code_challenge_methods_supported. Both endpoints below come
+    # from that document rather than from a blog post.
+    #
+    # There is no registration_endpoint, so Cloudflare does not support Dynamic
+    # Client Registration. The MCP authorization spec names the two options
+    # left, and this takes the first: a client id shipped with the tool. That is
+    # what keeps `munim connect` a browser login for everyone rather than an
+    # errand. A public client's id is not a secret, which is what makes shipping
+    # it in a public repository correct rather than careless.
     "cloudflare": Provider(
         name="cloudflare",
         authorize_url="https://dash.cloudflare.com/oauth2/auth",

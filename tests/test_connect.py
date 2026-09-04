@@ -152,3 +152,32 @@ def test_vercel_uses_the_integration_install_flow_not_sign_in_with_vercel():
     # The console holds the scopes and the slug names the app, so state is the
     # only thing that legitimately travels in this URL.
     assert params == {"state": "state-abc"}
+
+
+def test_a_shipped_client_id_is_only_ever_for_a_public_client():
+    """Munim ships client ids so a browser login needs no registration errand.
+
+    That is only safe where the provider's flow is a public PKCE client, whose
+    id is public by design. A provider that needs a secret cannot have one: the
+    secret would have to ship too, and a secret in a public repository is not a
+    default, it is a leak.
+    """
+    from munim.connect.oauth import SHIPPED_CLIENT_IDS
+
+    for provider in SHIPPED_CLIENT_IDS:
+        assert provider in PROVIDERS, f"{provider} ships an id but has no flow"
+        assert not PROVIDERS[provider].needs_client_secret, (
+            f"{provider} needs a client secret, so its id must not be shipped")
+
+
+def test_the_environment_still_wins_over_a_shipped_id(monkeypatch):
+    """Anyone who would rather see their own application name on the consent
+    screen registers their own and sets it."""
+    from munim import cli
+
+    monkeypatch.setattr(cli, "SHIPPED_CLIENT_IDS", {"cloudflare": "shipped-id"})
+    monkeypatch.delenv("CLOUDFLARE_OAUTH_CLIENT_ID", raising=False)
+    assert cli._client_id("cloudflare")[0] == "shipped-id"
+
+    monkeypatch.setenv("CLOUDFLARE_OAUTH_CLIENT_ID", "mine")
+    assert cli._client_id("cloudflare")[0] == "mine"
