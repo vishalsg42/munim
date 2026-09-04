@@ -95,7 +95,7 @@ def _clients(registry: Registry) -> list[Finding]:
         else:
             out.append(Finding(
                 WARN, f"  {record.name}", "nothing connected",
-                fix=f'munim connect "{record.name}" cloudflare --via-mcp'))
+                fix=f'munim connect "{record.name}" cloudflare'))
     return out
 
 
@@ -103,7 +103,7 @@ def _oauth_apps() -> list[Finding]:
     """Whether a provider can be logged in to, and by which of the two routes.
 
     A registered application is no longer the only way in. Every provider that
-    runs its own MCP server registers a client on demand, so `--via-mcp` needs
+    runs its own MCP server registers a client on demand, so connecting needs
     nothing set up at all, and telling someone to go and register an
     application when they do not have to is worse than saying nothing.
     """

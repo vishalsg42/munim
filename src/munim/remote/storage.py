@@ -22,10 +22,14 @@ class KeychainTokenStorage(TokenStorage):
     be, and the failure is silent.
     """
 
-    def __init__(self, client: str, provider: str, backend=keyring) -> None:
+    def __init__(self, client: str, provider: str, backend=None) -> None:
         self._client = client
         self._provider = provider
-        self._backend = backend
+        # Resolved here, not as a default argument. A default is bound when the
+        # module is imported, so `keyring` could never be substituted after
+        # that: a caller passing nothing always reached the real OS keychain,
+        # including from a test that had replaced it.
+        self._backend = backend if backend is not None else keyring
 
     def _service(self, kind: str) -> str:
         return f"{SERVICE}:{self._provider}:{kind}"
@@ -48,6 +52,27 @@ class KeychainTokenStorage(TokenStorage):
     async def get_client_info(self) -> OAuthClientInformationFull | None:
         data = self._read("client")
         return OAuthClientInformationFull(**data) if data else None
+
+    def move_to(self, client: str) -> "KeychainTokenStorage":
+        """Re-file this session under another client name.
+
+        Connecting without naming a client has to authorise first and find out
+        who it authorised second, so the session begins under a provisional name
+        and moves once the provider has answered. Copy then delete, because a
+        delete that fails after a successful copy costs a stale entry, and one
+        that fails before costs the session.
+        """
+        moved = KeychainTokenStorage(client, self._provider, self._backend)
+        for kind in ("client", "tokens"):
+            raw = self._backend.get_password(self._service(kind), self._client)
+            if raw is not None:
+                self._backend.set_password(moved._service(kind), client, raw)
+        for kind in ("client", "tokens"):
+            try:
+                self._backend.delete_password(self._service(kind), self._client)
+            except Exception:
+                pass  # a leftover provisional entry is harmless
+        return moved
 
     async def set_client_info(self, info: OAuthClientInformationFull) -> None:
         # This carries the client secret for providers that require one. It goes

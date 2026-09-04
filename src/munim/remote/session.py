@@ -134,3 +134,18 @@ async def tools_for(client: str, provider: str, **kwargs) -> list[str]:
     """What this client's account can be asked to do. Read-only."""
     async with session_for(client, provider, **kwargs) as session:
         return [t.name for t in (await session.list_tools()).tools]
+
+
+async def connect_and_identify(client: str, provider: str,
+                               **kwargs) -> tuple[list[str], str | None]:
+    """Open the session and ask the provider which account it belongs to.
+
+    The identity is the point. The operator types a name; the provider knows
+    what was actually authorised, and showing them side by side is what turns
+    "check it is the right account" from advice into something checkable.
+    """
+    from munim.remote.identity import identity_of
+
+    async with session_for(client, provider, **kwargs) as session:
+        tools = [t.name for t in (await session.list_tools()).tools]
+        return tools, await identity_of(session, provider)

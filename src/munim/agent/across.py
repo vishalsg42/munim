@@ -60,7 +60,7 @@ async def ask(question: str, clients: list[str], *, backend=None) -> str:
     if not toolsets:
         return ("No client has a session with a provider yet, so there is "
                 "nothing to read across. Connect one with "
-                "`munim connect \"<client>\" cloudflare --via-mcp`.")
+                "`munim connect \"<client>\" cloudflare`.")
 
     model, _ = build_model()
     agent = Agent(model=model, tools=toolsets, system_prompt=SYSTEM,

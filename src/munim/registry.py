@@ -92,6 +92,24 @@ class Registry:
         records[record.name] = record.model_dump()
         self._save(records)
 
+    def rename(self, old: str, new: str) -> ClientRecord:
+        """Move a client to another name, keeping its domain.
+
+        Needed because a client can now be named by the account it was
+        authorised as, and `Tech.example@gmail.com's Account` is not what the
+        operator calls them. Refuses to overwrite: two clients merged into one
+        is a mutation on the wrong account waiting to happen (D5).
+        """
+        records = self._load()
+        if old not in records:
+            raise UnknownClient(f"no client registered as {old!r}")
+        if new in records:
+            raise ValueError(f"{new!r} is already registered; pick another name")
+        record = ClientRecord(**{**records.pop(old), "name": new})
+        records[new] = record.model_dump()
+        self._save(records)
+        return record
+
     def find_by_domain(self, hostname: str) -> ClientRecord | None:
         """Resolve a hostname to its client, matching subdomains.
 

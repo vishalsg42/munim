@@ -41,7 +41,10 @@ def _client_id(provider: str) -> tuple[str, str]:
     return client_id, os.environ.get(f"{prefix}_OAUTH_CLIENT_SECRET", "")
 
 
-def connect_via_mcp(client: str, provider: str) -> int:
+PROVISIONAL = "…connecting"
+
+
+def connect_via_mcp(client: str | None, provider: str) -> int:
     """Connect through the provider's own MCP server.
 
     Nothing is registered by hand. The provider's authorization server issues a
@@ -52,28 +55,106 @@ def connect_via_mcp(client: str, provider: str) -> int:
     import asyncio
 
     from munim.remote.servers import server_for
-    from munim.remote.session import NoRemoteServer, tools_for
+    from munim.remote.session import NoRemoteServer, connect_and_identify
 
     server = server_for(provider)
     if server is None:
         print(f"{provider} runs no MCP server. Use `munim connect {client} "
-              f"{provider}` without --via-mcp.", file=sys.stderr)
+              f"{provider} --via-app`.", file=sys.stderr)
         return 2
 
-    print(f"Opening your browser to log in to {provider} as {client}.",
-          file=sys.stderr)
-    print(f"The consent screen will name the application "
-          f"\"Munim ({client})\" - check it is the right account before you "
-          f"approve, because that is the one thing this cannot check for you.",
-          file=sys.stderr)
+    # Without a name, authorise first and ask the provider who that was. The
+    # session has to be stored somewhere while that happens, so it starts under
+    # a provisional name and moves once the answer comes back. Naming a client
+    # up front was always a guess checked by eye; this makes the account itself
+    # the source of the name.
+    naming = client is None
+    working_name = client or PROVISIONAL
+
+    if naming:
+        print(f"Opening your browser. Sign in to the {provider} account you "
+              f"want to add, and the client will be named after it.",
+              file=sys.stderr)
+    else:
+        print(f"Opening your browser to log in to {provider} as {client}.",
+              file=sys.stderr)
+        print(f"The consent screen will name the application "
+              f"\"Munim ({client})\".", file=sys.stderr)
+
     try:
-        tools = asyncio.run(tools_for(client, provider))
+        tools, account = asyncio.run(connect_and_identify(working_name, provider))
     except NoRemoteServer as exc:
         print(str(exc), file=sys.stderr)
         return 2
 
-    print(f"Connected {provider} for {client}: {len(tools)} tools available.",
+    if naming:
+        if not account:
+            print(f"{provider} did not say which account was authorised, so "
+                  f"there is nothing to name this after. Run it again with a "
+                  f"name: munim connect \"<client>\" {provider}",
+                  file=sys.stderr)
+            return 2
+        from munim.remote.storage import KeychainTokenStorage
+        KeychainTokenStorage(PROVISIONAL, provider).move_to(account)
+        client = account
+        registry = _registry()
+        try:
+            registry.get(client)
+        except UnknownClient:
+            registry.add(ClientRecord(name=client))
+
+    # The account the provider says was authorised, beside the name it was
+    # stored under. This is the only moment the two can be compared, and until
+    # now nothing compared them: a typo at the prompt stored a real token under
+    # a name that had nothing to do with it.
+    where = f"\n  account: {account}" if account and not naming else ""
+    print(f"Connected {provider} for {client}: {len(tools)} tools.{where}",
           file=sys.stderr)
+    if account and not naming:
+        print("  If that is not the right account, run the command again and "
+              "pick the other one at the consent screen.", file=sys.stderr)
+    if naming:
+        print(f'  Rename it with whatever you call them: '
+              f'munim rename "{client}" "<your name for them>"', file=sys.stderr)
+    return 0
+
+
+def rename(old: str, new: str) -> int:
+    """Move a client and everything filed under its name.
+
+    The registry entry is the visible part; the sessions and pasted keys are
+    filed by client name too, and leaving them behind would silently
+    disconnect a client that still looks connected.
+    """
+    from munim.container import KeychainBackend
+    from munim.remote.servers import SERVERS
+    from munim.remote.storage import KeychainTokenStorage
+
+    registry = _registry()
+    try:
+        record = registry.rename(old, new)
+    except (UnknownClient, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    moved = []
+    for provider in sorted(SERVERS):
+        store = KeychainTokenStorage(old, provider)
+        if store._read("tokens") is not None:
+            store.move_to(new)
+            moved.append(f"{provider} (mcp)")
+
+    backend = KeychainBackend()
+    for provider in ("cloudflare", "vercel", "resend"):
+        secret = backend.get(old, provider)
+        if secret is not None:
+            backend.set(new, provider, secret)
+            moved.append(provider)
+
+    carried = f" carrying {', '.join(moved)}" if moved else ""
+    print(f"{old!r} is now {new!r}{carried}.", file=sys.stderr)
+    if record.domain:
+        print(f"  domain: {record.domain}", file=sys.stderr)
     return 0
 
 
@@ -131,21 +212,43 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
 
     c = sub.add_parser("connect", help="log in to a provider as one client")
-    c.add_argument("client")
-    c.add_argument("provider", choices=sorted({*PROVIDERS, "resend"}))
+    c.add_argument("client", nargs="?",
+                   help="what you call this client. Leave it out and the "
+                        "account you sign in to supplies the name")
+    c.add_argument("provider", nargs="?", choices=sorted({*PROVIDERS, "resend"}))
     c.add_argument("--token", action="store_true",
                    help="paste an API key instead of logging in")
     c.add_argument("--via-app", action="store_true",
                    help="use a registered OAuth application instead of the "
                         "provider's MCP server. Only needed if you want your "
                         "own application name on the consent screen")
+    # This was the way in before it became the default. Accepted and ignored,
+    # because a flag that was documented and then removed is a dead end for
+    # whoever copied the line.
+    c.add_argument("--via-mcp", action="store_true", help=argparse.SUPPRESS)
 
     ls = sub.add_parser("clients", help="list registered clients")
     ls.add_argument("--verbose", action="store_true")
 
+    r = sub.add_parser("rename", help="call a client something else")
+    r.add_argument("old")
+    r.add_argument("new")
+
     sub.add_parser("doctor", help="what is set up, what is not, and the next step")
 
     args = parser.parse_args(argv)
+
+    # `munim connect cloudflare` reads as one positional, and argparse fills the
+    # first one. Shift it: a lone argument that names a provider is a provider.
+    if args.command == "connect" and args.provider is None:
+        if args.client in {*PROVIDERS, "resend"}:
+            args.client, args.provider = None, args.client
+        else:
+            parser.error(f"unknown provider {args.client!r}. "
+                         f"Choose from: {', '.join(sorted({*PROVIDERS, 'resend'}))}")
+
+    if args.command == "rename":
+        return rename(args.old, args.new)
 
     if args.command == "doctor":
         from munim.doctor import run as doctor_run
