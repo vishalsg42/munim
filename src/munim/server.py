@@ -391,6 +391,15 @@ def build_server(backend=None, registry=None, runs_dir=None,
         known = all_runs(runs)
         if not known:
             return {"runs": [], "run": None}
+
+        # A run id that does not exist used to read back as events=0,
+        # done=false, which is exactly what a launch that has not started yet
+        # looks like. An agent given that answer waits for a run that will
+        # never begin, and a typo is indistinguishable from patience.
+        if run_id and run_id not in known:
+            return {"error": f"no run {run_id!r}. Known runs are listed here.",
+                    "runs": known, "run": None}
+
         chosen = run_id or known[-1]
         log = RunLog(chosen, runs)
         events = list(log.read())

@@ -121,8 +121,13 @@ class Container:
         """Private. Adapters use .http(); nothing else should reach a secret."""
         secret = self._backend.get(self._client, provider)
         if secret is None:
+            # The label, not the id. The id is the right identity and the wrong
+            # word for it: `no resend credential for client 'c_2db35f36a043bf0c'`
+            # makes the operator map an opaque key back to a client before the
+            # message helps at all. Falls back to the id when there is no label,
+            # which is a container built without going through the registry.
             raise UnknownCredential(
-                f"no {provider} credential for client {self._client!r}"
+                f"no {provider} credential for client {self.label!r}"
             )
         return secret
 
