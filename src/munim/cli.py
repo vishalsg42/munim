@@ -689,14 +689,11 @@ def main(argv: list[str] | None = None) -> int:
         return doctor_run(_registry())
 
     if args.command == "clients":
+        from munim.connected import describe
         backend = KeychainBackend()
         for record in _registry().clients():
-            from munim.container import Container
-            container = Container(record.id, backend)
-            connected = [p for p in ("cloudflare", "vercel", "resend")
-                         if container.has(p)]
             print(f"{record.name:32} {record.domain or '-':32} "
-                  f"{', '.join(connected) or 'nothing connected'}")
+                  f"{describe(record.id, backend)}")
         return 0
 
     if args.token:

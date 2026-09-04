@@ -23,6 +23,7 @@ from mcp.server.fastmcp import FastMCP
 from munim.agent.launch import launch
 from munim.checks.dns import run_all_async, run_reachability_async
 from munim.connect.oauth import PROVIDERS as OAUTH_PROVIDERS
+from munim.connected import reachable
 from munim.connect.token import TokenConnector
 from munim.container import Container, KeychainBackend, UnknownClient
 from munim.env import load as load_env
@@ -98,11 +99,10 @@ def build_server(backend=None, registry=None, runs_dir=None,
         """List every client container and which providers each has connected."""
         out = []
         for record in registry.clients():
-            container = Container(record.id, backend)
             out.append({
                 "client": record.name,
                 "domain": record.domain,
-                "connected": [p for p in PROVIDERS if container.has(p)],
+                "connected": reachable(record.id, backend),
             })
         return out
 
@@ -323,7 +323,7 @@ def build_server(backend=None, registry=None, runs_dir=None,
         return {
             "client": record.name,
             "domain": record.domain,
-            "connected": [p for p in PROVIDERS if container.has(p)],
+            "connected": reachable(record.id, backend),
             "oauth_available": [p for p in PROVIDERS if p in OAUTH_PROVIDERS],
         }
 

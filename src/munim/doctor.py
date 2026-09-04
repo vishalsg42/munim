@@ -14,11 +14,11 @@ from pathlib import Path
 
 from munim.connect.oauth import PROVIDERS as OAUTH_PROVIDERS
 from munim.connect.oauth import REDIRECT_URI
-from munim.container import Container, KeychainBackend
+from munim.connected import connections
+from munim.container import KeychainBackend
 from munim.env import load as load_env
 from munim.registry import Registry
 
-PROVIDERS = ("cloudflare", "vercel", "resend")
 
 OK, WARN, BAD = "ok", "warn", "bad"
 MARK = {OK: "✓", WARN: "!", BAD: "✗"}
@@ -95,19 +95,15 @@ def _clients(registry: Registry) -> list[Finding]:
     if not records:
         return [Finding(WARN, "Clients", "none registered yet",
                         fix='ask your agent: check <a domain you look after>')]
-    from munim.remote.servers import SERVERS
-    from munim.remote.storage import KeychainTokenStorage
 
     backend = KeychainBackend()
     out = [Finding(OK, "Clients", f"{len(records)} registered")]
     for record in records:
-        container = Container(record.id, backend)
         # Two ways a client can be connected, and they are not the same thing:
         # a stored API credential this tool calls with, or a session with the
         # provider's own MCP server. Reporting only the first hid the second.
-        keys = [p for p in PROVIDERS if container.has(p)]
-        sessions = [p for p in sorted(SERVERS)
-                    if KeychainTokenStorage(record.id, p)._read("tokens")]
+        # `doctor` was the only reader that knew; now they all ask one function.
+        keys, sessions = connections(record.id, backend)
 
         parts = []
         if keys:
