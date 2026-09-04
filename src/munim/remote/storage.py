@@ -15,6 +15,13 @@ from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 SERVICE = "munim-mcp"
 
 
+# How Munim authenticates when a provider issues it a secret. Named once and
+# imported by the session, which requests it at registration, and by the store,
+# which falls back to it when the registration response omits the field. Two
+# copies of this string is how the fallback ends up disagreeing with the ask.
+CONFIDENTIAL_AUTH_METHOD = "client_secret_post"
+
+
 class KeychainTokenStorage(TokenStorage):
     """One client's session with one provider.
 
@@ -169,12 +176,31 @@ class KeychainTokenStorage(TokenStorage):
         # public client, sends no secret, and Supabase answers
         # `Required parameter: client_secret`. The secret was never missing.
         #
-        # RFC 7591 says the default when the field is absent is
-        # client_secret_basic, so absent never means public for a client holding
-        # a secret. Only the absent case is filled in; a server that states a
-        # method is obeyed, and a public client is left alone because inventing
-        # a method for one would break a flow that works.
+        # Filled in with what was asked for at registration, not with the RFC
+        # 7591 default. The spec says an omitted method means
+        # client_secret_basic, and trying that against Supabase failed the same
+        # way: basic auth puts the secret in an Authorization header and takes
+        # it out of the body, which is precisely the parameter Supabase says is
+        # required. The server accepted a registration requesting
+        # client_secret_post and then declined to echo the field, so the
+        # request is better evidence than the default.
+        #
+        # Only the absent case is filled in. A server that states a method is
+        # obeyed, and a public client is left alone, because inventing a method
+        # for one would break a flow that works.
+        # Set on the object rather than on a copy, deliberately. The SDK hands
+        # the same instance it keeps in memory and then does the token exchange
+        # with that instance, not with what it just stored:
+        #
+        #     client_information = await handle_registration_response(...)
+        #     self.context.client_info = client_information
+        #     await self.context.storage.set_client_info(client_information)
+        #     token_response = yield await self._perform_authorization()
+        #
+        # Normalising a copy fixed the keychain and left the exchange using the
+        # null, so the first connect after registering always failed and only a
+        # second one worked. Mutating in place fixes both, because they are one
+        # object.
         if info.client_secret and not info.token_endpoint_auth_method:
-            info = info.model_copy(
-                update={"token_endpoint_auth_method": "client_secret_basic"})
+            info.token_endpoint_auth_method = CONFIDENTIAL_AUTH_METHOD
         self._write("client", info)
