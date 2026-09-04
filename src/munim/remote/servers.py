@@ -31,16 +31,21 @@ SERVERS: dict[str, RemoteServer] = {
     "vercel": RemoteServer(
         provider="vercel",
         url="https://mcp.vercel.com",
-        public_client=False,
-        note="requires a client secret, issued at registration; Vercel states it "
-             "only supports clients it has reviewed, which is unverified for a "
-             "dynamically registered one",
+        public_client=True,
+        note="registration confirmed: HTTP 201, token_endpoint_auth_method none, "
+             "no secret, despite the authorization server metadata omitting "
+             "`none` from token_endpoint_auth_methods_supported. Asked for "
+             "client_secret_post and was given a public client, so the metadata "
+             "understates it and only registering finds that out. Vercel states "
+             "it supports only clients it has reviewed; whether that rejects a "
+             "dynamically registered one at token exchange is still unverified",
     ),
     "resend": RemoteServer(
         provider="resend",
         url="https://mcp.resend.com/mcp",
         public_client=True,
-        note="registration endpoint advertised; not yet exercised",
+        note="registration confirmed: HTTP 201, token_endpoint_auth_method none, "
+             "no secret",
     ),
 }
 

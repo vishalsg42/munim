@@ -105,17 +105,51 @@ def test_the_consent_screen_names_the_client():
     assert auth.context.client_metadata.client_name == "Munim (Balaji Roofings)"
 
 
-def test_a_provider_needing_a_secret_registers_for_one():
-    """Vercel's authorization server does not offer `none`. Registration issues
-    the secret at run time and it goes to the keychain; it never becomes a
-    value in this repository."""
+def test_every_provider_registers_as_a_public_client():
+    """Measured, not read. All three return HTTP 201 with
+    token_endpoint_auth_method `none` and no secret.
+
+    Vercel is the reason this is asserted rather than assumed: its authorization
+    server metadata omits `none` from token_endpoint_auth_methods_supported, so
+    this code asked for client_secret_post and was handed a public client
+    anyway. The metadata understates it, and only registering finds that out.
+    """
     from munim.remote.session import auth_for
 
-    public = auth_for("X", "cloudflare", backend=FakeKeyring())
-    confidential = auth_for("X", "vercel", backend=FakeKeyring())
+    for provider in ("cloudflare", "vercel", "resend"):
+        auth = auth_for("X", provider, backend=FakeKeyring())
+        assert auth.context.client_metadata.token_endpoint_auth_method == "none", provider
 
-    assert public.context.client_metadata.token_endpoint_auth_method == "none"
-    assert confidential.context.client_metadata.token_endpoint_auth_method == "client_secret_post"
+
+def test_a_provider_that_did_need_a_secret_would_ask_for_one():
+    """None do today. The path stays because the next one might, and because a
+    provider silently downgrading to a public client is a change worth noticing
+    rather than a branch worth deleting."""
+    import munim.remote.servers as servers_mod
+    from munim.remote.servers import RemoteServer
+    from munim.remote.session import auth_for
+
+    confidential = RemoteServer(provider="acme", url="https://mcp.acme.example",
+                                public_client=False, note="hypothetical")
+    original = dict(servers_mod.SERVERS)
+    servers_mod.SERVERS["acme"] = confidential
+    try:
+        auth = auth_for("X", "acme", backend=FakeKeyring())
+        assert auth.context.client_metadata.token_endpoint_auth_method == "client_secret_post"
+    finally:
+        servers_mod.SERVERS.clear()
+        servers_mod.SERVERS.update(original)
+
+
+def test_every_server_entry_records_how_it_was_verified():
+    """`not yet exercised` sat in this file for a provider whose registration
+    turned out to work. A note that records a guess reads exactly like one that
+    records a measurement."""
+    from munim.remote.servers import SERVERS
+
+    for provider, server in SERVERS.items():
+        assert "confirmed" in server.note, (
+            f"{provider} records no confirmation, so its entry is a guess")
 
 
 def test_a_provider_with_no_mcp_server_is_refused_at_construction():

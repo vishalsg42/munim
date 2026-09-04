@@ -697,9 +697,21 @@ Probed by following the MCP discovery chain from an unauthenticated request:
 
 | Provider | MCP server | Registration endpoint | CIMD | `none` auth |
 |---|---|---|---|---|
-| Cloudflare | `mcp.cloudflare.com/mcp` | `/register`, **confirmed working** | yes | yes |
-| Vercel | `mcp.vercel.com` | `api.vercel.com/login/oauth/register` | no | no |
+| Cloudflare | `mcp.cloudflare.com/mcp` | `/register` | yes | yes |
+| Vercel | `mcp.vercel.com` | `api.vercel.com/login/oauth/register` | no | **see below** |
 | Resend | `mcp.resend.com/mcp` | `api.resend.com/oauth/register` | yes | yes |
+
+All three registrations were then run, not just read about. Each returned
+HTTP 201 with `token_endpoint_auth_method: none` and no secret.
+
+Vercel is why that distinction matters. Its authorization server metadata omits
+`none` from `token_endpoint_auth_methods_supported`, so this code asked for
+`client_secret_post` and was handed a public client regardless. The metadata
+understates what the server does, and reading it produced a wrong entry in
+`remote/servers.py` that only registering corrected. The note beside every
+provider now records how it was verified, and a test refuses an entry that
+records no confirmation, because a note holding a guess reads exactly like one
+holding a measurement.
 
 Cloudflare's was not read about but exercised: one unauthenticated POST returned
 a `client_id` bound to `http://localhost:8976/oauth/callback` with
