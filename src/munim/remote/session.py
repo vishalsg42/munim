@@ -23,7 +23,10 @@ from mcp.shared.auth import OAuthClientMetadata
 
 from munim.connect.callback import redirect_uri, serve_until_callback
 from munim.remote.servers import SERVERS, server_for
-from munim.remote.storage import KeychainTokenStorage
+from munim.remote.storage import (
+    CONFIDENTIAL_AUTH_METHOD,
+    KeychainTokenStorage,
+)
 
 
 # What OAuthClientProvider allows for the whole flow. The listener matches it
@@ -137,7 +140,7 @@ def auth_for(client: str, provider: str, *, backend=None,
         # Registration issues the secret; it is stored beside the tokens and
         # never becomes a value here. Only the auth method differs.
         meta = _metadata(label).model_copy(
-            update={"token_endpoint_auth_method": "client_secret_post"})
+            update={"token_endpoint_auth_method": CONFIDENTIAL_AUTH_METHOD})
     else:
         meta = _metadata(label)
 

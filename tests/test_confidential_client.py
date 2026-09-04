@@ -54,6 +54,9 @@ async def test_a_secret_without_a_method_is_stored_with_one():
     assert saved["client_secret"] == "s" * 44
     assert saved["token_endpoint_auth_method"] is not None, (
         "a client with a secret and no auth method sends no secret")
+    # Not client_secret_basic: that moves the secret into an Authorization
+    # header and out of the body, which is the parameter Supabase requires.
+    assert saved["token_endpoint_auth_method"] == "client_secret_post"
 
 
 async def test_a_method_the_server_did_state_is_left_alone():
@@ -92,3 +95,21 @@ async def test_round_trips_back_as_a_usable_registration():
     back = await store.get_client_info()
     assert back.client_secret == "s" * 44
     assert back.token_endpoint_auth_method
+
+
+async def test_the_caller_sees_the_correction_too():
+    """The one that actually mattered.
+
+    The SDK keeps the object it passes here and performs the token exchange
+    with that instance, not with what was written to the keychain. Correcting a
+    copy left the exchange still holding the null auth method, so the first
+    connect after registration failed every time and only a second one worked.
+    """
+    ring = Ring()
+    store = KeychainTokenStorage("c_abc", "supabase", ring)
+    info = _info(client_secret="s" * 44, token_endpoint_auth_method=None)
+
+    await store.set_client_info(info)
+
+    assert info.token_endpoint_auth_method == "client_secret_post", (
+        "the caller's own object was left with a null auth method")
