@@ -174,11 +174,20 @@ def test_the_readme_lists_every_tool_that_exists(tmp_path):
 
     from munim.server import build_server
 
-    readme = (pathlib.Path(__file__).parent.parent / "README.md").read_text()
+    root = pathlib.Path(__file__).parent.parent
+    # The table moved out of the README when it was cut to what a first-time
+    # reader needs. The rule is unchanged: the surface is written down
+    # somewhere a reader will reach, and the README links to it.
+    documented = (root / "docs" / "TOOLS.md").read_text()
     surface = {t.name for t in build_server()._tool_manager.list_tools()}
 
-    undocumented = {n for n in surface if f"`{n}`" not in readme}
-    assert not undocumented, f"tools nobody reading the README would know about: {undocumented}"
+    undocumented = {n for n in surface if f"`{n}`" not in documented}
+    assert not undocumented, f"tools nobody reading the docs would know about: {undocumented}"
+
+    readme = (root / "README.md").read_text()
+    assert "docs/TOOLS.md" in readme, (
+        "the tool list is documented but the README does not point at it, so "
+        "nobody arriving at the repository would find it")
 
 
 async def test_applying_a_plan_made_for_another_client_is_refused(tmp_path, monkeypatch):
