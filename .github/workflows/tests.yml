@@ -9,6 +9,12 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Pushing twice in a minute queued two full runs, and the room job spends most
+# of its time installing node modules. A superseded run tells nobody anything.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   python:
     runs-on: ubuntu-latest
@@ -53,8 +59,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: npm
+          cache-dependency-path: room/package-lock.json
       - working-directory: room
-        run: npm install
+        # ci, not install: it installs exactly the lockfile and fails if
+        # package.json and the lock have drifted, which install would paper over.
+        run: npm ci
       - name: Reducer tests
         working-directory: room
         run: npx tsx --test src/state.test.ts
