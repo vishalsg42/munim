@@ -65,11 +65,26 @@ def is_platform_domain(domain: str) -> bool:
     return any(lowered.endswith(suffix) for suffix in PLATFORM_SUFFIXES)
 
 
+# Which part of the setup a check speaks for, so a skip explains itself in the
+# right terms. "mail settings belong to the platform" is wrong about whether www
+# reaches the site.
+_SUBJECT = {
+    "spf_single": "mail settings", "spf_lookups": "mail settings",
+    "dkim_present": "mail settings", "dkim_chunking": "mail settings",
+    "dmarc_present": "mail settings", "dmarc_policy": "mail settings",
+    "mx_present": "mail settings",
+    "ns_delegated": "DNS", "apex_resolves": "DNS", "caa_allows": "DNS",
+    "www_redirect": "the web address", "https_enforced": "the web address",
+    "cert_valid": "the certificate",
+}
+
+
 def _not_their_domain(check: str, domain: str) -> CheckResult:
     platform = next(s for s in PLATFORM_SUFFIXES if domain.lower().endswith(s))
+    subject = _SUBJECT.get(check, "these settings")
     return CheckResult(
         check, "skip",
-        f"{domain} is a {platform.lstrip('.')} address, so mail settings belong to "
+        f"{domain} is a {platform.lstrip('.')} address, so {subject} belong to "
         "the platform, not to this business.",
         "", detail={"reason": "platform_domain"})
 
@@ -284,12 +299,6 @@ def dkim_chunking(domain: str, selector: str, ns: str = "1.1.1.1") -> CheckResul
     Pasted as one long string it is silently invalid: the record exists, looks
     right in a dashboard, and no receiver can verify a signature with it.
     """
-    if is_platform_domain(domain):
-        return _not_their_domain("mx_present", domain)
-    if is_platform_domain(domain):
-        return _not_their_domain("dmarc_policy", domain)
-    if is_platform_domain(domain):
-        return _not_their_domain("dmarc_present", domain)
     if is_platform_domain(domain):
         return _not_their_domain("dkim_chunking", domain)
     name = f"{selector}._domainkey.{domain}"
