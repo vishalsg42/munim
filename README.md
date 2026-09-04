@@ -1,5 +1,10 @@
 # Munim
 
+[![PyPI](https://img.shields.io/pypi/v/munim)](https://pypi.org/project/munim/)
+[![Python](https://img.shields.io/pypi/pyversions/munim)](https://pypi.org/project/munim/)
+[![Tests](https://github.com/vishalsg42/munim/actions/workflows/tests.yml/badge.svg)](https://github.com/vishalsg42/munim/actions/workflows/tests.yml)
+[![Licence](https://img.shields.io/pypi/l/munim)](LICENSE)
+
 **One MCP server holding a live session with every client's account at once.**
 
 A coding agent can be logged in to one Cloudflare account. One Vercel. One Resend. Connect
@@ -81,63 +86,104 @@ Nothing is registered by hand, because all three providers issue a client on dem
 
 ## Install
 
-Requires Python 3.10+.
-
-Once it is on PyPI, nothing is cloned:
+Requires Python 3.10+. Nothing else: no Node, no build step, no account to create
+first.
 
 ```bash
-uv tool install munim
+uv tool install munim          # or: pipx install munim, or: pip install munim
 claude mcp add munim -- munim-mcp
 ```
 
-Until then, or to work on it:
+That is the whole install. The control room ships inside the package, so there is
+no npm step and nothing to compile.
+
+<details>
+<summary>Working on Munim itself</summary>
 
 ```bash
 git clone https://github.com/vishalsg42/munim && cd munim
-uv venv && uv pip install -e .
+uv venv && uv pip install -e ".[dev]"
 claude mcp add munim -- "$(pwd)/.venv/bin/munim-mcp"
 ```
 
-The control room ships pre-built inside the package, so neither path needs npm.
+</details>
 
-Set a model host in `.env` (see `.env.example`). Any Strands-supported provider works:
-Amazon Bedrock, Gemini, Anthropic, OpenAI, Ollama.
+### Three steps to something useful
 
+**1. Point it at a model.** Any Strands-supported provider works: Amazon Bedrock,
+Gemini, Anthropic, OpenAI, Ollama. Put one key in `.env` in the directory you run
+from (see `.env.example`):
 
 ```
 GEMINI_API_KEY=...
 ```
 
-Connect a client. Nothing is registered by hand: Cloudflare, Vercel and Resend each
-run their own MCP server, and each registers a client on demand, so a browser opens
-and that is the whole setup. There is no application to create and no client secret
-anywhere in this project. Leave the name out and the account you sign in to supplies
-it, which is what keeps a name and an account from drifting apart:
+This is only needed for the tools that reason, which are `check`, `work_on_client`
+and `ask_across_clients`. Connecting accounts and reading them needs no model.
+
+**2. Connect a client.** A browser opens, you sign in, and that is the setup. There
+is no application to register and no client secret anywhere in this project,
+because Cloudflare, Vercel, Resend and the rest each run their own MCP server and
+each issues a client on demand:
 
 ```bash
-munim connect cloudflare                    # browser login; the account names the client
-munim connect "Balaji Roofings" zoho --url https://…   # Zoho: the URL is the credential
-munim connect "Balaji Roofings" vercel      # or name it yourself
-munim rename "<account name>" "Balaji Roofings"
-munim merge "<account name>" "Balaji Roofings"   # if they were added twice
-munim forget "<client>"                          # only when it holds nothing
-munim clients                                # what is connected
-munim doctor                                 # what is missing, and the fix
+munim connect cloudflare
 ```
 
-Then, in your coding agent:
+Leave the name out and the account you sign in to supplies it, which is what stops
+a name and an account from drifting apart. To add a second client, **sign out of
+the provider in your browser first**, or the consent screen hands you the same
+account again:
+
+```bash
+munim connect cloudflare      # sign in as the second client
+munim clients                 # who is connected, and to what
+```
+
+**3. Ask your coding agent something that spans them.** This is the part a single
+logged-in session cannot do:
 
 ```
 which of my clients has a domain expiring this quarter?
 check ivyandfern.co.uk for Ivy & Fern Studio
 ```
 
-Open the control room to watch a run:
+Run `munim doctor` at any point. It says what is set up, what is not, and the exact
+command to fix each gap.
+
+### Every command
 
 ```bash
-uv run munim-room                        # http://127.0.0.1:8977
-uv run munim-room --port 8986            # if 8977 is taken
-uv run munim-room --runs DIR --reports DIR   # serve a different set of runs
+munim connect cloudflare                     # browser login; the account names the client
+munim connect "Balaji Roofings" vercel       # or name the client yourself
+munim connect "Balaji Roofings" zoho --url https://…   # Zoho: the URL is the credential
+munim connect "<client>" resend --token      # paste a key instead of logging in
+
+munim clients                                # who is connected, and to what
+munim doctor                                 # what is missing, and the fix for each
+munim servers                                # which MCP servers Munim knows about
+munim add-server <name> <url>                # point it at any other MCP server
+
+munim rename "<account name>" "Balaji Roofings"   # the name is a label; the id is the identity
+munim merge "<account name>" "Balaji Roofings"    # if one account became two clients
+munim forget "<client>"                           # only when it holds nothing
+munim disconnect "<client>" [provider]            # drop credentials, keep the client
+munim disconnect --all                            # drop every credential
+```
+
+A rename is only a label change. Credentials are filed under a client id that never
+changes, so renaming cannot orphan a session.
+
+### Watching a run
+
+The control room is a page that follows a run as it happens. It reads the same run
+log the terminal does, so it can be opened mid-launch, or after one, and replays
+from the beginning:
+
+```bash
+munim-room                              # http://127.0.0.1:8977
+munim-room --port 8986                  # if 8977 is taken
+munim-room --runs DIR --reports DIR     # serve a different set of runs
 ```
 
 ## Any MCP server
@@ -340,15 +386,6 @@ In a coding agent that somebody is the agent itself: a Gmail connector works
 without setup because the client, not the operator, holds the Google
 registration. Munim is a client too, so it needs its own, and that is a decision
 about carrying a Google credential rather than a thing to slip in.
-
-**Published to PyPI.** The package builds, a wheel installed into an empty
-environment runs and carries the control room, the name is free, and
-`.github/workflows/publish.yml` publishes on a tag through PyPI's trusted
-publishing, so no token has to exist. What is missing is the pending publisher
-on PyPI, which is an account decision rather than a code one. Until then
-installing means cloning, while every other MCP server is one line in a config,
-and that gap is plausibly why a credential tool with a good design ends up with
-no adopters (D15).
 
 **Watch mode.** `audit_all_clients` is the shape of it and runs on demand.
 Running on a schedule and telling somebody only when the answer changes is the
