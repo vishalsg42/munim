@@ -28,17 +28,27 @@ class ClientRecord(BaseModel):
 
     name: str
     domain: str | None = None
-    providers: list[str] = []
 
 
 class Registry:
     def __init__(self, path: Path) -> None:
         self._path = Path(path)
 
+    # Registries written before the keychain became the single source of truth
+    # carry a `providers` list. It was a second copy of a fact the keychain
+    # already held, and `munim connect` never updated it, so it was wrong for
+    # anyone who used the documented path. Dropped on load rather than migrated:
+    # `extra="forbid"` would otherwise take every client down at once.
+    _LEGACY_KEYS = ("providers",)
+
     def _load(self) -> dict[str, dict]:
         if not self._path.exists():
             return {}
-        return json.loads(self._path.read_text())
+        records = json.loads(self._path.read_text())
+        for record in records.values():
+            for key in self._LEGACY_KEYS:
+                record.pop(key, None)
+        return records
 
     def _save(self, records: dict[str, dict]) -> None:
         """Atomic. The agent, the room and interactive tools all write here;

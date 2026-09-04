@@ -146,10 +146,6 @@ def build_server(backend=None, registry=None, runs_dir=None) -> FastMCP:
         """
         registry.get(client)  # unregistered client fails before a secret is stored
         TokenConnector(backend).connect(client, provider, credential)
-        record = registry.get(client)
-        if provider not in record.providers:
-            record.providers.append(provider)
-            registry.update(record)
         # The credential is deliberately not echoed.
         return {"client": client, "provider": provider, "connected": True,
                 "oauth_available": provider in OAUTH_PROVIDERS}

@@ -6,6 +6,8 @@ the registry holds references, the keychain holds values.
 
 import json
 
+import json
+
 import pytest
 
 from munim.registry import ClientRecord, Registry, UnknownClient
@@ -17,13 +19,10 @@ def test_a_new_registry_has_no_clients(tmp_path):
 
 def test_added_clients_survive_a_reload(tmp_path):
     path = tmp_path / "registry.json"
-    Registry(path).add(
-        ClientRecord(name="acme", domain="acme.example", providers=["vercel"])
-    )
+    Registry(path).add(ClientRecord(name="acme", domain="acme.example"))
 
     reloaded = Registry(path).get("acme")
     assert reloaded.domain == "acme.example"
-    assert reloaded.providers == ["vercel"]
 
 
 def test_an_unknown_client_is_an_error_not_an_empty_record(tmp_path):
@@ -44,14 +43,15 @@ def test_the_registry_file_never_contains_a_secret(tmp_path):
     registry = Registry(path)
     with pytest.raises(Exception):
         registry.add(
-            ClientRecord(name="acme", providers=["vercel"], token="sk-secret-value")
+            ClientRecord(name="acme", token="sk-secret-value")
         )
 
-    registry.add(ClientRecord(name="acme", providers=["vercel"]))
+    registry.add(ClientRecord(name="acme"))
     assert "sk-secret-value" not in path.read_text()
-    # Providers are named, never valued.
+    # A stored record carries a name and a domain and nothing else. Whether a
+    # provider is connected is the keychain's to answer, not this file's.
     stored = json.loads(path.read_text())
-    assert stored["acme"]["providers"] == ["vercel"]
+    assert set(stored["acme"]) == {"name", "domain"}
 
 
 def test_a_client_can_be_looked_up_by_one_of_its_domains(tmp_path):
@@ -68,17 +68,17 @@ def test_a_client_can_be_looked_up_by_one_of_its_domains(tmp_path):
 
 
 def test_update_replaces_an_existing_client(tmp_path):
-    """connect_provider must append to `providers`, and `add` refuses to
-    overwrite, so there has to be an update path."""
+    """`add` refuses to overwrite, so there has to be an update path - a client
+    acquires a domain after it is registered."""
     path = tmp_path / "registry.json"
     registry = Registry(path)
     registry.add(ClientRecord(name="acme"))
 
     record = registry.get("acme")
-    record.providers.append("cloudflare")
+    record.domain = "acme.example"
     registry.update(record)
 
-    assert Registry(path).get("acme").providers == ["cloudflare"]
+    assert Registry(path).get("acme").domain == "acme.example"
 
 
 def test_update_refuses_an_unregistered_client(tmp_path):
@@ -112,3 +112,19 @@ def test_a_failed_write_leaves_the_previous_file_intact(tmp_path):
     assert path.read_text() == before
     assert Registry(path).get("acme").domain == "acme.example"
     assert list(path.parent.glob("*.tmp")) == []
+
+
+def test_a_registry_written_before_the_keychain_was_the_only_truth_still_loads(tmp_path):
+    """`providers` was a second copy of a fact the keychain already held, and
+    `munim connect` never updated it. Removing the field must not lock anyone
+    out of their own registry: `extra="forbid"` would reject the stale key and
+    take every client down at once."""
+    path = tmp_path / "registry.json"
+    path.write_text(json.dumps({
+        "acme": {"name": "acme", "domain": "acme.example",
+                 "providers": ["vercel", "cloudflare"]},
+    }))
+
+    record = Registry(path).get("acme")
+    assert record.domain == "acme.example"
+    assert not hasattr(record, "providers")

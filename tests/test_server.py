@@ -21,12 +21,13 @@ def _server(tmp_path):
 
     registry = Registry(tmp_path / "registry.json")
     registry.add(ClientRecord(name="acme", domain="acme.example"))
-    return build_server(backend=Keychain(), registry=registry,
-                        runs_dir=tmp_path / "runs"), registry
+    keychain = Keychain()
+    return (build_server(backend=keychain, registry=registry,
+                         runs_dir=tmp_path / "runs"), registry, keychain)
 
 
 async def test_every_mutating_tool_names_its_client(tmp_path):
-    server, _ = _server(tmp_path)
+    server, _, _ = _server(tmp_path)
     tools = {t.name: t for t in await server.list_tools()}
     for name in MUTATING:
         assert name in tools, f"{name} is listed as mutating but is not registered"
@@ -37,7 +38,7 @@ async def test_every_mutating_tool_names_its_client(tmp_path):
 async def test_the_only_cross_client_tool_is_read_only(tmp_path):
     """Read across, write within (D5). If a tool spans containers it must not
     be able to change anything."""
-    server, _ = _server(tmp_path)
+    server, _, _ = _server(tmp_path)
     names = {t.name for t in await server.list_tools()}
     assert "find_across_clients" in names
     assert "find_across_clients" not in MUTATING
@@ -45,7 +46,7 @@ async def test_the_only_cross_client_tool_is_read_only(tmp_path):
 
 async def test_no_tool_advertises_returning_a_credential(tmp_path):
     """D6: nothing hands a secret back across the MCP boundary."""
-    server, _ = _server(tmp_path)
+    server, _, _ = _server(tmp_path)
     for tool in await server.list_tools():
         blurb = (tool.description or "").lower()
         assert "returns the token" not in blurb
@@ -53,18 +54,20 @@ async def test_no_tool_advertises_returning_a_credential(tmp_path):
 
 
 async def test_connect_provider_does_not_echo_the_secret(tmp_path):
-    server, registry = _server(tmp_path)
+    server, registry, keychain = _server(tmp_path)
     result = await server.call_tool(
         "connect_provider",
         {"client": "acme", "provider": "resend", "credential": "re_super_secret"},
     )
     rendered = str(result)
     assert "re_super_secret" not in rendered, "the credential came back out"
-    assert "resend" in registry.get("acme").providers
+    # The keychain is the only record that a provider is connected; the registry
+    # deliberately has nowhere to say so.
+    assert keychain.get("acme", "resend") == "re_super_secret"
 
 
 async def test_an_unregistered_client_is_refused_before_a_secret_is_stored(tmp_path):
-    server, _ = _server(tmp_path)
+    server, _, _ = _server(tmp_path)
     with pytest.raises(Exception):
         await server.call_tool(
             "connect_provider",
@@ -73,7 +76,7 @@ async def test_an_unregistered_client_is_refused_before_a_secret_is_stored(tmp_p
 
 
 async def test_client_status_reports_presence_not_values(tmp_path):
-    server, _ = _server(tmp_path)
+    server, _, _ = _server(tmp_path)
     await server.call_tool("connect_provider",
                            {"client": "acme", "provider": "resend", "credential": "re_x"})
     result = str(await server.call_tool("client_status", {"client": "acme"}))
@@ -88,7 +91,7 @@ async def test_naming_a_new_domain_registers_it_and_checks_it(tmp_path, monkeypa
     monkeypatch.setattr(checks, "query", lambda *a, **k: [])
     monkeypatch.setattr(checks, "run_reachability", lambda d: [])
 
-    server, registry = _server(tmp_path)
+    server, registry, keychain = _server(tmp_path)
     assert [c.name for c in registry.clients()] == ["acme"]
 
     await server.call_tool("check", {"target": "newclient.example"})
@@ -100,7 +103,7 @@ async def test_naming_the_same_domain_twice_does_not_duplicate_it(tmp_path, monk
     monkeypatch.setattr(checks, "query", lambda *a, **k: [])
     monkeypatch.setattr(checks, "run_reachability", lambda d: [])
 
-    server, registry = _server(tmp_path)
+    server, registry, keychain = _server(tmp_path)
     await server.call_tool("check", {"target": "newclient.example"})
     await server.call_tool("check", {"target": "newclient.example"})
     assert sum(1 for c in registry.clients() if c.name == "newclient.example") == 1
@@ -113,7 +116,7 @@ async def test_an_existing_client_is_found_by_its_domain(tmp_path, monkeypatch):
     monkeypatch.setattr(checks, "query", lambda *a, **k: [])
     monkeypatch.setattr(checks, "run_reachability", lambda d: [])
 
-    server, registry = _server(tmp_path)   # acme, domain acme.example
+    server, registry, keychain = _server(tmp_path)   # acme, domain acme.example
     await server.call_tool("check", {"target": "acme.example"})
     assert len(registry.clients()) == 1
 
@@ -121,7 +124,7 @@ async def test_an_existing_client_is_found_by_its_domain(tmp_path, monkeypatch):
 async def test_an_unknown_name_that_is_not_a_domain_is_refused(tmp_path):
     """Auto-registering a typo'd client name would be how a wrong-tenant write
     starts. A bare name has to already exist."""
-    server, _ = _server(tmp_path)
+    server, _, _ = _server(tmp_path)
     with pytest.raises(Exception, match="not a domain"):
         await server.call_tool("check", {"target": "Acme Corp"})
 
@@ -129,7 +132,7 @@ async def test_an_unknown_name_that_is_not_a_domain_is_refused(tmp_path):
 async def test_reads_may_register_but_writes_may_not(tmp_path):
     """The safety property: connect_provider still refuses an unknown client
     even though check would have registered one (D5)."""
-    server, registry = _server(tmp_path)
+    server, registry, keychain = _server(tmp_path)
     with pytest.raises(Exception):
         await server.call_tool("connect_provider", {
             "client": "brand-new.example", "provider": "resend", "credential": "x"})
