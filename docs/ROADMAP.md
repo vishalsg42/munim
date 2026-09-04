@@ -74,6 +74,22 @@ application route, which builds its own authorize URL. The one exception is
 is credential isolation this is the least comfortable thing in the project, and
 it is a property of the spec rather than of this implementation.
 
+**Gmail sessions expire after seven days.** Google issues a refresh token
+lasting seven days to any External app whose publishing status is Testing and
+whose scopes go beyond name, email and profile. Gmail's do. Escaping it means
+publishing the app and passing OAuth verification plus a CASA Tier 2 third-party
+security assessment, renewed annually, which is not something a self-hosted tool
+does casually. Every other provider holds a session that refreshes, so this is
+Gmail's alone, and it is worth weighing against what Gmail is actually for:
+nothing in Munim reads mail today.
+
+**Adding Gmail test users is manual, and there is no API.** Every mailbox to be
+connected must be listed in the Cloud Console by hand, capped at 100 for the
+lifetime of the app with removals still counted. No Google API manages the
+consent screen audience: the IAP brand resource has no test-user field, and the
+IAP OAuth Admin API that once managed brands was shut down in March 2026. For an
+operator with a dozen clients this is a real ceiling on Gmail specifically.
+
 **A wrong-account guard that survives a token refresh.** Every session verifies
 which account it belongs to before use. What is not proven is the behaviour when
 a refresh token silently returns a session for a different account, which should

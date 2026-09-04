@@ -14,11 +14,12 @@ uses the project you already have selected. That also means there is no state
 file to keep: `.env` holds the answer, and holding the answer is what stops this
 running twice.
 
-What it cannot do, and why: `gcloud` has exactly one OAuth command and its own
-documentation says "this API cannot be used as a generic management API for all
-OAuth clients in your project". It creates Identity-Aware Proxy clients. There
-is no API for creating a Desktop-app OAuth client, so that step is the Console,
-by hand, for everyone.
+What it cannot do, and why: there is no API for creating a Desktop-app OAuth
+client, so that step is the Console, by hand, for everyone. `gcloud` has one
+OAuth command group and it is not an alternative: it managed Identity-Aware
+Proxy brands, its own documentation said "this API cannot be used as a generic
+management API for all OAuth clients in your project", and it was shut down in
+March 2026 anyway.
 
 Nor the consent screen before it. A project that has never had one answers the
 create-client page with "you must first configure your consent screen", which

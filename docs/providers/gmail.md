@@ -103,6 +103,12 @@ If you choose "Web application" instead, add
 unverified application only works for accounts on that list. Add every Google
 account whose mail you intend to connect.
 
+There is no API for this. Google's own guidance describes the Console flow and
+nothing else, the IAP brand resource has no test-user field, and the IAP OAuth
+Admin API that once managed brands was shut down in March 2026. So this step is
+by hand, per account, capped at 100 for the lifetime of the app, and removals
+still count against the cap.
+
 ### 6. Connect
 
 ```bash
@@ -121,6 +127,31 @@ that, and **Munim cannot ask for less**. The MCP specification hands scope
 selection to the server and Google's resource advertises the full set. This is
 the least comfortable thing in this project and it is a property of the
 specification rather than of this implementation.
+
+## The seven day expiry
+
+**A Gmail session dies after seven days and needs another browser login.** This
+is the most important thing on this page.
+
+Google: *"A Google Cloud Platform project with an OAuth consent screen
+configured for an external user type and a publishing status of 'Testing' is
+issued a refresh token expiring in 7 days, unless the only OAuth scopes
+requested are a subset of name, email address, and user profile."*
+
+Gmail's scopes are far beyond that subset, so the seven days apply. Every other
+provider here holds a session that refreshes: Cloudflare indefinitely, Vercel
+for thirty days with rotation, Supabase likewise. Gmail is the exception, and
+for a tool whose purpose is holding live sessions across many accounts that is a
+real limitation rather than an inconvenience.
+
+The only way out is publishing the app and passing OAuth verification plus a
+**CASA Tier 2** third-party security assessment, which restricted Gmail scopes
+require, renewed annually. That also removes the test user list. It is not
+something a self-hosted tool does casually.
+
+There is no API to soften any of this. Test users are Console-only: the IAP
+brand resource carries no test-user field, and no Google API published today
+manages the consent screen audience.
 
 ## Gotchas
 

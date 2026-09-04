@@ -30,6 +30,14 @@ Unlike Gmail, these are not Google restricted scopes, so the test-user
 restriction may not apply the same way. That is **unverified**: nobody has
 connected Stitch through Munim yet.
 
+## The seven day expiry
+
+Almost certainly applies here too. Google issues a refresh token expiring in
+seven days to any External app in Testing whose scopes go beyond name, email and
+profile, and Stitch's do. See [the Gmail page](gmail.md), which explains it.
+
+**Unverified for Stitch specifically**, because nobody has connected it.
+
 ## Status
 
 Registration requirements confirmed by probing. **Not yet connected live.** If
