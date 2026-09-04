@@ -135,9 +135,10 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("provider", choices=sorted({*PROVIDERS, "resend"}))
     c.add_argument("--token", action="store_true",
                    help="paste an API key instead of logging in")
-    c.add_argument("--via-mcp", action="store_true",
-                   help="connect through the provider's own MCP server, which "
-                        "needs no application registered by hand")
+    c.add_argument("--via-app", action="store_true",
+                   help="use a registered OAuth application instead of the "
+                        "provider's MCP server. Only needed if you want your "
+                        "own application name on the consent screen")
 
     ls = sub.add_parser("clients", help="list registered clients")
     ls.add_argument("--verbose", action="store_true")
@@ -176,7 +177,14 @@ def main(argv: list[str] | None = None) -> int:
         print("Stored.", file=sys.stderr)
         return 0
 
-    if getattr(args, "via_mcp", False):
+    # The provider's own MCP server is the default wherever there is one: it
+    # registers a client on demand, so it works from a clean clone with nothing
+    # set up. Sending someone to register an application when they do not have
+    # to was the friction this project set out to remove, and it was ours.
+    from munim.remote.servers import server_for
+
+    # `--token` never reaches here: it is handled above and stores a pasted key.
+    if not args.via_app and server_for(args.provider) is not None:
         return connect_via_mcp(args.client, args.provider)
     return connect(args.client, args.provider)
 

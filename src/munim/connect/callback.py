@@ -28,6 +28,7 @@ _PAGE = (
 
 class _Handler(http.server.BaseHTTPRequestHandler):
     result: dict = {}
+    expect_state: str | None = None
 
     def do_GET(self):  # noqa: N802
         parsed = urllib.parse.urlparse(self.path)
@@ -35,7 +36,20 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
             return
-        _Handler.result = dict(urllib.parse.parse_qsl(parsed.query))
+        answer = dict(urllib.parse.parse_qsl(parsed.query))
+
+        # A callback for somebody else's flow is not ours to accept. Anything
+        # can reach a localhost port: another tool mid-login, a stale tab, an
+        # authorization the browser completed on its own. Taking the first
+        # arrival and handing its code to our token endpoint is how a login
+        # fails with "state parameter mismatch" at best, and how an injected
+        # code gets exchanged at worst. Keep listening instead.
+        if _Handler.expect_state and answer.get("state") != _Handler.expect_state:
+            self.send_response(404)
+            self.end_headers()
+            return
+
+        _Handler.result = answer
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(_PAGE)))
@@ -50,13 +64,20 @@ def redirect_uri(port: int = DEFAULT_PORT) -> str:
     return f"http://localhost:{port}{CALLBACK_PATH}"
 
 
-def serve_until_callback(port: int = DEFAULT_PORT, timeout: float = 180.0) -> dict:
-    """Block until the redirect lands, ignoring everything that is not it.
+def serve_until_callback(port: int = DEFAULT_PORT, timeout: float = 180.0,
+                         expect_state: str | None = None) -> dict:
+    """Block until *our* redirect lands, ignoring everything that is not it.
+
+    `expect_state` is the state sent on the authorization request. A callback
+    carrying any other state belongs to a different flow and is ignored rather
+    than returned, which is both correct and the difference between waiting a
+    little longer and exchanging a code that was never ours.
 
     Returns the query parameters. Raises TimeoutError naming the URL it waited
     on, because "no callback received" tells whoever reads it nothing.
     """
     _Handler.result = {}
+    _Handler.expect_state = expect_state
     try:
         server = http.server.HTTPServer(("127.0.0.1", port), _Handler)
     except OSError as exc:

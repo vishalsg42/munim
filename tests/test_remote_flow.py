@@ -137,3 +137,51 @@ async def test_the_authorization_url_carries_pkce_and_our_callback():
     assert query["code_challenge_method"] == ["S256"]
     assert query["redirect_uri"] == ["http://localhost:8976/oauth/callback"]
     assert "code_verifier" not in query, "the verifier must never reach the browser"
+
+
+def test_a_callback_for_another_flow_is_ignored():
+    """Anything can reach a localhost port: another tool mid-login, a stale
+    tab, an authorization the browser finished on its own. Taking the first
+    arrival is how a real login failed with
+
+        State parameter mismatch: _I8qw1Qcc... != LrUKhNB0wM...
+
+    two different generators, so the callback belonged to something else. Worse
+    than the failure is the success: exchanging a code that was never ours.
+    """
+    import threading
+    import urllib.request
+
+    from munim.connect.callback import redirect_uri, serve_until_callback
+
+    port = 8981
+    caught: dict = {}
+
+    def listen():
+        caught.update(serve_until_callback(port, timeout=10, expect_state="ours"))
+
+    thread = threading.Thread(target=listen, daemon=True)
+    thread.start()
+
+    # Wait for the socket rather than guessing at a sleep: a race here reads as
+    # the behaviour under test failing, which is how this test lied once.
+    import socket
+    import time
+    for _ in range(100):
+        with socket.socket() as probe:
+            if probe.connect_ex(("127.0.0.1", port)) == 0:
+                break
+        time.sleep(0.05)
+    else:
+        pytest.fail(f"listener never bound {port}")
+
+    base = redirect_uri(port)
+    # Somebody else's callback arrives first and must be refused.
+    with pytest.raises(Exception):
+        urllib.request.urlopen(f"{base}?code=theirs&state=someone-else", timeout=3)
+    # Then ours.
+    urllib.request.urlopen(f"{base}?code=ours&state=ours", timeout=3).read()
+    thread.join(5)
+
+    assert caught.get("code") == "ours", f"took the wrong callback: {caught}"
+    assert caught.get("state") == "ours"

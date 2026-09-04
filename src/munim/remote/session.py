@@ -13,6 +13,7 @@ a session for a client that is not registered.
 """
 
 import asyncio
+import urllib.parse
 from contextlib import asynccontextmanager
 
 from mcp import ClientSession
@@ -59,7 +60,15 @@ def auth_for(client: str, provider: str, *, backend=None,
     storage = (KeychainTokenStorage(client, provider, backend) if backend
                else KeychainTokenStorage(client, provider))
 
+    # The state the SDK put on the authorization request. The listener waits for
+    # a callback carrying this one and ignores the rest: anything can reach a
+    # localhost port, and accepting the first arrival is how a login fails with
+    # "state parameter mismatch" on somebody else's redirect.
+    pending: dict[str, str | None] = {}
+
     async def redirect(url: str) -> None:
+        query = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+        pending["state"] = query.get("state", [None])[0]
         if on_url is not None:
             await on_url(url)
         else:
@@ -68,7 +77,15 @@ def auth_for(client: str, provider: str, *, backend=None,
             webbrowser.open(url)
 
     async def callback() -> tuple[str, str | None]:
-        answer = await asyncio.to_thread(serve_until_callback)
+        answer = await asyncio.to_thread(serve_until_callback,
+                                         expect_state=pending.get("state"))
+        if "error" in answer:
+            # Ours, and a refusal. Saying so beats waiting out the deadline and
+            # reporting that no callback arrived when one did.
+            raise RuntimeError(
+                f"{provider} refused the login: "
+                f"{answer.get('error_description') or answer['error']}"
+            )
         return answer.get("code", ""), answer.get("state")
 
     if not server.public_client:

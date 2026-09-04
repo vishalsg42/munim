@@ -169,3 +169,49 @@ def test_both_flows_agree_on_the_redirect():
     remote = auth_for("X", "cloudflare", backend=FakeKeyring())
     assert REDIRECT_URI == redirect_uri()
     assert str(remote.context.client_metadata.redirect_uris[0]) == redirect_uri()
+
+
+def _routes(argv, monkeypatch):
+    """Which connect path the CLI chooses, without running either."""
+    from munim import cli
+
+    taken = {}
+    monkeypatch.setattr(cli, "connect_via_mcp",
+                        lambda c, p: taken.update(path="mcp") or 0)
+    monkeypatch.setattr(cli, "connect", lambda c, p: taken.update(path="app") or 0)
+    cli.main(argv)
+    return taken["path"]
+
+
+def test_a_provider_with_an_mcp_server_needs_no_setup_by_default(monkeypatch):
+    """The default has to be the path that works from a clean clone. Sending
+    someone to register an application when they do not have to was the
+    friction this project set out to remove, and for a while it was ours."""
+    assert _routes(["connect", "Acme", "cloudflare"], monkeypatch) == "mcp"
+    assert _routes(["connect", "Acme", "resend"], monkeypatch) == "mcp"
+    assert _routes(["connect", "Acme", "vercel"], monkeypatch) == "mcp"
+
+
+def test_a_provider_without_one_falls_back_to_an_application(monkeypatch):
+    assert _routes(["connect", "Acme", "supabase"], monkeypatch) == "app"
+
+
+def test_via_app_opts_out(monkeypatch):
+    """For anyone who wants their own application name on the consent screen."""
+    assert _routes(["connect", "Acme", "cloudflare", "--via-app"], monkeypatch) == "app"
+
+
+def test_token_entry_reaches_neither_path(monkeypatch, capsys):
+    """`--token` stores a pasted key and returns before any login is chosen.
+    Asserting it "routes to the app path" was wrong, and the routing carried a
+    condition for it that could never be true."""
+    from munim import cli
+
+    taken = {}
+    monkeypatch.setattr(cli, "connect_via_mcp",
+                        lambda c, p: taken.update(path="mcp") or 0)
+    monkeypatch.setattr(cli, "connect", lambda c, p: taken.update(path="app") or 0)
+    monkeypatch.setattr("builtins.input", lambda: "")
+
+    assert cli.main(["connect", "Acme", "cloudflare", "--token"]) == 2
+    assert taken == {}, "a pasted key should not start a browser login"
