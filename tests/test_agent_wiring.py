@@ -109,3 +109,19 @@ async def test_a_missing_model_costs_the_explanation_not_the_findings(tmp_path):
         "a missing model host has to be said out loud"
     assert any(e.kind == "finding" for e in events), \
         "the deterministic findings must survive the model being absent"
+
+
+def test_the_agent_is_built_with_printing_turned_off():
+    """Strands streams tokens to stdout by default and the MCP server writes
+    JSON-RPC to the same stdout with nothing in between. The default handler
+    interleaves prose with the protocol and kills the connection.
+
+    Asserted on the construction call rather than by capturing output, because
+    whether the corruption shows up depends on timing: the first run of this
+    over real stdio came back clean and was still wrong.
+    """
+    import inspect
+
+    source = inspect.getsource(agent_module.explain)
+    assert "callback_handler=None" in source, \
+        "Agent must be constructed with callback_handler=None"

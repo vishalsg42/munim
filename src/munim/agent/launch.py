@@ -108,8 +108,14 @@ async def explain(domain: str, client: str, failures: list[CheckResult],
     # the client, so an invalid credential does not surface until the call.
     try:
         model, label = build_model()
+        # callback_handler=None is load-bearing, not tidiness. Strands defaults
+        # to PrintingCallbackHandler, which streams the model's tokens to
+        # stdout, and the MCP server writes JSON-RPC to that same stdout with
+        # no redirect in between. Left at the default this agent interleaves
+        # prose with the protocol and the coding agent's connection dies. It
+        # did not, in the first run over stdio, purely on timing.
         agent = Agent(model=model, tools=_tools(domain, log, client),
-                      system_prompt=SYSTEM)
+                      system_prompt=SYSTEM, callback_handler=None)
         log.append(client=client, stage="diagnose", kind="stage_start",
                    human_text=f"Working out what to tell {client}",
                    detail={"model": label})
