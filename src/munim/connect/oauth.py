@@ -16,16 +16,15 @@ which no provider's own login can do.
 
 import base64
 import hashlib
-import http.server
 import secrets
 import threading
-import time
 import urllib.parse
 import webbrowser
 from dataclasses import dataclass, field
 
 import httpx
 
+from munim.connect.callback import serve_until_callback
 from munim.container import KeychainBackend
 
 CALLBACK_PORT = 8976
@@ -126,41 +125,6 @@ def _pkce() -> tuple[str, str]:
     return verifier, challenge
 
 
-class _Callback(http.server.BaseHTTPRequestHandler):
-    """Receives the redirect, then the server is torn down.
-
-    Anything that is not the callback path gets a 404 and is ignored, because
-    the listener has to survive them: browsers speculatively fetch /favicon.ico
-    and probe localhost ports, and a single stray GET must not cost the operator
-    their login.
-    """
-
-    result: dict = {}
-
-    def do_GET(self):  # noqa: N802
-        parsed = urllib.parse.urlparse(self.path)
-        if parsed.path != "/oauth/callback":
-            self.send_response(404)
-            self.end_headers()
-            return
-        _Callback.result = dict(urllib.parse.parse_qsl(parsed.query))
-        body = (
-            b"<!doctype html><meta charset=utf-8>"
-            b"<body style='font:16px -apple-system,sans-serif;color:#17191c;"
-            b"background:#fbfaf8;display:grid;place-items:center;height:100vh;margin:0'>"
-            b"<div style='text-align:center'><p style='font-size:20px'>Connected.</p>"
-            b"<p style='color:#5f6368'>You can close this tab.</p></div>"
-        )
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def log_message(self, *args):  # keep the terminal clean
-        pass
-
-
 class OAuthConnector:
     name = "oauth"
 
@@ -205,27 +169,26 @@ class OAuthConnector:
         verifier, challenge = _pkce()
         state = secrets.token_urlsafe(24)
 
-        _Callback.result = {}
-        server = http.server.HTTPServer(("127.0.0.1", CALLBACK_PORT), _Callback)
-        # Short per-request timeout so the loop below can re-check the deadline
-        # rather than blocking in accept() until someone connects.
-        server.timeout = 0.5
-        deadline = time.monotonic() + timeout
+        # The listener runs in a thread so the browser can be opened while it
+        # is already accepting: opening first and listening after loses a
+        # callback from a provider that redirects immediately.
+        answer: dict = {}
 
-        def serve_until_callback() -> None:
-            while not _Callback.result and time.monotonic() < deadline:
-                server.handle_request()
+        def listen() -> None:
+            try:
+                answer.update(serve_until_callback(CALLBACK_PORT, timeout))
+            except (TimeoutError, RuntimeError):
+                pass
 
-        thread = threading.Thread(target=serve_until_callback, daemon=True)
+        thread = threading.Thread(target=listen, daemon=True)
         thread.start()
 
         url = self.authorize_url(provider, client_id, state, challenge)
         if open_browser:
             webbrowser.open(url)
-        thread.join(timeout)
-        server.server_close()
+        thread.join(timeout + 1)
 
-        result = _Callback.result
+        result = answer
         if not result:
             raise TimeoutError(
                 f"no callback on {REDIRECT_URI} within {timeout:.0f}s; "

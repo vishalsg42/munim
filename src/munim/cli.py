@@ -41,6 +41,42 @@ def _client_id(provider: str) -> tuple[str, str]:
     return client_id, os.environ.get(f"{prefix}_OAUTH_CLIENT_SECRET", "")
 
 
+def connect_via_mcp(client: str, provider: str) -> int:
+    """Connect through the provider's own MCP server.
+
+    Nothing is registered by hand. The provider's authorization server issues a
+    client on demand, so this works for anyone who installs Munim, and it is
+    per client: each one is a separate registration, which is why two accounts
+    with the same provider do not clobber each other (D25).
+    """
+    import asyncio
+
+    from munim.remote.servers import server_for
+    from munim.remote.session import NoRemoteServer, tools_for
+
+    server = server_for(provider)
+    if server is None:
+        print(f"{provider} runs no MCP server. Use `munim connect {client} "
+              f"{provider}` without --via-mcp.", file=sys.stderr)
+        return 2
+
+    print(f"Opening your browser to log in to {provider} as {client}.",
+          file=sys.stderr)
+    print(f"The consent screen will name the application "
+          f"\"Munim ({client})\" - check it is the right account before you "
+          f"approve, because that is the one thing this cannot check for you.",
+          file=sys.stderr)
+    try:
+        tools = asyncio.run(tools_for(client, provider))
+    except NoRemoteServer as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    print(f"Connected {provider} for {client}: {len(tools)} tools available.",
+          file=sys.stderr)
+    return 0
+
+
 def connect(client: str, provider: str) -> int:
     load_env()
     registry = _registry()
@@ -99,6 +135,9 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("provider", choices=sorted({*PROVIDERS, "resend"}))
     c.add_argument("--token", action="store_true",
                    help="paste an API key instead of logging in")
+    c.add_argument("--via-mcp", action="store_true",
+                   help="connect through the provider's own MCP server, which "
+                        "needs no application registered by hand")
 
     ls = sub.add_parser("clients", help="list registered clients")
     ls.add_argument("--verbose", action="store_true")
@@ -137,6 +176,8 @@ def main(argv: list[str] | None = None) -> int:
         print("Stored.", file=sys.stderr)
         return 0
 
+    if getattr(args, "via_mcp", False):
+        return connect_via_mcp(args.client, args.provider)
     return connect(args.client, args.provider)
 
 

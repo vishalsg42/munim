@@ -1,0 +1,137 @@
+"""Two clients, one provider, no collision.
+
+This is the property the whole multi-account claim rests on. A coding agent
+holds one account per provider because one client id shares one token store.
+A registration and a token set per client is what removes that, and if these
+ever share a key the failure is silent: a call made as the wrong client, which
+is the exact fault D5 exists to prevent.
+"""
+
+import pytest
+from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
+
+from munim.remote.servers import SERVERS, server_for
+from munim.remote.storage import KeychainTokenStorage
+
+
+class FakeKeyring:
+    def __init__(self):
+        self.store = {}
+
+    def get_password(self, service, account):
+        return self.store.get((service, account))
+
+    def set_password(self, service, account, secret):
+        self.store[(service, account)] = secret
+
+
+def _token(value: str) -> OAuthToken:
+    return OAuthToken(access_token=value, token_type="Bearer")
+
+
+def _client_info(client_id: str) -> OAuthClientInformationFull:
+    return OAuthClientInformationFull(
+        client_id=client_id,
+        redirect_uris=["http://localhost:8976/oauth/callback"],
+    )
+
+
+async def test_two_clients_hold_separate_tokens_for_one_provider():
+    ring = FakeKeyring()
+    a = KeychainTokenStorage("Balaji Roofings", "cloudflare", ring)
+    b = KeychainTokenStorage("Kloudfirst", "cloudflare", ring)
+
+    await a.set_tokens(_token("token-for-balaji"))
+    await b.set_tokens(_token("token-for-kloudfirst"))
+
+    assert (await a.get_tokens()).access_token == "token-for-balaji"
+    assert (await b.get_tokens()).access_token == "token-for-kloudfirst"
+
+
+async def test_two_clients_hold_separate_registrations():
+    """Each client is its own registered application, which is why the provider
+    has nothing to clobber."""
+    ring = FakeKeyring()
+    a = KeychainTokenStorage("Balaji Roofings", "cloudflare", ring)
+    b = KeychainTokenStorage("Kloudfirst", "cloudflare", ring)
+
+    await a.set_client_info(_client_info("client-id-a"))
+    await b.set_client_info(_client_info("client-id-b"))
+
+    assert (await a.get_client_info()).client_id == "client-id-a"
+    assert (await b.get_client_info()).client_id == "client-id-b"
+
+
+async def test_one_client_across_providers_does_not_collide():
+    ring = FakeKeyring()
+    cf = KeychainTokenStorage("Balaji Roofings", "cloudflare", ring)
+    vc = KeychainTokenStorage("Balaji Roofings", "vercel", ring)
+
+    await cf.set_tokens(_token("cloudflare-token"))
+    await vc.set_tokens(_token("vercel-token"))
+
+    assert (await cf.get_tokens()).access_token == "cloudflare-token"
+    assert (await vc.get_tokens()).access_token == "vercel-token"
+
+
+async def test_nothing_is_returned_before_anything_is_stored():
+    ring = FakeKeyring()
+    store = KeychainTokenStorage("Nobody", "cloudflare", ring)
+    assert await store.get_tokens() is None
+    assert await store.get_client_info() is None
+
+
+def test_a_provider_without_an_mcp_server_is_absent_not_guessed():
+    """Supabase has no entry. D11: absent, rather than a plausible URL."""
+    assert server_for("supabase") is None
+    assert server_for("cloudflare").url == "https://mcp.cloudflare.com/mcp"
+
+
+def test_every_recorded_server_says_whether_it_needs_a_secret():
+    """Because that decides whether registration can be silent, and a wrong
+    answer here means a secret in a config file."""
+    for provider, server in SERVERS.items():
+        assert server.url.startswith("https://"), provider
+        assert isinstance(server.public_client, bool), provider
+        assert server.note, f"{provider} records no evidence for its entry"
+
+
+def test_the_consent_screen_names_the_client():
+    """The account picker is the one step only a person can get right, so the
+    application name they see has to say which client they are connecting."""
+    from munim.remote.session import auth_for
+
+    auth = auth_for("Balaji Roofings", "cloudflare", backend=FakeKeyring())
+    assert auth.context.client_metadata.client_name == "Munim (Balaji Roofings)"
+
+
+def test_a_provider_needing_a_secret_registers_for_one():
+    """Vercel's authorization server does not offer `none`. Registration issues
+    the secret at run time and it goes to the keychain; it never becomes a
+    value in this repository."""
+    from munim.remote.session import auth_for
+
+    public = auth_for("X", "cloudflare", backend=FakeKeyring())
+    confidential = auth_for("X", "vercel", backend=FakeKeyring())
+
+    assert public.context.client_metadata.token_endpoint_auth_method == "none"
+    assert confidential.context.client_metadata.token_endpoint_auth_method == "client_secret_post"
+
+
+def test_a_provider_with_no_mcp_server_is_refused_at_construction():
+    from munim.remote.session import NoRemoteServer, auth_for
+
+    with pytest.raises(NoRemoteServer, match="cloudflare, resend, vercel"):
+        auth_for("X", "supabase", backend=FakeKeyring())
+
+
+def test_both_flows_agree_on_the_redirect():
+    """Two OAuth paths now share one listener. If they disagreed on the URI,
+    one of them would register a redirect the provider then refuses."""
+    from munim.connect.callback import redirect_uri
+    from munim.connect.oauth import REDIRECT_URI
+    from munim.remote.session import auth_for
+
+    remote = auth_for("X", "cloudflare", backend=FakeKeyring())
+    assert REDIRECT_URI == redirect_uri()
+    assert str(remote.context.client_metadata.redirect_uris[0]) == redirect_uri()
