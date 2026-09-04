@@ -10,6 +10,7 @@ talks to the callback, and the token goes straight to the keychain.
 import argparse
 import os
 import sys
+from getpass import getpass
 
 from munim.connect.oauth import (PROVIDERS, SHIPPED_CLIENT_IDS,
                                  OAuthConnector)
@@ -353,6 +354,71 @@ def ask_which_client(registry, ask=input, *, account_can_name=False) -> str | No
     return None
 
 
+def config(action: str, provider: str | None, client_id: str | None) -> int:
+    """The application credential for providers that will not issue one.
+
+    Stored in the keychain rather than a file, because a file has a location
+    and an installed package cannot know which directory you will run from.
+    See munim/appcreds.py.
+
+    The id is a parameter: it is not a secret, it is in the Cloud Console and in
+    every authorize URL. The secret is prompted, because an argument lands in
+    shell history and is visible to anyone who can run `ps` at the time.
+    """
+    from munim.appcreds import forget as forget_app
+    from munim.appcreds import remember, stored
+    from munim.env import load as load_env
+    from munim.remote.servers import SERVERS
+
+    # doctor loads this and config did not, so `config list` said "not set" for
+    # a provider `doctor` reported as configured. Two commands disagreeing about
+    # the same fact is worse than either answer alone.
+    load_env()
+
+    needs_one = sorted(n for n, srv in SERVERS.items() if srv.auth == "app")
+
+    if action == "list":
+        found = stored(needs_one)
+        for name in needs_one:
+            entry = found.get(name)
+            if entry is None:
+                print(f"  {name:10} not set", file=sys.stderr)
+            else:
+                secret = "with a secret" if entry["secret"] else "no secret"
+                print(f"  {name:10} {entry['client_id']}  ({secret}, from the "
+                      f"{entry['from']})", file=sys.stderr)
+        if not needs_one:
+            print("No provider needs an application registered by hand.",
+                  file=sys.stderr)
+        return 0
+
+    if not provider:
+        print(f"name a provider: {', '.join(needs_one)}", file=sys.stderr)
+        return 2
+
+    if action == "unset":
+        if forget_app(provider):
+            print(f"Removed the {provider} application.", file=sys.stderr)
+        else:
+            print(f"Nothing stored for {provider}.", file=sys.stderr)
+        return 0
+
+    if not client_id:
+        print(f"--client-id is required. Find it at "
+              f"{SERVERS[provider].register_at or 'the provider console'}",
+              file=sys.stderr)
+        return 2
+
+    # Prompted, never an argument. An empty secret is legitimate: Google
+    # documents an installed-app secret as not confidential and some providers
+    # issue none at all.
+    secret = getpass(f"{provider} client secret (leave empty if none): ")
+    remember(provider, client_id, secret)
+    print(f"Stored the {provider} application in your keychain. It works from "
+          f"any directory.", file=sys.stderr)
+    return 0
+
+
 def connect_by_url(client: str, provider: str, url: str) -> int:
     """Connect a provider that identifies a client by their own endpoint.
 
@@ -674,6 +740,14 @@ def main(argv: list[str] | None = None) -> int:
     f = sub.add_parser("forget", help="remove a client that holds nothing")
     f.add_argument("client")
 
+    c = sub.add_parser("config", help="the application credential for gmail "
+                                      "and stitch, stored in your keychain")
+    c.add_argument("action", choices=["set", "list", "unset"])
+    c.add_argument("provider", nargs="?")
+    c.add_argument("--client-id", dest="client_id",
+                   help="the application's client id. The secret is prompted, "
+                        "never passed as an argument")
+
     sub.add_parser("doctor", help="what is set up, what is not, and the next step")
 
     args = parser.parse_args(argv)
@@ -717,6 +791,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "rename":
         return rename(args.old, args.new)
+
+    if args.command == "config":
+        return config(args.action, args.provider, args.client_id)
 
     if args.command == "doctor":
         from munim.doctor import run as doctor_run

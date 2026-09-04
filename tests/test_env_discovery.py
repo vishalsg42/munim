@@ -113,3 +113,15 @@ def test_nothing_anywhere_is_not_an_error(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
     assert load() is None
+
+
+def test_munim_env_is_exclusive(tmp_path, monkeypatch):
+    """Naming a file that is not there reads nothing, rather than quietly
+    falling through to whatever .env happens to be up the tree. A typo would
+    otherwise load a different file and say nothing."""
+    (tmp_path / ".env").write_text("A_TEST_KEY=from-the-cwd\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("MUNIM_ENV", str(tmp_path / "not-here.env"))
+
+    assert load() is None
+    assert "A_TEST_KEY" not in os.environ

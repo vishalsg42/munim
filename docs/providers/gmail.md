@@ -85,13 +85,20 @@ as test users, which is the next step.
 
 Application type: **Desktop app**. Name it anything. Create.
 
-Copy the two values into `~/.munim/.env`, which is the location that works
-regardless of where you run from:
+Store them with:
 
+```bash
+munim config set gmail --client-id ...apps.googleusercontent.com
 ```
-GMAIL_OAUTH_CLIENT_ID=...apps.googleusercontent.com
-GMAIL_OAUTH_CLIENT_SECRET=...
-```
+
+It prompts for the secret rather than taking it as an argument, because an
+argument lands in your shell history and is visible to anyone who can run `ps`
+while the command runs. Both go to your keychain, which has no folder, so this
+works from any directory and there is no file to lose or leak.
+
+`GMAIL_OAUTH_CLIENT_ID` and `GMAIL_OAUTH_CLIENT_SECRET` in the environment or in
+`~/.munim/.env` also work, and the environment wins over the keychain. `munim
+config list` says which one a value came from.
 
 If you choose "Web application" instead, add
 `http://localhost:8976/oauth/callback` as an authorised redirect URI.

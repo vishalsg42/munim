@@ -37,12 +37,16 @@ CONFIG_HOME = Path.home() / ".munim" / ".env"
 
 def candidates(start: Path | None = None) -> list[Path]:
     """Every file that would be consulted, in order, whether or not it exists."""
-    found: list[Path] = []
-
+    # Exclusive, not merely first. Naming a file and then silently reading a
+    # different one because the named one was missing is a surprise, and a
+    # typo would be invisible. It also makes the setting usable as a way to
+    # say "read nothing", which the test suite relies on so that a developer's
+    # own configuration cannot decide what the tests assert.
     named = os.environ.get("MUNIM_ENV")
     if named:
-        found.append(Path(named).expanduser())
+        return [Path(named).expanduser()]
 
+    found: list[Path] = []
     here = (start or Path.cwd()).resolve()
     found += [directory / ".env" for directory in [here, *here.parents]]
     found.append(CONFIG_HOME)

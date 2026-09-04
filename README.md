@@ -183,7 +183,7 @@ steps and what connecting grants:
 
 | | |
 |---|---|
-| [Gmail](docs/providers/gmail.md) | An application registered by hand, once. About ten minutes |
+| [Gmail](docs/providers/gmail.md) | An application registered by hand, once. About ten minutes, then `munim config set gmail --client-id ...` |
 | [Stitch](docs/providers/stitch.md) | An API key in a header, pasted with `--token` |
 | [Zoho](docs/providers/zoho.md) | No registration: the endpoint URL is the credential |
 
@@ -228,6 +228,10 @@ munim clients                                # who is connected, and to what
 munim doctor                                 # what is missing, and the fix for each
 munim servers                                # which MCP servers Munim knows about
 munim add-server <name> <url>                # point it at any other MCP server
+
+munim config set gmail --client-id ...        # the secret is prompted, never an argument
+munim config list                            # what is set, and where it came from
+munim config unset gmail                     # remove it
 
 munim rename "<old>" "<new>"                 # the name is a label; the id is the identity
 munim merge "<source>" "<target>"            # if one account became two clients

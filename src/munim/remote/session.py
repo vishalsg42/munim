@@ -86,16 +86,15 @@ def _registered_application(provider: str) -> tuple[str, str] | None:
     without setup only because the agent itself is a registered application.
 
     Munim is a client too, so for those providers somebody has to register one.
-    Read from the environment rather than shipped, so nothing here carries a
-    credential that belongs to a provider account.
+    Never shipped, so nothing here carries a credential belonging to a provider
+    account: it comes from the environment, or from the keychain where
+    `munim config set` puts it. See munim/appcreds.py for why the keychain,
+    which is that a file has a location and an installed package does not know
+    which directory you will run from.
     """
-    import os
+    from munim.appcreds import resolve
 
-    prefix = provider.upper().replace("-", "_")
-    client_id = os.environ.get(f"{prefix}_OAUTH_CLIENT_ID")
-    if not client_id:
-        return None
-    return client_id, os.environ.get(f"{prefix}_OAUTH_CLIENT_SECRET", "")
+    return resolve(provider)
 
 
 def _apply_sep_2207() -> None:
@@ -216,9 +215,12 @@ def auth_for(client: str, provider: str, *, backend=None,
                 f"{provider} will not register a client on demand, so it needs "
                 f"an application registered by hand"
                 + (f" at {server.register_at}" if server.register_at else "")
-                + f", then {provider.upper()}_OAUTH_CLIENT_ID and "
-                f"{provider.upper()}_OAUTH_CLIENT_SECRET in .env. "
-                f"`munim servers` says which providers need this.")
+                + f". Then: munim config set {provider}"
+                f"  (it prompts, and stores in your keychain rather than a "
+                f"file, so it works from any directory). "
+                f"{provider.upper()}_OAUTH_CLIENT_ID and _CLIENT_SECRET in the "
+                f"environment also work. `munim servers` says which providers "
+                f"need this.")
         storage.seed_client_info(*registered, redirect_uri())
 
     return OAuthClientProvider(
