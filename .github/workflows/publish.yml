@@ -23,16 +23,21 @@ jobs:
       - run: uv sync --extra dev
       - run: uv run pytest -q
 
+      # A tag that disagrees with pyproject publishes the wrong version number,
+      # and PyPI will not let it be republished under the right one. Cheaper to
+      # catch here than to burn a version.
       - name: The tag matches the version being published
         run: |
           tagged="${GITHUB_REF_NAME#v}"
           declared=$(uv run python -c "
-          import tomli, pathlib
-          print(tomli.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])
-          " 2>/dev/null || uv run python -c "
-          import re, pathlib
+          import pathlib, sys
           text = pathlib.Path('pyproject.toml').read_text()
-          print(re.search(r'^version = \"([^\"]+)\"', text, re.M).group(1))
+          try:
+              import tomllib          # stdlib from 3.11; this package allows 3.10
+              print(tomllib.loads(text)['project']['version'])
+          except ModuleNotFoundError:
+              import re
+              print(re.search(r'^version = \"([^\"]+)\"', text, re.M).group(1))
           ")
           echo "tag=$tagged pyproject=$declared"
           test "$tagged" = "$declared" || {
