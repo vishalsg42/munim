@@ -13,3 +13,7 @@ fixtures/real/
 # Control room build
 room/node_modules/
 room/dist/
+
+# Build artifacts. The wheel is made on demand and published from CI or by hand.
+dist/
+*.egg-info/

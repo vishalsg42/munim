@@ -83,11 +83,22 @@ Nothing is registered by hand, because all three providers issue a client on dem
 
 Requires Python 3.10+.
 
+Once it is on PyPI, nothing is cloned:
+
+```bash
+uv tool install munim
+claude mcp add munim -- munim-mcp
+```
+
+Until then, or to work on it:
+
 ```bash
 git clone https://github.com/vishalsg42/munim && cd munim
 uv venv && uv pip install -e .
 claude mcp add munim -- "$(pwd)/.venv/bin/munim-mcp"
 ```
+
+The control room ships pre-built inside the package, so neither path needs npm.
 
 Set a model host in `.env` (see `.env.example`). Any Strands-supported provider works:
 Amazon Bedrock, Gemini, Anthropic, OpenAI, Ollama.
@@ -329,6 +340,12 @@ In a coding agent that somebody is the agent itself: a Gmail connector works
 without setup because the client, not the operator, holds the Google
 registration. Munim is a client too, so it needs its own, and that is a decision
 about carrying a Google credential rather than a thing to slip in.
+
+**Published to PyPI.** The package builds, and a wheel installed into an empty
+environment runs and carries the control room. It is not published, so installing
+still means cloning, and every other MCP server is one line in a config. That
+gap is plausibly why a credential tool with a good design ends up with no
+adopters, which this project already recorded about somebody else's (D15).
 
 **Watch mode.** `audit_all_clients` is the shape of it and runs on demand.
 Running on a schedule and telling somebody only when the answer changes is the

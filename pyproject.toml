@@ -1,9 +1,25 @@
 [project]
 name = "munim"
 version = "0.1.0"
-description = "Per-client containers for multi-account client infrastructure work, over MCP."
+description = "One MCP server holding a live session with every client's account at once."
+readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
+authors = [{ name = "Vishal Gupta" }]
+keywords = ["mcp", "model-context-protocol", "multi-account", "cloudflare",
+            "vercel", "dns", "spf", "dkim", "dmarc", "strands"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: System :: Systems Administration",
+    "Topic :: Internet :: Name Service (DNS)",
+]
+
 dependencies = [
     "strands-agents==1.54.0",
     "mcp>=1.23.0,<2.0.0",
@@ -21,6 +37,11 @@ dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "respx>=0.22"]
 munim = "munim.cli:main"
 munim-mcp = "munim.server:main"
 munim-room = "munim.room.server:main"
+
+[project.urls]
+Homepage = "https://github.com/vishalsg42/munim"
+Repository = "https://github.com/vishalsg42/munim"
+Issues = "https://github.com/vishalsg42/munim/issues"
 
 [build-system]
 requires = ["hatchling"]
