@@ -710,6 +710,23 @@ Vercel requires a client secret, which DCR issues at registration time and the
 client stores locally, so that is not an obstacle and certainly not a reason to
 put a secret in the repository.
 
+**The multi-account question, measured up to the consent screen.** Two
+registrations run concurrently against `mcp.cloudflare.com/register`, one per
+client, returned two distinct client ids and stored them in separate
+directories, each reading back only its own. No collision and no dedupe.
+
+That is the crux, and it resolves the way the protocol is built rather than the
+way the tooling happens to behave. "One account at a time" comes from one client
+id sharing one token store. Dynamic Client Registration issues a client id per
+registration, so two clients are two applications as far as the provider is
+concerned, and there is no shared state to clobber. `mcpwarden` reaches the same
+place by spawning N servers; this reaches it by registering N clients inside one
+process, which is what keeps a question that spans them askable.
+
+What remains unverified is the sign-in itself, which needs a person: two browser
+consents, as two different accounts. `scripts/probe_mcp_wrapper.py` does exactly
+that and stops at listing tools.
+
 **What this costs the argument.** The friction that justified building adapters,
 that each operator would have to register an application per provider, does not
 exist on the MCP path. D24's shipped-client-id machinery answers a question the
