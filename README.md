@@ -80,7 +80,9 @@ check ivyandfern.co.uk for Ivy & Fern Studio
 Open the control room to watch a run:
 
 ```bash
-uv run munim-room     # http://127.0.0.1:8977
+uv run munim-room                        # http://127.0.0.1:8977
+uv run munim-room --port 8986            # if 8977 is taken
+uv run munim-room --runs ~/.munim/runs   # serve a different set of runs
 ```
 
 ## What is implemented
@@ -155,9 +157,25 @@ can leak a token.
 
 ```bash
 uv pip install -e ".[dev]"
-uv run pytest -q            # 50 tests
+uv run pytest -q                          # 115 tests
+cd room && npx tsx --test src/state.test.ts   # 5 more, the room's reducer
 cd room && npm install && npm run build
 ```
+
+The control room ships pre-built, so installing from a clone needs no npm step.
+Rebuild it only if you change `room/src`.
+
+To check the claim this project rests on — reading two client accounts at once,
+with no logout between them — connect two of your own and run:
+
+```bash
+uv run python scripts/cross_account_probe.py
+```
+
+It fails if either account is empty, and fails if the two share a project: two
+grants returning the same projects are one account wearing two names, which
+would make the claim vacuous. Measured on two real Vercel teams in
+[`docs/DECISIONS.md`](docs/DECISIONS.md) D23.
 
 Design decisions and the reasoning behind them are in [`docs/DECISIONS.md`](docs/DECISIONS.md),
 including the ones that were wrong first time.
