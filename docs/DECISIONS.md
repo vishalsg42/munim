@@ -655,6 +655,27 @@ SPF record without complaint, which is the first item in this project's own
 catalogue. Wrapping replaces the lines that make the call and keeps every line
 that decides which call to make.
 
-**Unverified and load-bearing:** whether two OAuth sessions to the same remote
-MCP server can coexist in one client. That is the whole multi-account claim, and
-it is what `mcpwarden` solves by spawning N named servers rather than N sessions.
+**The load-bearing question, now answered.** Whether two OAuth sessions to the
+same remote MCP server can coexist in one client. Claude Code keys its MCP
+authorisation state by *server name*, not by provider or account:
+`mcp-needs-auth-cache.json` holds `"cloudflare-api"` and `"claude.ai Canva"` as
+top-level keys. So two Cloudflare accounts can coexist, by registering the same
+URL twice under two names. That is precisely `mcpwarden`'s model.
+
+**Which makes the choice about where to wrap, not whether.**
+
+- *At the client config level*, registering the provider's server once per
+  client: multi-account for free, no code at all. It is also mcpwarden exactly.
+  Twelve clients across four providers is 48 entries in the tool list, and
+  nothing can read across two entries, so cross-client questions become
+  impossible again. Every gap D15 recorded returns.
+- *Inside Munim*, holding N MCP sessions and re-exposing them namespaced: the
+  container, `find_across_clients` and the cross-account handoff all survive,
+  because they sit above the transport. The cost is that Munim becomes an MCP
+  client with per-session OAuth, which is the resource-server machinery D24
+  records this project as not needing today.
+
+The free version costs the claim the project rests on. The version that keeps
+the claim is not free. Stated plainly so the choice is made on that basis rather
+than on "wrapping is obviously better", which is what it looks like until you
+ask where.
