@@ -74,14 +74,15 @@ application route, which builds its own authorize URL. The one exception is
 is credential isolation this is the least comfortable thing in the project, and
 it is a property of the spec rather than of this implementation.
 
-**Gmail sessions expire after seven days.** Google issues a refresh token
-lasting seven days to any External app whose publishing status is Testing and
-whose scopes go beyond name, email and profile. Gmail's do. Escaping it means
-publishing the app and passing OAuth verification plus a CASA Tier 2 third-party
-security assessment, renewed annually, which is not something a self-hosted tool
-does casually. Every other provider holds a session that refreshes, so this is
-Gmail's alone, and it is worth weighing against what Gmail is actually for:
-nothing in Munim reads mail today.
+**Gmail is capped at 100 users, permanently.** The seven day session expiry
+that Testing status imposes is removed by publishing the app, which needs no
+verification. What publishing cannot remove is a hard cap of 100 users over the
+lifetime of the project, which Google says "cannot be reset or changed", plus an
+unverified app warning screen. Going beyond that needs full verification: a
+homepage and privacy policy on a Search Console verified domain, a demo video,
+and probably a CASA assessment costing $500 to $4,500 and renewed annually.
+Whether CASA applies to a local client that talks only to Google is not
+documented either way.
 
 **Adding Gmail test users is manual, and there is no API.** Every mailbox to be
 connected must be listed in the Cloud Console by hand, capped at 100 for the

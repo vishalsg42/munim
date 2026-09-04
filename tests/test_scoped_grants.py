@@ -23,11 +23,15 @@ class Ring:
 
 
 def test_gmail_does_not_ask_for_the_whole_mailbox():
-    """https://mail.google.com/ is read, send and delete on everything. Munim
-    reads mail setup; it does not need to be able to empty an inbox."""
+    """https://mail.google.com/ adds permanent deletion. Munim reads a mailbox
+    and drafts into it; it has no reason to be able to destroy mail, and every
+    restricted scope has to be justified one at a time at verification."""
     scopes = SERVERS["gmail"].scopes
     assert scopes, "gmail asks for whatever Google advertises"
     assert "https://mail.google.com/" not in scopes
+    assert "https://www.googleapis.com/auth/gmail.compose" in scopes, (
+        "drafting and sending is a stated requirement, and compose is the "
+        "narrowest scope that covers it")
 
 
 def test_the_mcp_route_sets_no_scope_and_that_is_deliberate(monkeypatch):

@@ -208,17 +208,24 @@ _GOOGLE = {
              "client_secret_basic, so an application must be registered by "
              "hand. Google's installed-application client type treats the "
              "secret as not confidential, which is how every CLI ships one",
-        # Not https://mail.google.com/, which Google also advertises here and
-        # which grants read, send and delete on the entire mailbox. Munim reads
-        # a domain's mail setup and, at most, changes records that serve it.
-        # `modify` covers labelling and drafting without granting hard delete;
-        # `readonly` covers everything the check catalogue needs.
+        # The narrowest pair that covers reading a mailbox and putting a draft
+        # in it, which is what Munim is for here: `readonly` to check that a
+        # message arrived and authenticated, `compose` to create, update and
+        # send drafts.
         #
-        # These are Google restricted scopes either way, so an application
-        # using them stays limited to its own test users until it passes
-        # Google verification. That is a reason to ask for less, not more.
+        # Deliberately not `https://mail.google.com/`, which Google also
+        # advertises here and which adds permanent deletion, nor `modify`,
+        # which is broader than compose for no gain. Both would have to be
+        # justified one at a time to a human reviewer at verification, and
+        # "it deletes mail" is a claim this tool cannot support.
+        #
+        # All five advertised scopes are restricted either way, so an
+        # application using any of them stays limited to its own test users,
+        # with refresh tokens expiring in seven days, until it passes Google
+        # verification and a CASA assessment. Asking for less does not avoid
+        # that; it makes the application defensible.
         scopes=("https://www.googleapis.com/auth/gmail.readonly",
-                "https://www.googleapis.com/auth/gmail.modify"),
+                "https://www.googleapis.com/auth/gmail.compose"),
     ),
     # Recorded as needing an application registered by hand, on the strength of
     # sharing an authorization server with gmail. It takes an API key in a

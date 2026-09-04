@@ -128,30 +128,66 @@ selection to the server and Google's resource advertises the full set. This is
 the least comfortable thing in this project and it is a property of the
 specification rather than of this implementation.
 
-## The seven day expiry
+## The seven day expiry, and the button that removes it
 
-**A Gmail session dies after seven days and needs another browser login.** This
-is the most important thing on this page.
+**In Testing, a Gmail session dies after seven days.** Google: *"A Google Cloud
+Platform project with an OAuth consent screen configured for an external user
+type and a publishing status of 'Testing' is issued a refresh token expiring in
+7 days, unless the only OAuth scopes requested are a subset of name, email
+address, and user profile."*
 
-Google: *"A Google Cloud Platform project with an OAuth consent screen
-configured for an external user type and a publishing status of 'Testing' is
-issued a refresh token expiring in 7 days, unless the only OAuth scopes
-requested are a subset of name, email address, and user profile."*
+Gmail's scopes are far beyond that subset. Every other provider here holds a
+session that refreshes, so this is Gmail's alone.
 
-Gmail's scopes are far beyond that subset, so the seven days apply. Every other
-provider here holds a session that refreshes: Cloudflare indefinitely, Vercel
-for thirty days with rotation, Supabase likewise. Gmail is the exception, and
-for a tool whose purpose is holding live sessions across many accounts that is a
-real limitation rather than an inconvenience.
+**Publishing the app removes it.** The seven days are a property of Testing
+status, not of verification, and Google's own documentation never conditions the
+expiry on being verified. Press **Publish app** on the Audience page and the
+limit lifts.
 
-The only way out is publishing the app and passing OAuth verification plus a
-**CASA Tier 2** third-party security assessment, which restricted Gmail scopes
-require, renewed annually. That also removes the test user list. It is not
-something a self-hosted tool does casually.
+`https://console.cloud.google.com/auth/audience?project=YOUR_PROJECT`
 
-There is no API to soften any of this. Test users are Console-only: the IAP
-brand resource carries no test-user field, and no Google API published today
-manages the consent screen audience.
+What you accept in exchange, and the third one is permanent:
+
+- An **unverified app** warning screen before consent, which users click through.
+- Your **app name and logo are not shown** on the consent screen, because brand
+  verification has not been done.
+- A **hard cap of 100 users over the lifetime of the project**. Google: it
+  "applies over the entire lifetime of the project, and it cannot be reset or
+  changed."
+
+Google explicitly sanctions running this way: *"If the app is for your personal
+use (fewer than 100 users), you and your limited number of users can continue
+using the app without going through verification."*
+
+So publishing is the right move for a self-hosted tool, and the 100 is the real
+ceiling rather than the warning screen.
+
+Note one revocation rule that still applies in production: a refresh token
+holding Gmail scopes is revoked when the user changes their Google password.
+Also after six months of non-use.
+
+## If you ever need more than 100 users
+
+Full verification. Restricted scopes make it the heaviest tier:
+
+- A **homepage on a domain you own**, publicly accessible, ownership verified in
+  Google Search Console.
+- A **privacy policy on that same domain**, linked from both the homepage and
+  the consent screen.
+- A **demo video** showing the whole OAuth flow, the consent screen with the
+  exact scopes, and each restricted scope in use.
+- Probably a **CASA security assessment** by a third-party assessor, **$500 to
+  $4,500**, taking two to six weeks, renewed every twelve months. Google charges
+  nothing itself. The free self-scan route is deprecated.
+
+Whether CASA applies to a purely local client that stores tokens on the device
+and talks only to Google is **not clearly documented**. Google's trigger is
+having "the ability to access data from or through a third-party server". Munim
+is local, so it arguably does not, and Google does not say.
+
+Narrowing the scopes does not avoid any of this: `gmail.readonly` is classified
+restricted exactly like `https://mail.google.com/`. It may affect the assurance
+level, whose weights Google does not publish.
 
 ## Gotchas
 
