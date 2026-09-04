@@ -1,15 +1,10 @@
-// Run with: npx tsx --test src/state.test.ts
+// Run with: node --test tests/room/ - no install, no build, no dependencies.
 import assert from "node:assert";
 import { test } from "node:test";
-import { initialState, reduce } from "./state";
-import type { LaunchEvent } from "./types";
+import { initialState, reduce } from "../../src/munim/room/static/reduce.mjs";
 
-const ev = (
-  seq: number,
-  kind: LaunchEvent["kind"],
-  detail = {},
-  stage = "mail",
-): LaunchEvent => ({
+
+const ev = (seq, kind, detail = {}, stage = "mail") => ({
   run_id: "r", seq, ts: 0, client: "Ivy", stage, kind,
   human_text: "x", detail,
 });

@@ -5,10 +5,329 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📒</text></svg>" />
     <title>Munim</title>
-    <script type="module" crossorigin src="/assets/index-Ckgw1MgK.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-DIxblxYQ.css">
+    <!--
+      One file, no build step. This used to be React, Vite, TypeScript and
+      Tailwind: 82MB of node_modules and a 201KB bundle to render a reducer and
+      an EventSource subscription. The whole React surface was useReducer, two
+      useEffect and one useRef.
+
+      That toolchain is also what forced the built assets to be committed, so a
+      Python package would not need npm to install. Committed build artifacts go
+      stale silently, which needed a CI job to catch, which needed Node on every
+      push of a Python project. Removing the build removes all of it.
+
+      Only the reducer below is worth reading closely; the rest is markup.
+    -->
+    <style>
+      /* The palette is Tailwind's stone/amber/emerald/rose, kept by value so
+         the page looks the same as the build it replaces. */
+      :root {
+        /* Taken verbatim from the Tailwind 4 build this replaces, so the page
+           is the same colour rather than approximately the same colour. The
+           earlier hand-converted hex was 2-3 per channel out on stone-400. */
+        --stone-200: oklch(92.3% .003 48.717); --stone-300: oklch(86.9% .005 56.366);
+        --stone-400: oklch(70.9% .01 56.259);  --stone-500: oklch(55.3% .013 58.071);
+        --stone-600: oklch(44.4% .011 73.639); --stone-700: oklch(37.4% .01 67.558);
+        --stone-900: oklch(21.6% .006 56.043);
+        --amber-50: oklch(98.7% .022 95.277);  --amber-300: oklch(87.9% .169 91.605);
+        --amber-400: oklch(82.8% .189 84.429); --amber-700: oklch(55.5% .163 48.998);
+        --amber-800: oklch(47.3% .137 46.201); --amber-900: oklch(41.4% .112 45.904);
+        --amber-950: oklch(27.9% .077 45.635);
+        --emerald-50: oklch(97.9% .021 166.113); --emerald-300: oklch(84.5% .143 164.978);
+        --emerald-500: oklch(69.6% .17 162.48);  --emerald-800: oklch(43.2% .095 166.913);
+        --rose-50: oklch(96.9% .015 12.422);   --rose-200: oklch(89.2% .058 10.001);
+        --rose-300: oklch(81% .117 11.638);    --rose-400: oklch(71.2% .194 13.428);
+        --rose-600: oklch(58.6% .253 17.585);  --rose-950: oklch(27.1% .105 12.094);
+        --sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+        --mono: "SF Mono", ui-monospace, "JetBrains Mono", monospace;
+      }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body { height: 100%; }
+      body {
+        /* Warm off-white rather than pure white: paper, not a blank canvas. */
+        background: #fbfaf8;
+        color: #17191c;
+        font-family: var(--sans);
+        /* Tailwind's preflight sets this, and the arbitrary text-[11px] sizes
+           inherited it. Without it every chip and stage box is 3-4px shorter. */
+        line-height: 1.5;
+        -webkit-font-smoothing: antialiased;
+      }
+      [hidden] { display: none !important; }
+
+      header {
+        display: flex; align-items: center; justify-content: space-between;
+        border-bottom: 1px solid var(--stone-200); background: #fff;
+        padding: 16px 32px;
+      }
+      .brand { display: flex; align-items: baseline; gap: 12px; }
+      .brand b { font-size: 15px; font-weight: 600; letter-spacing: -0.025em; }
+      .brand span { font-size: 12px; color: var(--stone-400); }
+      .status {
+        display: flex; align-items: center; gap: 8px; font-size: 11px;
+        text-transform: uppercase; letter-spacing: 0.1em; color: var(--stone-400);
+      }
+      .dot {
+        height: 6px; width: 6px; border-radius: 9999px;
+        background: var(--stone-300);
+      }
+      .dot.on { background: var(--emerald-500); }
+
+      main { margin: 0 auto; max-width: 64rem; padding: 40px 32px; }
+      .eyebrow {
+        font-size: 11px; text-transform: uppercase; letter-spacing: 0.2em;
+        color: var(--stone-400);
+      }
+      h1 { margin-top: 4px; font-size: 30px; font-weight: 600; letter-spacing: -0.025em; line-height: 1.2; }
+
+      .stages { margin-top: 32px; display: flex; align-items: center; gap: 8px; list-style: none; }
+      .stages li { flex: 1 1 0%; }
+      .stages span {
+        display: block; width: 100%; border: 1px solid var(--stone-200);
+        border-radius: 6px; padding: 8px 12px; font-size: 12px;
+        text-transform: capitalize; background: #fff; color: var(--stone-400);
+        transition: background-color .5s, border-color .5s, color .5s;
+      }
+      .stages span.now {
+        border-color: var(--amber-400); background: var(--amber-50); color: var(--amber-900);
+      }
+      .stages span.done {
+        border-color: var(--emerald-300); background: var(--emerald-50); color: var(--emerald-800);
+      }
+
+      /* Every chip is present from the first frame. They light up in place;
+         nothing is inserted, so nothing moves and the eye can track one cell. */
+      .chips {
+        margin-top: 32px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 8px;
+      }
+      .chip {
+        border: 1px solid var(--stone-200); border-radius: 6px; padding: 8px 12px;
+        font-size: 11px; background: #fff; color: var(--stone-400);
+        transition: background-color .3s, border-color .3s, color .3s;
+      }
+      .chip.running { border-color: var(--amber-400); background: var(--amber-50); color: var(--amber-800); }
+      .chip.pass { border-color: var(--emerald-300); background: var(--emerald-50); color: var(--emerald-800); }
+      .chip.fail {
+        border-color: var(--rose-400); background: var(--rose-50); color: var(--rose-950);
+        box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+      }
+
+      section.card {
+        margin-top: 32px; border-radius: 8px; padding: 24px;
+        box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+      }
+      /* A finding is a mode, not a row in a list. It takes the screen because
+         it is the only thing on it that needs a person. */
+      #finding { border: 1px solid var(--rose-300); background: var(--rose-50); }
+      #finding .label {
+        font-size: 11px; text-transform: uppercase; letter-spacing: 0.2em; color: var(--rose-600);
+      }
+      #finding .text { margin-top: 8px; font-size: 18px; line-height: 1.375; color: var(--rose-950); }
+      #finding pre {
+        margin-top: 16px; overflow-x: auto; border: 1px solid var(--rose-200);
+        border-radius: 4px; background: #fff; padding: 12px;
+        font-family: var(--mono); font-size: 11px; line-height: 1.6; color: var(--stone-600);
+      }
+      #finding .who { margin-top: 8px; font-family: var(--mono); font-size: 10px; color: var(--stone-400); }
+
+      #confirm { margin-top: 24px; border: 1px solid var(--amber-300); background: var(--amber-50); }
+      #confirm .label {
+        font-size: 11px; text-transform: uppercase; letter-spacing: 0.2em; color: var(--amber-700);
+      }
+      #confirm .text { margin-top: 8px; font-size: 15px; color: var(--amber-950); }
+      #confirm .whose { margin-top: 12px; font-size: 12px; color: var(--stone-600); }
+      #confirm .whose b { font-weight: 500; color: var(--stone-900); }
+      /* The only interactive element in the whole application. */
+      #confirm button {
+        margin-top: 16px; border: 0; border-radius: 6px; background: var(--stone-900);
+        padding: 8px 16px; font-size: 13px; font-weight: 500; color: #fff;
+        font-family: inherit; cursor: pointer; transition: background-color .15s;
+      }
+      #confirm button:hover { background: var(--stone-700); }
+
+      #log { margin-top: 40px; border-top: 1px solid var(--stone-200); padding-top: 16px; }
+      #lines {
+        max-height: 10rem; overflow-y: auto; font-family: var(--mono);
+        font-size: 11px; color: var(--stone-500);
+      }
+      #lines p + p { margin-top: 4px; }
+      #lines .seq { color: var(--stone-300); }
+      #lines .stage { color: var(--stone-400); }
+
+      #empty { display: grid; place-items: center; padding: 128px 32px; text-align: center; }
+      #empty .a { color: var(--stone-500); }
+      #empty .b { margin-top: 8px; font-size: 13px; color: var(--stone-400); }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <header>
+      <div class="brand">
+        <b>Munim</b><span>multi-account MCP server</span>
+      </div>
+      <span class="status"><i class="dot" id="dot"></i><span id="badge">waiting</span></span>
+    </header>
+
+    <div id="empty">
+      <div>
+        <p class="a">No launch running.</p>
+        <p class="b">Ask your coding agent to launch a client. This window follows along.</p>
+      </div>
+    </div>
+
+    <main id="main" hidden>
+      <p class="eyebrow" id="eyebrow">Launching</p>
+      <h1 id="client"></h1>
+      <ol class="stages" id="stages"></ol>
+      <div class="chips" id="chips"></div>
+      <section class="card" id="finding" hidden></section>
+      <section class="card" id="confirm" hidden></section>
+      <section id="log"><div id="lines"></div></section>
+    </main>
+
+    <script type="module">
+      import {
+        CHECKS, CHECK_LABELS, STAGES, CHECK_ONLY, initialState, reduce,
+      } from "./reduce.mjs";
+
+      const $ = (id) => document.getElementById(id);
+      const text = (s) => (s == null ? "" : String(s));
+
+      // Built once, then only their classes change. Nothing is inserted after
+      // the first paint, so nothing reflows.
+      const stageEls = {};
+      for (const stage of STAGES) {
+        const li = document.createElement("li");
+        const span = document.createElement("span");
+        span.textContent = stage;
+        li.appendChild(span);
+        $("stages").appendChild(li);
+        stageEls[stage] = span;
+      }
+      const chipEls = {};
+      for (const check of CHECKS) {
+        const div = document.createElement("div");
+        div.className = "chip";
+        div.textContent = CHECK_LABELS[check] || check;
+        $("chips").appendChild(div);
+        chipEls[check] = div;
+      }
+
+      let rendered = 0;  // how many log lines are already in the DOM
+
+      function render(state) {
+        const live = state.client !== null;
+        $("dot").className = "dot" + (state.done || state.connected ? " on" : "");
+        $("badge").textContent = state.done ? "done" : state.connected ? "live" : "waiting";
+        $("empty").hidden = live;
+        $("main").hidden = !live;
+        if (!live) return;
+
+        $("eyebrow").textContent =
+          state.stagesSeen.length > 0 && state.stagesSeen.every((s) => CHECK_ONLY.includes(s))
+            ? "Checking"
+            : "Launching";
+        $("client").textContent = text(state.client);
+
+        for (const stage of STAGES) {
+          const done = state.stagesDone.includes(stage);
+          const now = state.stage === stage && !done;
+          stageEls[stage].className = now ? "now" : done ? "done" : "";
+        }
+        for (const check of CHECKS) {
+          chipEls[check].className = "chip " + (state.checks[check] || "idle");
+        }
+
+        renderFinding(state.finding);
+        renderConfirm(state.awaitingConfirm);
+
+        // Append only what is new. Re-rendering the whole log would fight the
+        // scroll position on every event.
+        const lines = $("lines");
+        for (const e of state.events.slice(rendered)) {
+          const p = document.createElement("p");
+          const seq = document.createElement("span");
+          seq.className = "seq";
+          seq.textContent = String(e.seq).padStart(3, "0");
+          const stage = document.createElement("span");
+          stage.className = "stage";
+          stage.textContent = text(e.stage);
+          p.append(seq, " ", stage, " ", text(e.human_text));
+          lines.appendChild(p);
+        }
+        if (state.events.length !== rendered) {
+          rendered = state.events.length;
+          // The newest line is the one that matters; a log that has to be
+          // scrolled is a log nobody reads, on camera or otherwise.
+          lines.lastElementChild?.scrollIntoView({ block: "end", behavior: "smooth" });
+        }
+      }
+
+      function renderFinding(event) {
+        const box = $("finding");
+        box.hidden = !event;
+        if (!event) return;
+        const evidence = event.detail && event.detail.evidence;
+        const resolver = event.detail && event.detail.resolver;
+        box.replaceChildren();
+        box.appendChild(el("p", "label", "Needs attention"));
+        box.appendChild(el("p", "text", text(event.human_text)));
+        if (evidence) {
+          const pre = document.createElement("pre");
+          pre.textContent = text(evidence);
+          box.appendChild(pre);
+        }
+        if (resolver) {
+          box.appendChild(el("p", "who",
+            "answered by " + resolver + " · " +
+            new Date(event.ts * 1000).toISOString()));
+        }
+      }
+
+      function renderConfirm(event) {
+        const box = $("confirm");
+        box.hidden = !event;
+        if (!event) return;
+        box.replaceChildren();
+        box.appendChild(el("p", "label", "Waiting for you"));
+        box.appendChild(el("p", "text", text(event.human_text)));
+        const whose = el("p", "whose", "");
+        const name = document.createElement("b");
+        name.textContent = text(event.client);
+        whose.append("This changes ", name,
+          "’s live DNS. It is their account, not yours.");
+        box.appendChild(whose);
+        const button = document.createElement("button");
+        button.textContent = "Approve for " + text(event.client);
+        box.appendChild(button);
+      }
+
+      function el(tag, cls, content) {
+        const node = document.createElement(tag);
+        node.className = cls;
+        node.textContent = content;
+        return node;
+      }
+
+      let state = initialState;
+      function dispatch(action) {
+        state = reduce(state, action);
+        render(state);
+      }
+
+      // Replay then follow. The file holds the history; SSE has none, which is
+      // why the room can be opened mid-launch or refreshed without losing a run.
+      const source = new EventSource("/api/runs/latest/events");
+      source.onopen = () => dispatch({ type: "connected", value: true });
+      source.onerror = () => dispatch({ type: "connected", value: false });
+      source.addEventListener("launch", (m) =>
+        dispatch({ type: "event", event: JSON.parse(m.data) }));
+      // The server closes the stream once the run is done. An EventSource
+      // treats any close as a dropped connection and reconnects, which would
+      // flip the badge back to "live" on a run that finished minutes ago.
+      source.addEventListener("done", () => source.close());
+
+      render(state);
+    </script>
   </body>
 </html>

@@ -59,21 +59,10 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: '22'
-          cache: npm
-          cache-dependency-path: room/package-lock.json
-      - working-directory: room
-        # ci, not install: it installs exactly the lockfile and fails if
-        # package.json and the lock have drifted, which install would paper over.
-        run: npm ci
-      - name: Reducer tests
-        working-directory: room
-        run: npx tsx --test src/state.test.ts
-      # The control room ships pre-built so a clone needs no npm step. If the
-      # committed build no longer matches the source, that is a stale artifact
-      # being served to anyone who installs this.
-      - name: The committed build matches the source
-        working-directory: room
-        run: |
-          npm run build
-          git diff --exit-code -- ../src/munim/room/static \
-            || (echo "::error::room/src changed without rebuilding; run npm run build" && exit 1)
+      # No npm install and no build step: the control room is one HTML page
+      # that imports one ES module, and the module is what these six tests
+      # exercise. This used to be `npm ci` plus a Vite build against 82MB of
+      # node_modules, on every push of a Python project, to catch a committed
+      # build going stale. There is no committed build now.
+      - name: The control room reducer
+        run: node --test "tests/room/*.test.mjs"

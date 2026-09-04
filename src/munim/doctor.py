@@ -158,11 +158,13 @@ def _oauth_apps() -> list[Finding]:
 
 
 def _room() -> Finding:
+    """There is nothing to build. The room is one page and one module, shipped
+    as they are written, so the only way this fails is a broken install."""
     static = Path(__file__).parent / "room" / "static" / "index.html"
     if static.exists():
-        return Finding(OK, "Control room", "built")
-    return Finding(WARN, "Control room", "not built",
-                   fix="cd room && npm install && npm run build")
+        return Finding(OK, "Control room", "ready")
+    return Finding(WARN, "Control room", "missing",
+                   fix="reinstall munim; the control room ships with it")
 
 
 def run(registry: Registry | None = None) -> int:

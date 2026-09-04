@@ -114,11 +114,26 @@ async def report(request: Request) -> Response:
 
 
 async def index(request: Request) -> Response:
+    """A real file if the path names one, the page otherwise.
+
+    The page is a module and imports `./reduce.mjs`, so that path has to come
+    back as JavaScript. Falling straight through to index.html answered it with
+    HTML, and a browser refuses a module served as text/html: the room rendered
+    blank with the failure only visible in the console.
+
+    The containment check is not decoration. Without it `/../../.ssh/id_rsa`
+    resolves out of the build directory, and this server is reachable from the
+    machine it runs on.
+    """
+    wanted = (BUILD_DIR / request.path_params.get("path", "")).resolve()
+    if wanted.is_file() and wanted.is_relative_to(BUILD_DIR.resolve()):
+        return FileResponse(wanted)
+
     page = BUILD_DIR / "index.html"
     if page.exists():
         return FileResponse(page)
     return JSONResponse(
-        {"error": "control room is not built", "hint": "cd room && npm install && npm run build"},
+        {"error": "control room is missing", "hint": "reinstall munim"},
         status_code=503,
     )
 

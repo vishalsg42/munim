@@ -365,13 +365,13 @@ nothing reads it back for that purpose.
 
 ```bash
 uv pip install -e ".[dev]"
-uv run pytest -q                              # the Python suite
-cd room && npx tsx --test src/state.test.ts   # the room's reducer
-cd room && npm install && npm run build
+uv run pytest -q                       # the Python suite
+node --test "tests/room/*.test.mjs"    # the control room's reducer
 ```
 
-The control room ships pre-built, so installing from a clone needs no npm step.
-Rebuild it only if you change `room/src`.
+The control room is one HTML page and one ES module, served as written. There
+is no build step and no `node_modules`: the only reason Node appears at all is
+to run six tests over the reducer, and those need no install.
 
 To check the claim this project rests on, which is reading two client accounts
 at once with no logout between them, connect two of your own and run:

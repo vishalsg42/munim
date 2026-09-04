@@ -135,7 +135,7 @@ property AWS advertises, exercised under duress rather than described.
 
 ## Built with
 
-`strands-agents` · `mcp` · Python · React · Tailwind · Server-Sent Events ·
+`strands-agents` · `mcp` · Python · Server-Sent Events ·
 the providers' own MCP servers (`mcp.cloudflare.com`, `mcp.vercel.com`,
 `mcp.resend.com`) · dnspython · Amazon Bedrock *(model host, when reachable)*
 
