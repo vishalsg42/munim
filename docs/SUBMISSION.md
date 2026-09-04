@@ -51,11 +51,23 @@ break nothing visible are the ones that survive longest.
 ### What it does
 
 One MCP server, added once to whatever coding agent you already use. Each client
-becomes a **container** holding only that client's credentials.
+becomes a **container**: its own registration with the provider, its own token,
+and its own namespace in the tool list.
 
-- **Read across every client.** One question, answered over all of them at once.
-- **Write only inside one you have named.** A change loads one client's
-  credentials; the others are not in the room.
+That last part is why several accounts can be live at once. A coding agent holds
+one account per provider because one client id shares one token store. Munim
+registers separately per client, so as far as Cloudflare or Vercel or Resend is
+concerned these are different applications, and there is nothing shared to
+clobber. Nobody registers an application by hand: all three providers issue a
+client on demand, so connecting is a browser window and nothing else.
+
+- **Read across every client.** One question, answered over all of them at once,
+  using each client's own account.
+- **Write only inside one you have named.** Not by instruction: a tool that spans
+  clients is built from only those the provider marks read-only, so one that
+  changes something is not present to be called.
+- **The account names the client.** The provider is asked which account was
+  authorised, so a name and an account cannot drift apart.
 - **Find what fails silently, then fix it properly.** When a domain carries two
   sender policies, the agent does not add a third. It combines them, keeping
   every sender, taking the strictest qualifier, and refusing if the merged policy
@@ -69,6 +81,13 @@ The division of labour is the design.
 **The checks are deterministic.** Whether a domain has two SPF records is decided
 by code reading a DNS answer. The model cannot contradict it, so it cannot invent
 a record that is not there or argue a failing check into passing.
+
+**The agent is what holds several accounts at once.** Strands' `MCPClient` takes
+an `httpx.Auth` and a tool-name prefix, and the MCP SDK's OAuth client is an
+`httpx.Auth`, so one agent carries a session per client against the same
+provider and tells them apart by name: `acme_ltd_*` acts on Acme's account and no
+other. The cross-account capability is how the agent is configured, not adapter
+code somebody wrote.
 
 **The agent does what a rule engine is bad at.** Diagnosing *why* something
 failed when the evidence is ambiguous. Is the certificate missing because DNS
@@ -117,7 +136,8 @@ property AWS advertises, exercised under duress rather than described.
 ## Built with
 
 `strands-agents` · `mcp` · Python · React · Tailwind · Server-Sent Events ·
-Cloudflare API · Resend · dnspython · Amazon Bedrock *(model host, when reachable)*
+the providers' own MCP servers (`mcp.cloudflare.com`, `mcp.vercel.com`,
+`mcp.resend.com`) · dnspython · Amazon Bedrock *(model host, when reachable)*
 
 ---
 

@@ -32,8 +32,9 @@ stop arriving, and nobody notices for weeks.
 
 ## What it does
 
-Adds one MCP server to whatever coding agent you use. Each client becomes a **container**
-holding only that client's credentials.
+Adds one MCP server to whatever coding agent you use. Each client becomes a **container**:
+its own registration with the provider, its own token, its own namespace in the tool list.
+Nothing is registered by hand, because all three providers issue a client on demand.
 
 - **Read across every client.** *"Whose domain expires this quarter?"*
 - **Write only inside one you have named.** A mutation loads one client's credentials and
@@ -60,13 +61,16 @@ Amazon Bedrock, Gemini, Anthropic, OpenAI, Ollama.
 GEMINI_API_KEY=...
 ```
 
-Connect a client. Where a provider publishes an OAuth flow this opens a browser
-and no secret ever passes through your coding agent; where it does not, you paste
-a key once and it goes straight to your keychain:
+Connect a client. Nothing is registered by hand: Cloudflare, Vercel and Resend each
+run their own MCP server, and each registers a client on demand, so a browser opens
+and that is the whole setup. There is no application to create and no client secret
+anywhere in this project. Leave the name out and the account you sign in to supplies
+it, which is what keeps a name and an account from drifting apart:
 
 ```bash
-munim connect "Balaji Roofings" vercel      # browser login
-munim connect "Balaji Roofings" resend      # Resend has no OAuth; key only
+munim connect cloudflare                    # browser login; the account names the client
+munim connect "Balaji Roofings" vercel      # or name it yourself
+munim rename "<account name>" "Balaji Roofings"
 munim clients                                # what is connected
 munim doctor                                 # what is missing, and the fix
 ```
@@ -93,12 +97,17 @@ uv run munim-room --runs DIR --reports DIR   # serve a different set of runs
 | Per-client credential containers, OS keychain | ✅ |
 | Read across / write within | ✅ |
 | Check catalogue, 13 checks, no credentials needed | ✅ |
-| Strands launch agent: diagnosis and owner-facing explanation | ✅ |
+| A session per client against the providers' own MCP servers | ✅ live against Cloudflare |
+| Dynamic client registration, so nothing is registered by hand | ✅ Cloudflare, Vercel, Resend |
+| Client named by the account it was authorised as | ✅ |
+| Strands agent holding every client's provider tools, namespaced | ✅ |
+| Cross-client questions, writes structurally absent | ✅ `ask_across_clients` |
 | Run log with replay | ✅ open the room mid-run, or refresh, and the whole run replays |
 | Resuming an interrupted launch from the log | ⬜ not implemented |
 | Control room, live over SSE | ✅ |
 | Launch report for the business owner | ✅ |
 | OAuth connect (PKCE), issuer validated per RFC 9207 | ✅ Vercel live against two real accounts |
+| Two accounts on one provider at once | ◐ registration proven; second sign-in not yet run |
 | Cloudflare DNS writes: idempotent upsert, SPF merge | ✅ tested, including partial-failure behaviour; not yet run against a live zone |
 | Vercel reads: deploys, env scope, env applied | ✅ live |
 | Resend writes: create and verify a sender domain | ✅ |
@@ -133,18 +142,30 @@ codebase because Resend publishes no authorization endpoint, not because it was 
 ```mermaid
 flowchart TD
     A["Coding agent<br/>(Claude Code, Codex, Cursor)"] -->|stdio, JSON-RPC| B["Munim MCP server"]
-    B --> C["Container(client)"]
-    C -->|".http(provider)"| D["Authenticated client<br/>the raw secret never returned"]
-    D --> E["Provider adapters"]
-    C --> F["Checks<br/>deterministic, no model"]
-    B --> G["Strands agent<br/>diagnose &amp; explain"]
+
+    B --> F["Checks<br/>13, deterministic, no credentials"]
+    B --> G["Strands agent"]
+
+    G --> S1["MCPClient<br/>prefix: acme_ltd"]
+    G --> S2["MCPClient<br/>prefix: ivy_fern"]
+    S1 --> K1[["Container(Acme Ltd)<br/>own registration, own token"]]
+    S2 --> K2[["Container(Ivy &amp; Fern)<br/>own registration, own token"]]
+    K1 --> P["The providers' own MCP servers<br/>mcp.cloudflare.com · mcp.vercel.com · mcp.resend.com"]
+    K2 --> P
+
     G --> H[("~/.munim/runs/&lt;id&gt;.jsonl<br/>the one source")]
     F --> H
     H --> I["Control room<br/>separate process, SSE"]
     H --> J["Launch report<br/>for the business owner"]
 ```
 
-Three decisions carry the design:
+Two clients, one provider, one process. That is the whole thing, and it is not
+engineered: each client registers separately with the provider, so as far as the
+provider is concerned they are two applications and there is nothing shared to
+clobber. A coding agent holds one account per provider because one client id
+shares one token store.
+
+Four decisions carry the design:
 
 **Enumeration is deterministic; only judgement is model work.** The checks decide pass or
 fail from a DNS answer. The agent cannot contradict them, so it cannot invent a record or
@@ -160,8 +181,15 @@ leaves a record to resume from.
 **A container is bound to one client at construction and cannot widen.** `"acme"` versus
 `"acme-uk"` would otherwise be a *successful* mutation on the wrong account. Container
 construction fails on an unregistered name, and the raw credential is never returned to
-calling code. Adapters receive an authenticated HTTP client, so no log line or stack trace
-can leak a token.
+calling code: a session carries its own registration and its own token, filed under
+`(client, provider)`, so two clients cannot borrow each other's. Where an adapter is used
+instead it receives an authenticated HTTP client, so no log line or stack trace can leak a
+token.
+
+**Read across, write within is a property of which tools exist.** A tool that spans clients
+is built from only those the provider marks `readOnlyHint`, default deny, so one that
+changes something is not present to be called. It used to be a line in a system prompt, and
+an instruction is not a boundary.
 
 ## Development
 
