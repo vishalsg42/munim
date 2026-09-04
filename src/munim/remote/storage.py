@@ -56,7 +56,35 @@ class KeychainTokenStorage(TokenStorage):
 
     async def get_client_info(self) -> OAuthClientInformationFull | None:
         data = self._read("client")
-        return OAuthClientInformationFull(**data) if data else None
+        if not data:
+            return None
+        data.pop("_seeded", None)   # our bookkeeping, not the provider's
+        return OAuthClientInformationFull(**data)
+
+    def seed_client_info(self, client_id: str, client_secret: str,
+                         redirect_uri: str) -> None:
+        """Record an application the operator registered, so the flow uses it.
+
+        Written straight in rather than through set_client_info, which is async
+        and would drag a coroutine into building an httpx.Auth. Only ever
+        overwrites what a previous seed wrote: a registration the provider
+        issued is not ours to replace.
+        """
+        existing = self._read("client")
+        if existing and not existing.get("_seeded"):
+            return
+        self._backend.set_password(self._service("client"), self._client,
+                                   json.dumps({
+                                       "client_id": client_id,
+                                       "client_secret": client_secret or None,
+                                       "redirect_uris": [redirect_uri],
+                                       "token_endpoint_auth_method":
+                                           "client_secret_post" if client_secret else "none",
+                                       "grant_types": ["authorization_code",
+                                                       "refresh_token"],
+                                       "response_types": ["code"],
+                                       "_seeded": True,
+                                   }))
 
     def remember_endpoint(self, url: str) -> None:
         """Where this client's server lives, when the URL is the credential.

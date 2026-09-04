@@ -440,7 +440,11 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("client", nargs="?",
                    help="what you call this client. Leave it out and the "
                         "account you sign in to supplies the name")
-    c.add_argument("provider", nargs="?", choices=sorted({*PROVIDERS, "resend"}))
+    # Whatever is known, built in or added by the operator. A fixed list here
+    # meant adding a server did not make it connectable.
+    from munim.remote.servers import all_servers
+    known = sorted({*PROVIDERS, "resend", *all_servers()})
+    c.add_argument("provider", nargs="?", choices=known)
     c.add_argument("--token", action="store_true",
                    help="paste an API key instead of logging in")
     c.add_argument("--via-app", action="store_true",
@@ -493,11 +497,12 @@ def main(argv: list[str] | None = None) -> int:
     # `munim connect cloudflare` reads as one positional, and argparse fills the
     # first one. Shift it: a lone argument that names a provider is a provider.
     if args.command == "connect" and args.provider is None:
-        if args.client in {*PROVIDERS, "resend"}:
+        from munim.remote.servers import all_servers
+        if args.client in {*PROVIDERS, "resend", *all_servers()}:
             args.client, args.provider = None, args.client
         else:
-            parser.error(f"unknown provider {args.client!r}. "
-                         f"Choose from: {', '.join(sorted({*PROVIDERS, 'resend'}))}")
+            parser.error(f"unknown provider {args.client!r}. Choose from: "
+                         + ", ".join(sorted({*PROVIDERS, "resend", *all_servers()})))
 
     if args.command == "add-server":
         return add_server(args.name, args.url)

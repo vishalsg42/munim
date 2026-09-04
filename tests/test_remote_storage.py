@@ -163,7 +163,7 @@ def test_every_server_entry_records_how_it_was_verified():
 def test_a_provider_with_no_mcp_server_is_refused_at_construction():
     from munim.remote.session import NoRemoteServer, auth_for
 
-    with pytest.raises(NoRemoteServer, match="cloudflare, resend, vercel"):
+    with pytest.raises(NoRemoteServer, match="Providers that do"):
         auth_for("X", "supabase", backend=FakeKeyring())
 
 
@@ -237,3 +237,71 @@ def test_the_listener_waits_as_long_as_the_sdk_does():
     sdk = inspect.signature(OAuthClientProvider.__init__).parameters["timeout"].default
     assert LOGIN_TIMEOUT >= sdk, (
         f"the listener gives up after {LOGIN_TIMEOUT}s and the SDK waits {sdk}s")
+
+
+def test_a_provider_needing_an_application_says_so_before_opening_a_browser():
+    """Google will not register a client, so there is nothing to open a browser
+    for until an application exists. Discovering that at the consent screen
+    would waste the operator's time and leave a half-made session."""
+    import munim.remote.session as mod
+    from munim.remote.session import NoRemoteServer, auth_for
+
+    with pytest.raises(NoRemoteServer) as caught:
+        auth_for("X", "gmail", backend=FakeKeyring())
+    said = str(caught.value)
+    assert "registered by hand" in said
+    assert "GMAIL_OAUTH_CLIENT_ID" in said
+    assert "console.cloud.google.com" in said, "a fix with no address is a complaint"
+
+
+def test_a_registered_application_is_used_instead_of_registering(monkeypatch):
+    """The path that needs no credential in this repository: whoever registers
+    one puts it in the environment and the flow uses it."""
+    from munim.remote.session import auth_for
+    from munim.remote.storage import KeychainTokenStorage
+
+    monkeypatch.setenv("GMAIL_OAUTH_CLIENT_ID", "theirs.apps.googleusercontent.com")
+    monkeypatch.setenv("GMAIL_OAUTH_CLIENT_SECRET", "their-secret")
+    ring = FakeKeyring()
+
+    auth_for("c_1", "gmail", backend=ring)
+
+    seeded = KeychainTokenStorage("c_1", "gmail", ring)._read("client")
+    assert seeded["client_id"] == "theirs.apps.googleusercontent.com"
+    assert seeded["token_endpoint_auth_method"] == "client_secret_post"
+
+
+def test_a_registration_the_provider_issued_is_not_overwritten(monkeypatch):
+    """A seeded application must never replace one the provider actually
+    issued: that would swap a working session's identity underneath it."""
+    from munim.remote.session import auth_for
+    from munim.remote.storage import KeychainTokenStorage
+
+    ring = FakeKeyring()
+    store = KeychainTokenStorage("c_1", "gmail", ring)
+    ring.set_password(store._service("client"), "c_1",
+                      '{"client_id": "issued-by-provider", "redirect_uris": []}')
+
+    monkeypatch.setenv("GMAIL_OAUTH_CLIENT_ID", "mine")
+    auth_for("c_1", "gmail", backend=ring)
+
+    assert store._read("client")["client_id"] == "issued-by-provider"
+
+
+def test_no_google_credential_is_committed():
+    """Whether to ship one is a decision about this repository, and until it is
+    made deliberately there must not be one here by accident."""
+    import pathlib
+
+    from munim.remote.servers import SERVERS
+
+    for provider, server in SERVERS.items():
+        assert "googleusercontent" not in server.note, provider
+        assert "GOCSPX" not in server.note, provider
+
+    root = pathlib.Path(__file__).parent.parent
+    for path in (root / "src").rglob("*.py"):
+        text = path.read_text()
+        assert "GOCSPX-" not in text, f"a Google client secret in {path.name}"
+        assert ".apps.googleusercontent.com" not in text, \
+            f"a Google client id in {path.name}"

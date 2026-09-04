@@ -148,7 +148,7 @@ the server, and there are three answers it can give.
 | | what it means | what you do |
 |---|---|---|
 | **registers** | issues a client on demand (RFC 7591) | nothing. `munim connect acme` opens a browser |
-| **app** | no registration endpoint, wants a secret | register an application once, put its id and secret in `.env` |
+| **app** | no registration endpoint, wants a secret | register an application once at the provider, put its id and secret in `.env`. Munim refuses before opening a browser rather than failing at the consent screen |
 | **url** | answered without credentials | either it is open, or the URL carries the credential. Pass it with `connect --url`; it goes to your keychain, never to a file here, and is never printed whole |
 
 All three were found by probing real servers rather than reading about them.

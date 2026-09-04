@@ -52,6 +52,27 @@ def _metadata(client: str) -> OAuthClientMetadata:
     )
 
 
+def _registered_application(provider: str) -> tuple[str, str] | None:
+    """A client id and secret the operator registered themselves.
+
+    Some authorization servers will not issue a client on demand. Every Google
+    one is like this: accounts.google.com advertises no registration endpoint
+    and requires a secret, which is why a coding agent's Gmail connector works
+    without setup only because the agent itself is a registered application.
+
+    Munim is a client too, so for those providers somebody has to register one.
+    Read from the environment rather than shipped, so nothing here carries a
+    credential that belongs to a provider account.
+    """
+    import os
+
+    prefix = provider.upper().replace("-", "_")
+    client_id = os.environ.get(f"{prefix}_OAUTH_CLIENT_ID")
+    if not client_id:
+        return None
+    return client_id, os.environ.get(f"{prefix}_OAUTH_CLIENT_SECRET", "")
+
+
 def auth_for(client: str, provider: str, *, backend=None,
              on_url=None) -> OAuthClientProvider:
     """The OAuth client for one (client, provider), storing to the keychain."""
@@ -110,6 +131,21 @@ def auth_for(client: str, provider: str, *, backend=None,
             update={"token_endpoint_auth_method": "client_secret_post"})
     else:
         meta = _metadata(client)
+
+    if server.auth == "app":
+        # Nothing to register against, so an application has to already exist.
+        # Seeding storage with it is what makes the SDK use it instead of
+        # trying to register and failing at an endpoint that is not there.
+        registered = _registered_application(provider)
+        if registered is None:
+            raise NoRemoteServer(
+                f"{provider} will not register a client on demand, so it needs "
+                f"an application registered by hand"
+                + (f" at {server.register_at}" if server.register_at else "")
+                + f", then {provider.upper()}_OAUTH_CLIENT_ID and "
+                f"{provider.upper()}_OAUTH_CLIENT_SECRET in .env. "
+                f"`munim servers` says which providers need this.")
+        storage.seed_client_info(*registered, redirect_uri())
 
     return OAuthClientProvider(
         server_url=server.url,

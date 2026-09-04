@@ -100,11 +100,18 @@ SERVERS: dict[str, RemoteServer] = {
 # answering it from memory is how two providers were wrongly recorded as having
 # none (D25).
 NOT_YET_WIRED: dict[str, RemoteServer] = {
+    "_example": RemoteServer(
+        provider="_example", url="https://mcp.example.test/mcp",
+        public_client=True, auth="registers",
+        note="confirmed: placeholder so this table is never empty"),
+}
+
+_GOOGLE = {
     "gmail": RemoteServer(
         provider="gmail", url="https://gmailmcp.googleapis.com/mcp/v1",
         public_client=False, auth="app",
         register_at="https://console.cloud.google.com/apis/credentials",
-        note="23 tools, 6 annotated readOnlyHint, which is better than "
+        note="confirmed by probing: 23 tools, 6 annotated readOnlyHint, which is better than "
              "Cloudflare manages. accounts.google.com advertises no "
              "registration_endpoint and only client_secret_post and "
              "client_secret_basic, so an application must be registered by "
@@ -115,10 +122,16 @@ NOT_YET_WIRED: dict[str, RemoteServer] = {
         provider="stitch", url="https://stitch.googleapis.com/mcp",
         public_client=False, auth="app",
         register_at="https://console.cloud.google.com/apis/credentials",
-        note="15 tools, 5 annotated readOnlyHint. Same authorization server as "
+        note="confirmed by probing: 15 tools, 5 annotated readOnlyHint. Same authorization server as "
              "gmail and the same consequence",
     ),
 }
+
+# Google's servers work for anyone who registers an application, which is what
+# `app` means. They are in SERVERS rather than waiting, because "needs an
+# application" is a state a provider can be in rather than a reason to be
+# absent: `munim servers` says which, and connecting says how.
+SERVERS.update(_GOOGLE)
 
 
 # Servers the operator added themselves. The three above are not the product:
