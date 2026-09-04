@@ -94,6 +94,13 @@
       .stages span.done {
         border-color: var(--emerald-300); background: var(--emerald-50); color: var(--emerald-800);
       }
+      /* Deliberately not run. Distinct from pending, which is the same flat
+         grey, because "nobody asked for this" and "this has not happened yet"
+         look identical otherwise and only one of them is worth waiting for. */
+      .stages span.off {
+        border-style: dashed; color: var(--stone-400);
+      }
+      .stages span.off::after { content: " off"; opacity: .7; }
 
       /* Every chip is present from the first frame. They light up in place;
          nothing is inserted, so nothing moves and the eye can track one cell. */
@@ -231,8 +238,15 @@
 
         for (const stage of STAGES) {
           const done = state.stagesDone.includes(stage);
-          const now = state.stage === stage && !done;
-          stageEls[stage].className = now ? "now" : done ? "done" : "";
+          const off = state.stagesOff.includes(stage);
+          const now = state.stage === stage && !done && !off;
+          // "off" is not "pending". Agents are off by default, so without this
+          // the diagnose chip sits grey for the whole run and reads as a step
+          // that hung rather than one nobody asked for.
+          stageEls[stage].className = off ? "off" : now ? "now" : done ? "done" : "";
+          stageEls[stage].title = off
+            ? "Agents are off, so this step did not run. munim config ai on"
+            : "";
         }
         for (const check of CHECKS) {
           chipEls[check].className = "chip " + (state.checks[check] || "idle");

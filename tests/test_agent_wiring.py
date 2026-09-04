@@ -30,6 +30,15 @@ def _server(tmp_path):
                         reports_dir=tmp_path / "reports"), registry
 
 
+@pytest.fixture
+def agents_on(monkeypatch):
+    """Agents are off by default now, including in the suite, so a test about
+    the agent has to say so. That default is deliberate: it is what a fresh
+    install gets, and the tests below would otherwise be the only place in the
+    project where reasoning happens without anybody asking for it."""
+    monkeypatch.setenv("MUNIM_AI", "1")
+
+
 @pytest.fixture(autouse=True)
 def _canned_checks(monkeypatch):
     """The wiring is what is under test, not the catalogue. Live lookups made
@@ -63,9 +72,9 @@ class _FakeAgent:
         return "Your mail is not signed, so receivers cannot prove it is you."
 
 
-async def test_check_runs_the_agent_when_something_failed(tmp_path, monkeypatch):
+async def test_check_runs_the_agent_when_something_failed(tmp_path, monkeypatch, agents_on):
     _FakeAgent.asked = []
-    monkeypatch.setattr(agent_module, "build_model", lambda: (object(), "fake"))
+    monkeypatch.setattr(agent_module, "build_model", lambda *a, **k: (object(), "fake"))
     monkeypatch.setattr(agent_module, "Agent", _FakeAgent)
 
     server, _ = _server(tmp_path)
@@ -79,8 +88,8 @@ async def test_check_runs_the_agent_when_something_failed(tmp_path, monkeypatch)
     assert "Failing checks:" in prompt
 
 
-async def test_the_agents_explanation_reaches_the_run_log(tmp_path, monkeypatch):
-    monkeypatch.setattr(agent_module, "build_model", lambda: (object(), "fake"))
+async def test_the_agents_explanation_reaches_the_run_log(tmp_path, monkeypatch, agents_on):
+    monkeypatch.setattr(agent_module, "build_model", lambda *a, **k: (object(), "fake"))
     monkeypatch.setattr(agent_module, "Agent", _FakeAgent)
 
     server, _ = _server(tmp_path)
@@ -94,21 +103,64 @@ async def test_the_agents_explanation_reaches_the_run_log(tmp_path, monkeypatch)
     assert any("receivers cannot prove" in e.human_text for e in events)
 
 
-async def test_a_missing_model_costs_the_explanation_not_the_findings(tmp_path):
-    """A fresh clone has no key. The checks must still land."""
+async def test_agents_off_costs_the_explanation_not_the_findings(tmp_path):
+    """A fresh install has agents off. The checks must still land.
+
+    This used to assert an `escalated` event, under the docstring "a missing
+    model host has to be said out loud". That was right while having no host was
+    a fault. Agents being off is a setting somebody chose, so it is reported as
+    an observation: escalating on the default state would cry wolf on every run
+    a fresh install makes.
+    """
     server, _ = _server(tmp_path)
     result = await server.call_tool("check", {"target": "acme"})
-    payload = result[1] if isinstance(result, tuple) else result
-    text = str(payload)
+    text = str(result[1] if isinstance(result, tuple) else result)
     assert "dkim_present" in text, text[:400]
+    assert "'agents': 'off'" in text or '"agents": "off"' in text, \
+        "check has to say so where the coding agent is actually looking"
+
+    from munim.runlog import all_runs, RunLog
+    runs = all_runs(tmp_path / "runs")
+    events = list(RunLog(runs[-1], tmp_path / "runs").read())
+    assert any(e.kind == "observation" and e.detail.get("agents") == "off"
+               for e in events), "the run log has to say why there is no prose"
+    assert not any(e.kind == "escalated" for e in events), \
+        "a setting is not an escalation"
+    assert any(e.kind == "finding" for e in events), \
+        "the deterministic findings must survive the model being absent"
+
+
+async def test_a_broken_host_still_escalates(tmp_path, monkeypatch, agents_on):
+    """The other half. Agents on and the host failing is a fault, and still has
+    to be said out loud: this is what the old test was protecting."""
+    def broken(*a, **k):
+        raise RuntimeError("bedrock said no")
+
+    monkeypatch.setattr(agent_module, "build_model", broken)
+
+    server, _ = _server(tmp_path)
+    await server.call_tool("check", {"target": "acme"})
 
     from munim.runlog import all_runs, RunLog
     runs = all_runs(tmp_path / "runs")
     events = list(RunLog(runs[-1], tmp_path / "runs").read())
     assert any(e.kind == "escalated" for e in events), \
-        "a missing model host has to be said out loud"
-    assert any(e.kind == "finding" for e in events), \
-        "the deterministic findings must survive the model being absent"
+        "a host that fails while agents are on has to be said out loud"
+    assert any(e.kind == "finding" for e in events)
+
+
+async def test_a_client_with_nothing_connected_is_told_so_when_agents_are_on(
+        tmp_path, monkeypatch, agents_on):
+    """The refusal that is about the client rather than about the switch."""
+    import munim.agent.within as within
+
+    monkeypatch.setattr(within, "connected_providers", lambda cid, backend=None: [])
+    server, _ = _server(tmp_path)
+    result = await server.call_tool("work_on_client",
+                                    {"client": "acme", "request": "anything"})
+    text = str(result)
+    assert "no provider connected" in text
+    assert "munim connect" in text, "a refusal with no next step is a complaint"
 
 
 def test_the_agent_is_built_with_printing_turned_off():
@@ -127,7 +179,7 @@ def test_the_agent_is_built_with_printing_turned_off():
         "Agent must be constructed with callback_handler=None"
 
 
-async def test_the_agent_gets_provider_tools_for_connected_providers(tmp_path, monkeypatch):
+async def test_the_agent_gets_provider_tools_for_connected_providers(tmp_path, monkeypatch, agents_on):
     """Built and unreachable is this project's recurring fault: the whole
     Strands agent was that way this morning. A toolset module nothing calls is
     the same bug waiting."""
@@ -142,7 +194,7 @@ async def test_the_agent_gets_provider_tools_for_connected_providers(tmp_path, m
     built = []
     monkeypatch.setattr(toolsets_mod, "toolset_for",
                         lambda c, p, **k: built.append((c, p)) or _Stub(p))
-    monkeypatch.setattr(agent_module, "build_model", lambda: (object(), "fake"))
+    monkeypatch.setattr(agent_module, "build_model", lambda *a, **k: (object(), "fake"))
 
     captured = {}
 
@@ -162,7 +214,7 @@ async def test_the_agent_gets_provider_tools_for_connected_providers(tmp_path, m
     assert "cloudflare" in names, f"the agent did not receive it: {names}"
 
 
-async def test_an_unconnected_provider_does_not_open_a_browser(tmp_path, monkeypatch):
+async def test_an_unconnected_provider_does_not_open_a_browser(tmp_path, monkeypatch, agents_on):
     """Building a toolset for a provider the client has not connected would
     start an OAuth flow in the middle of a diagnosis."""
     import munim.remote.storage as storage_mod
@@ -173,7 +225,7 @@ async def test_an_unconnected_provider_does_not_open_a_browser(tmp_path, monkeyp
     built = []
     monkeypatch.setattr(toolsets_mod, "toolset_for",
                         lambda c, p, **k: built.append((c, p)) or _Stub(p))
-    monkeypatch.setattr(agent_module, "build_model", lambda: (object(), "fake"))
+    monkeypatch.setattr(agent_module, "build_model", lambda *a, **k: (object(), "fake"))
     monkeypatch.setattr(agent_module, "Agent", _FakeAgent)
 
     server, _ = _server(tmp_path)
@@ -186,7 +238,7 @@ class _Stub:
         self._prefix = prefix
 
 
-async def test_work_on_client_is_given_that_client_and_no_other(tmp_path, monkeypatch):
+async def test_work_on_client_is_given_that_client_and_no_other(tmp_path, monkeypatch, agents_on):
     """"Write within" has to be a property of what the agent holds, not a rule
     it is asked to follow. A request needing a second account should have
     nothing to reach with."""
@@ -197,7 +249,7 @@ async def test_work_on_client_is_given_that_client_and_no_other(tmp_path, monkey
     monkeypatch.setattr(within, "toolset_for",
                         lambda cid, provider, **kw: built.append((cid, kw.get("label")))
                         or _Stub(provider))
-    monkeypatch.setattr(within, "build_model", lambda: (object(), "fake"))
+    monkeypatch.setattr(within, "build_model", lambda *a, **k: (object(), "fake"))
 
     captured = {}
 
@@ -217,17 +269,20 @@ async def test_work_on_client_is_given_that_client_and_no_other(tmp_path, monkey
     assert len(captured["tools"]) == 1, "the agent was given more than one client"
 
 
-async def test_a_client_with_nothing_connected_is_told_so(tmp_path, monkeypatch):
-    """Rather than an agent with no tools quietly inventing an answer."""
-    import munim.agent.within as within
+async def test_work_on_client_with_agents_off_says_which_command(tmp_path):
+    """Rather than a traceback, or a tool that vanished from the list.
 
-    monkeypatch.setattr(within, "connected_providers", lambda cid, backend=None: [])
+    Keeping the tool registered and answering is the whole reason it was not
+    made to disappear: a coding agent can read this and tell its operator what
+    to run.
+    """
     server, _ = _server(tmp_path)
     result = await server.call_tool("work_on_client",
                                     {"client": "acme", "request": "anything"})
     text = str(result)
-    assert "no provider connected" in text
-    assert "munim connect" in text, "a refusal with no next step is a complaint"
+    assert "agents" in text and "off" in text
+    assert "munim config ai on" in text, \
+        "a refusal with no next step is a complaint"
 
 
 async def test_working_on_one_client_is_declared_mutating(tmp_path):

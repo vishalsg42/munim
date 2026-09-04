@@ -445,6 +445,172 @@ def config(action: str, provider: str | None, client_id: str | None) -> int:
     return 0
 
 
+def config_ai(action: str | None, names: list[str]) -> int:
+    """The agent switch, the model host, the model id and the key.
+
+    Under `config` rather than a noun of its own because `config` is already the
+    settings command: it writes the same `__munim__` keychain account, prompts
+    secrets through getpass, and never echoes one back. A second command doing
+    all three against the same account is the duplication this file warns about
+    where `config` loads the env, and two commands disagreeing about one fact is
+    worse than either answer alone.
+    """
+    from munim import settings
+
+    hosts = ", ".join(settings.ORDER)
+
+    if action is None:
+        return _show_ai()
+
+    if action in ("on", "off"):
+        settings.set_enabled(action == "on")
+        state = settings.ai()
+        if action == "on":
+            chosen = state.chosen()
+            if chosen:
+                print(f"Agents on, using {chosen}. This takes effect on the next "
+                      f"tool call: no need to reconnect your coding agent.",
+                      file=sys.stderr)
+            else:
+                print("Agents on, but no model host can be built yet.",
+                      file=sys.stderr)
+                for line in _missing_hosts():
+                    print(f"  {line}", file=sys.stderr)
+        else:
+            print("Agents off. Munim is local: the checks, the audit and the "
+                  "mail plan all still work, and nothing reaches a model host.",
+                  file=sys.stderr)
+        return 0
+
+    if action == "host":
+        if len(names) != 1:
+            print(f"name a host: {settings.AUTO}, {hosts}", file=sys.stderr)
+            return 2
+        wanted = names[0]
+        if wanted != settings.AUTO and wanted not in settings.HOSTS:
+            print(f"{wanted!r} is not a host Munim knows. Choose from: "
+                  f"{settings.AUTO}, {hosts}", file=sys.stderr)
+            return 2
+        settings.set_host(wanted)
+        print(f"Host set to {wanted}.", file=sys.stderr)
+        if wanted != settings.AUTO and not settings.installed(wanted):
+            spec = settings.HOSTS[wanted]
+            print(f"  It is not installed here: pip install 'munim[{spec.extra}]'",
+                  file=sys.stderr)
+        return 0
+
+    if action == "model":
+        # Two positionals, like `servers add`. One shared model id would be a
+        # bug rather than a shortcut: set a Gemini id, switch to Bedrock, and it
+        # is handed to BedrockModel(model_id=...).
+        if len(names) != 2:
+            print(f"config ai model takes a host and a model id: "
+                  f"munim config ai model gemini gemini-2.5-pro\n"
+                  f"  hosts: {hosts}", file=sys.stderr)
+            return 2
+        host, model_id = names
+        if host not in settings.HOSTS:
+            print(f"{host!r} is not a host Munim knows. Choose from: {hosts}",
+                  file=sys.stderr)
+            return 2
+        settings.set_model(host, model_id)
+        print(f"{host} will use {model_id}.", file=sys.stderr)
+        return 0
+
+    if action == "key":
+        if len(names) != 1:
+            print(f"name a host: {hosts}", file=sys.stderr)
+            return 2
+        host = names[0]
+        spec = settings.HOSTS.get(host)
+        if spec is None:
+            print(f"{host!r} is not a host Munim knows. Choose from: {hosts}",
+                  file=sys.stderr)
+            return 2
+        if not spec.keys:
+            print(f"{host} authenticates with AWS credentials rather than an "
+                  f"API key, so there is nothing to store here.", file=sys.stderr)
+            return 2
+        secret = getpass(f"{host} API key: ")
+        if not secret.strip():
+            print("Nothing pasted; not storing anything.", file=sys.stderr)
+            return 2
+        settings.remember_key(host, secret.strip())
+        print(f"Stored the {host} key in your keychain. It works from any "
+              f"directory.", file=sys.stderr)
+        # The obvious sequence should do the obvious thing. Without this,
+        # `key gemini` then `on` picks Bedrock, because auto prefers it and
+        # constructing a model does not authenticate.
+        if settings.ai().host == settings.AUTO:
+            settings.set_host(host)
+            print(f"  Host was {settings.AUTO}, so it is now {host}.",
+                  file=sys.stderr)
+        return 0
+
+    if action == "unset":
+        if len(names) != 1:
+            print(f"name a host: {hosts}", file=sys.stderr)
+            return 2
+        if settings.forget_key(names[0]):
+            print(f"Removed the {names[0]} key.", file=sys.stderr)
+        else:
+            print(f"Nothing stored for {names[0]}.", file=sys.stderr)
+        return 0
+
+    print(f"unknown: config ai {action}. Try: on, off, host, model, key, unset",
+          file=sys.stderr)
+    return 2
+
+
+def _missing_hosts() -> list[str]:
+    from munim import settings
+
+    lines = []
+    for name in settings.ORDER:
+        spec = settings.HOSTS[name]
+        if not settings.installed(name):
+            lines.append(f"{name}: not installed"
+                         + (f", run pip install 'munim[{spec.extra}]'"
+                            if spec.extra else ""))
+        elif spec.keys and not settings.resolve_key(name)[0]:
+            lines.append(f"{name}: no key, run munim config ai key {name}")
+    return lines
+
+
+def _show_ai() -> int:
+    """What is on, on what, and where each answer came from. Never a key."""
+    from munim import settings
+    from munim.env import load as load_env
+
+    load_env()
+    state = settings.ai()
+    chosen = state.chosen()
+
+    print(f"  agents     {'on' if state.enabled else 'off'}"
+          f"  (from the {state.where['enabled']})", file=sys.stderr)
+    print(f"  host       {state.host}  (from the {state.where['host']})"
+          + (f"  -> {chosen}" if state.host == settings.AUTO and chosen else ""),
+          file=sys.stderr)
+    for name in settings.ORDER:
+        spec = settings.HOSTS[name]
+        if not settings.installed(name):
+            note = (f"not installed, run pip install 'munim[{spec.extra}]'"
+                    if spec.extra else "not installed")
+        elif not spec.keys:
+            note = f"ready, model {settings.model_for(name)}"
+        else:
+            secret, source = settings.resolve_key(name)
+            note = (f"key from the {source}, model {settings.model_for(name)}"
+                    if secret else f"no key, run munim config ai key {name}")
+        print(f"    {name:10} {note}", file=sys.stderr)
+    for problem in state.problems:
+        print(f"  ! {problem}", file=sys.stderr)
+    if not state.enabled:
+        print("  Munim is local. Turn agents on with: munim config ai on",
+              file=sys.stderr)
+    return 0
+
+
 def connect_by_url(client: str, provider: str, url: str) -> int:
     """Connect a provider that identifies a client by their own endpoint.
 
@@ -771,13 +937,18 @@ def main(argv: list[str] | None = None) -> int:
     sv.add_argument("names", nargs="*", metavar="ARG",
                     help="a name and a URL, for `add`")
 
-    c = sub.add_parser("config", help="the application credential for gmail "
-                                      "and stitch, stored in your keychain")
-    c.add_argument("action", choices=["set", "list", "unset"])
-    c.add_argument("provider", nargs="?")
+    c = sub.add_parser("config", help="settings: the agent switch and model "
+                                      "host, plus the gmail and stitch "
+                                      "application credential")
+    c.add_argument("subject", nargs="?", choices=["ai", "app"],
+                   help="omit to show everything")
+    c.add_argument("action", nargs="?",
+                   help="ai: on, off, host, model, key, unset. "
+                        "app: set, list, unset")
+    c.add_argument("names", nargs="*", metavar="ARG")
     c.add_argument("--client-id", dest="client_id",
-                   help="the application's client id. The secret is prompted, "
-                        "never passed as an argument")
+                   help="the application's client id, for `app set`. The "
+                        "secret is prompted, never passed as an argument")
 
     sub.add_parser("doctor", help="what is set up, what is not, and the next step")
 
@@ -792,6 +963,13 @@ def main(argv: list[str] | None = None) -> int:
     if argv and argv[0] in LEGACY:
         old = argv[0]
         argv = [LEGACY[old], "add" if old == "add-server" else old, *argv[1:]]
+
+    # `config` grew a subject when the agent settings landed beside the
+    # application credential. The old spelling is published (docs/providers/
+    # gmail.md tells people to run `munim config set gmail --client-id ...`), so
+    # it is rewritten rather than broken.
+    if len(argv) >= 2 and argv[0] == "config" and argv[1] in ("set", "list", "unset"):
+        argv = ["config", "app", *argv[1:]]
 
     args = parser.parse_args(argv)
 
@@ -828,7 +1006,20 @@ def main(argv: list[str] | None = None) -> int:
         return list_servers()
 
     if args.command == "config":
-        return config(args.action, args.provider, args.client_id)
+        if args.subject == "ai":
+            return config_ai(args.action, args.names)
+        if args.subject == "app":
+            provider = args.action if args.action in ("set", "unset", "list") else None
+            # `app set gmail`: action is the verb, the provider is the first name.
+            verb = args.action or "list"
+            name = args.names[0] if args.names else None
+            return config(verb, name, args.client_id)
+        # No subject: show everything, because "what is configured" is one
+        # question even though it has two answers.
+        print("Applications:", file=sys.stderr)
+        config("list", None, None)
+        print("Agents:", file=sys.stderr)
+        return config_ai(None, [])
 
     if args.command == "doctor":
         from munim.doctor import run as doctor_run
