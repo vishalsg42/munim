@@ -4,8 +4,13 @@ import { test } from "node:test";
 import { initialState, reduce } from "./state";
 import type { LaunchEvent } from "./types";
 
-const ev = (seq: number, kind: LaunchEvent["kind"], detail = {}): LaunchEvent => ({
-  run_id: "r", seq, ts: 0, client: "Ivy", stage: "mail", kind,
+const ev = (
+  seq: number,
+  kind: LaunchEvent["kind"],
+  detail = {},
+  stage = "mail",
+): LaunchEvent => ({
+  run_id: "r", seq, ts: 0, client: "Ivy", stage, kind,
   human_text: "x", detail,
 });
 
@@ -29,4 +34,16 @@ test("run_done leaves nothing pending", () => {
   s = reduce(s, { type: "event", event: ev(2, "run_done") });
   assert.equal(s.awaitingConfirm, null);
   assert.ok(s.done);
+});
+
+test("a verify-only run is a check, not a launch", () => {
+  let s = reduce(initialState, { type: "event", event: ev(1, "stage_start", {}, "verify") });
+  s = reduce(s, { type: "event", event: ev(2, "observation", { check: "mx_present" }, "verify") });
+  assert.deepEqual(s.stagesSeen, ["verify"]);
+});
+
+test("a launch touches more than verify", () => {
+  let s = reduce(initialState, { type: "event", event: ev(1, "stage_start", {}, "deploy") });
+  s = reduce(s, { type: "event", event: ev(2, "stage_start", {}, "verify") });
+  assert.deepEqual(s.stagesSeen, ["deploy", "verify"]);
 });

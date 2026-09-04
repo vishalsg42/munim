@@ -6,6 +6,7 @@ export interface RoomState {
   client: string | null;
   stage: string | null;
   stagesDone: string[];
+  stagesSeen: string[];
   checks: Record<string, CheckState>;
   finding: LaunchEvent | null;
   awaitingConfirm: LaunchEvent | null;
@@ -16,7 +17,7 @@ export interface RoomState {
 }
 
 export const initialState: RoomState = {
-  client: null, stage: null, stagesDone: [], checks: {},
+  client: null, stage: null, stagesDone: [], stagesSeen: [], checks: {},
   finding: null, awaitingConfirm: null, escalated: null,
   events: [], done: false, connected: false,
 };
@@ -36,6 +37,11 @@ export function reduce(state: RoomState, action: Action): RoomState {
   const next: RoomState = {
     ...state,
     client: e.client || state.client,
+    // Every stage the run has touched, not just the completed ones. A run that
+    // only ever touches `verify` is a check, not a launch, and the room says so.
+    stagesSeen: e.stage && !state.stagesSeen.includes(e.stage)
+      ? [...state.stagesSeen, e.stage]
+      : state.stagesSeen,
     events: [...state.events, e].slice(-200),
   };
   const check = e.detail?.check as string | undefined;

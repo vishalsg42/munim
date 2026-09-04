@@ -21,10 +21,20 @@ export default function App() {
     source.addEventListener("launch", (m) =>
       dispatch({ type: "event", event: JSON.parse((m as MessageEvent).data) as LaunchEvent }),
     );
+    // The server closes the stream once the run is done. An EventSource treats
+    // any close as a dropped connection and reconnects, which would flip the
+    // badge back to "live" on a run that finished minutes ago. Close it here.
+    source.addEventListener("done", () => source.close());
     return () => source.close();
   }, []);
 
   const live = state.client !== null;
+  // A check run only ever emits `verify` events. Calling that a launch would
+  // claim work the run never did.
+  const eyebrow =
+    state.stagesSeen.length > 0 && state.stagesSeen.every((s) => s === "verify")
+      ? "Checking"
+      : "Launching";
 
   return (
     <div className="min-h-full font-sans antialiased">
@@ -36,8 +46,12 @@ export default function App() {
           </span>
         </div>
         <span className="flex items-center gap-2 text-[11px] uppercase tracking-widest text-stone-400">
-          <i className={`h-1.5 w-1.5 rounded-full ${state.connected ? "bg-emerald-500" : "bg-stone-300"}`} />
-          {state.connected ? "live" : "waiting"}
+          <i
+            className={`h-1.5 w-1.5 rounded-full ${
+              state.done || state.connected ? "bg-emerald-500" : "bg-stone-300"
+            }`}
+          />
+          {state.done ? "done" : state.connected ? "live" : "waiting"}
         </span>
       </header>
 
@@ -46,7 +60,7 @@ export default function App() {
       ) : (
         <main className="mx-auto max-w-5xl px-8 py-10">
           <p className="text-[11px] uppercase tracking-[0.2em] text-stone-400">
-            Launching
+            {eyebrow}
           </p>
           <h1 className="mt-1 text-3xl font-semibold tracking-tight">{state.client}</h1>
 
