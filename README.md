@@ -94,13 +94,22 @@ uv run munim-room --runs DIR --reports DIR   # serve a different set of runs
 | Read across / write within | ✅ |
 | Check catalogue, 13 checks, no credentials needed | ✅ |
 | Strands launch agent: diagnosis and owner-facing explanation | ✅ |
-| Run log with replay and resume | ✅ |
+| Run log with replay | ✅ open the room mid-run, or refresh, and the whole run replays |
+| Resuming an interrupted launch from the log | ⬜ not implemented |
 | Control room, live over SSE | ✅ |
 | Launch report for the business owner | ✅ |
-| OAuth connect (PKCE) | ✅ built; needs a provider client ID |
-| Cloudflare DNS writes: idempotent upsert, SPF merge | ✅ tested against documented shapes; not yet probed live |
-| Vercel reads: deploys, env scope, env applied | ✅ |
-| Vercel / Resend write operations | ⬜ not yet |
+| OAuth connect (PKCE), issuer validated per RFC 9207 | ✅ Vercel live against two real accounts |
+| Cloudflare DNS writes: idempotent upsert, SPF merge | ✅ tested, including partial-failure behaviour; not yet run against a live zone |
+| Vercel reads: deploys, env scope, env applied | ✅ live |
+| Resend writes: create and verify a sender domain | ✅ |
+| Vercel write operations | ⬜ not yet |
+
+Re-running a launch after a partial failure does not duplicate anything, which
+is the property people usually mean by resume: every write reads what is there
+first and updates in place, and the SPF merge removes the leftovers before
+writing so a failure part-way leaves one working policy rather than two that
+receivers ignore. Picking a launch up from where it stopped is a different
+thing, and it is not built.
 
 ### Why there is no AgentCore deployment
 
@@ -158,8 +167,8 @@ can leak a token.
 
 ```bash
 uv pip install -e ".[dev]"
-uv run pytest -q                          # 115 tests
-cd room && npx tsx --test src/state.test.ts   # 5 more, the room's reducer
+uv run pytest -q                              # the Python suite
+cd room && npx tsx --test src/state.test.ts   # the room's reducer
 cd room && npm install && npm run build
 ```
 
