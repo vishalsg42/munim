@@ -7,14 +7,14 @@
 
 **One MCP server holding a live session with every client's account at once.**
 
-A coding agent can be logged in to one Cloudflare account. One Vercel. One Resend. Connect
-a second client and the first one goes away. So the person looking after a dozen small
-businesses runs a dozen agent sessions, and no single one of them can answer a question
-about more than one client.
+A coding agent can be logged in to one Cloudflare account. One Vercel. One Resend.
+Connect a second client and the first one goes away. So the person looking after a
+dozen small businesses runs a dozen agent sessions, and no single one of them can
+answer a question about more than one client.
 
-Munim holds them all. Each client gets its own registration with the provider, its own
-token and its own namespace in the tool list, so one agent can read across every client
-and write inside the one you named.
+Munim holds them all. Each client gets its own registration with the provider, its
+own token and its own namespace in the tool list, so one agent can **read across
+every client and write inside the one you named**.
 
 ```
 Kloudfirst       -> Kloudfirst@gmail.com's Account          (3 tools)
@@ -23,66 +23,10 @@ Balaji Roofings  -> Tech.bajajiroofing@gmail.com's Account  (3 tools)
 both sessions opened concurrently, one process, no logout
 ```
 
-That is a real run against two real Cloudflare accounts, not a diagram. Reproduce it with
-your own two accounts: `scripts/cross_account_probe.py`.
-
-### Why this is not just credential switching
-
-The nearest prior work, [`mcpwarden`](https://github.com/ibhugeloo/mcpwarden), registers N
-copies of a provider's MCP server in your coding agent, one per account, and its own
-description calls them *"exclusive context profiles"*: one active at a time. That removes
-the re-login and leaves the isolation. It cannot answer a question that spans two accounts,
-because nothing sees across two entries in a tool list.
-
-Isolation is the easy half. Twelve clients across four providers is 48 entries in your tool
-list and still no vantage point. Munim is one entry holding 48 sessions, which is what
-makes *"which of my clients has a domain expiring this quarter?"* a question you can ask.
-
-Nothing is registered by hand. Cloudflare, Vercel and Resend each run their own MCP server
-and each issues a client on demand, so connecting is a browser window and nothing else, and
-there is no client secret anywhere in this repository.
+That is a real run against two real Cloudflare accounts, not a diagram. Reproduce
+it with your own two: [`scripts/cross_account_probe.py`](scripts/cross_account_probe.py).
 
 ---
-
-*A munim is the steward a business owner trusts to keep their books and handle their affairs
-without being asked each time.*
-
----
-
-## The problem
-
-One person maintains the web and email setup of a dozen small businesses. The clients own
-the Vercel, Cloudflare and Resend accounts and pay the bills; the operator holds delegated
-access and does the work.
-
-Every provider allows one login at a time. So the operator's workaround is a separate
-coding-agent session per client. Isolation built out of browser tabs and discipline.
-
-That costs three things:
-
-1. **Switching.** Every action on a different client means re-authenticating somewhere.
-2. **No vantage point.** *"Which clients have a domain expiring this quarter?"* cannot be
-   asked from anywhere, because no place can see all of them.
-3. **Silent failure.** Standing up a client is a copy-paste dance between accounts, and one
-   of the handoffs fails invisibly.
-
-That last one is the reason this exists. Resend emits DKIM and SPF records that must be
-written into Cloudflare. Get the A record wrong and the site does not load, and you find out
-in minutes. **Get the SPF record wrong and nothing breaks**: the client's invoices quietly
-stop arriving, and nobody notices for weeks.
-
-## What it does
-
-Adds one MCP server to whatever coding agent you use. Each client becomes a **container**:
-its own registration with the provider, its own token, its own namespace in the tool list.
-Nothing is registered by hand, because all three providers issue a client on demand.
-
-- **Read across every client.** *"Whose domain expires this quarter?"*
-- **Write only inside one you have named.** A mutation loads one client's credentials and
-  no others.
-- **Check the things nobody checks.** Not because they are hard, but because running them
-  by hand on every launch for every client is not realistic. An agent does not get bored on
-  check eleven.
 
 ## Install
 
@@ -94,37 +38,24 @@ uv tool install munim          # or: pipx install munim, or: pip install munim
 claude mcp add munim -- munim-mcp
 ```
 
-That is the whole install. The control room ships inside the package, so there is
-no npm step and nothing to compile.
-
-<details>
-<summary>Working on Munim itself</summary>
-
-```bash
-git clone https://github.com/vishalsg42/munim && cd munim
-uv venv && uv pip install -e ".[dev]"
-claude mcp add munim -- "$(pwd)/.venv/bin/munim-mcp"
-```
-
-</details>
+The control room ships inside the package, so there is nothing to compile.
 
 ### Three steps to something useful
 
 **1. Point it at a model.** Any Strands-supported provider works: Amazon Bedrock,
 Gemini, Anthropic, OpenAI, Ollama. Put one key in `.env` in the directory you run
-from (see `.env.example`):
+from (see [`.env.example`](.env.example)):
 
 ```
 GEMINI_API_KEY=...
 ```
 
-This is only needed for the tools that reason, which are `check`, `work_on_client`
-and `ask_across_clients`. Connecting accounts and reading them needs no model.
+Only the tools that reason need this: `check`, `work_on_client` and
+`ask_across_clients`. Connecting accounts and reading them needs no model.
 
-**2. Connect a client.** A browser opens, you sign in, and that is the setup. There
-is no application to register and no client secret anywhere in this project,
-because Cloudflare, Vercel, Resend and the rest each run their own MCP server and
-each issues a client on demand:
+**2. Connect a client.** A browser opens, you sign in, and that is the setup. No
+application to register, no client secret anywhere in this project, because the
+providers each run their own MCP server and each issues a client on demand.
 
 ```bash
 munim connect cloudflare
@@ -133,7 +64,7 @@ munim connect cloudflare
 Leave the name out and the account you sign in to supplies it, which is what stops
 a name and an account from drifting apart. To add a second client, **sign out of
 the provider in your browser first**, or the consent screen hands you the same
-account again:
+account again and both clients end up bound to it.
 
 ```bash
 munim connect cloudflare      # sign in as the second client
@@ -141,17 +72,90 @@ munim clients                 # who is connected, and to what
 ```
 
 **3. Ask your coding agent something that spans them.** This is the part a single
-logged-in session cannot do:
+logged-in session cannot do.
 
 ```
 which of my clients has a domain expiring this quarter?
 check ivyandfern.co.uk for Ivy & Fern Studio
 ```
 
-Run `munim doctor` at any point. It says what is set up, what is not, and the exact
-command to fix each gap.
+Run `munim doctor` at any point. It says what is set up, what is not, and the
+exact command to fix each gap.
 
-### Every command
+---
+
+## The problem it solves
+
+One person maintains the web and email setup of a dozen small businesses. The
+clients own the accounts and pay the bills; the operator holds delegated access and
+does the work. Every provider allows one login at a time, so the workaround is a
+separate agent session per client: isolation built out of browser tabs and
+discipline.
+
+That costs three things:
+
+1. **Switching.** Every action on a different client means re-authenticating.
+2. **No vantage point.** *"Which clients have a domain expiring this quarter?"*
+   cannot be asked from anywhere, because no place can see all of them.
+3. **Silent failure.** Standing up a client is a copy-paste dance between
+   accounts, and one of the handoffs fails invisibly.
+
+The third one is why this exists. Resend emits DKIM and SPF records that must be
+written into Cloudflare. Get the A record wrong and the site does not load, and
+you find out in minutes. **Get the SPF record wrong and nothing breaks**: the
+client's invoices quietly stop arriving, and nobody notices for weeks.
+
+---
+
+## The tools your agent gets
+
+Twelve, and this is the whole surface. Anything not listed here is not reachable,
+whatever else is in the repository.
+
+| Tool | |
+|---|---|
+| `list_clients` | every client and what each is connected to |
+| `client_status` | what is known about one client |
+| `add_client` | register one |
+| `connect_provider` | store a pasted key, for providers with nothing better |
+| `find_across_clients` | one deterministic question over all of them at once |
+| `ask_across_clients` | one open question over all of them, read-only |
+| `audit_all_clients` | the whole catalogue against every client, silent when they all pass |
+| `check` | the 13-check catalogue against a client or a bare domain |
+| `work_on_client` | do something inside one client's accounts, using their own provider tools |
+| `plan_mail_setup` | what setting up email would change, touching no DNS |
+| `apply_mail_setup` | carry out a plan, with approval required to replace a record |
+| `launch_status` | read a run back |
+
+**Repair is deliberately two calls rather than one.** A tool call returns once, so
+there is nowhere for a mid-flight question to go. `plan` reads what is there and
+says what would change; `apply` carries out a plan the operator has seen. Approval
+is the gap between them.
+
+`apply` refuses without `approved=true` when the plan would replace or combine a
+record somebody put there on purpose. Creating one that does not exist is not a
+judgement call; changing one that does is, and it is someone else's live mail.
+
+---
+
+## Any MCP server
+
+Ten providers are built in, and only the first needed any code. Point Munim at any
+other MCP server and it works out how that server authenticates:
+
+```bash
+munim add-server acme https://mcp.acme.com/mcp
+munim connect "Acme Ltd" acme
+munim servers                       # what Munim knows about, and what each needs
+```
+
+Built in: Cloudflare, Vercel, Resend, Netlify, Linear, Notion, Sentry (all zero
+setup, via dynamic client registration), Gmail and Stitch (need a registered
+application), Zoho (the endpoint URL is the credential).
+
+---
+
+## Every command
 
 ```bash
 munim connect cloudflare                     # browser login; the account names the client
@@ -164,11 +168,11 @@ munim doctor                                 # what is missing, and the fix for 
 munim servers                                # which MCP servers Munim knows about
 munim add-server <name> <url>                # point it at any other MCP server
 
-munim rename "<account name>" "Balaji Roofings"   # the name is a label; the id is the identity
-munim merge "<account name>" "Balaji Roofings"    # if one account became two clients
-munim forget "<client>"                           # only when it holds nothing
-munim disconnect "<client>" [provider]            # drop credentials, keep the client
-munim disconnect --all                            # drop every credential
+munim rename "<old>" "<new>"                 # the name is a label; the id is the identity
+munim merge "<source>" "<target>"            # if one account became two clients
+munim forget "<client>"                      # only when it holds nothing
+munim disconnect "<client>" [provider]       # drop credentials, keep the client
+munim disconnect --all                       # drop every credential
 ```
 
 A rename is only a label change. Credentials are filed under a client id that never
@@ -176,9 +180,9 @@ changes, so renaming cannot orphan a session.
 
 ### Watching a run
 
-The control room is a page that follows a run as it happens. It reads the same run
-log the terminal does, so it can be opened mid-launch, or after one, and replays
-from the beginning:
+The control room follows a run as it happens. It reads the same run log the
+terminal does, so it can be opened mid-launch, or after one, and replays from the
+beginning:
 
 ```bash
 munim-room                              # http://127.0.0.1:8977
@@ -186,250 +190,74 @@ munim-room --port 8986                  # if 8977 is taken
 munim-room --runs DIR --reports DIR     # serve a different set of runs
 ```
 
-## Any MCP server
+---
 
-Ten providers are built in, and only the first needed any code. The rest are
-table entries: a URL and the answer probing gave when asked how the server wants
-to be authenticated. That is what the design is for. A provider stops being work
-and becomes a row.
+## Status
 
-| ready, nothing to set up | needs an application | needs a URL |
-|---|---|---|
-| Cloudflare, Vercel, Resend, Netlify, Linear, Notion, Sentry | Gmail, Stitch | Zoho |
-
-They are not the product either. The product is a session per client against
-something that speaks MCP, and there is no reason it has to be a server somebody
-else chose.
-
-```bash
-munim add-server acme https://mcp.acme.example/mcp
-munim servers
-```
-
-`add-server` works out what the server needs by doing what a client does: calling
-it without credentials and reading the challenge back. Probing changes nothing on
-the server, and there are three answers it can give.
-
-| | what it means | what you do |
-|---|---|---|
-| **registers** | issues a client on demand (RFC 7591) | nothing. `munim connect acme` opens a browser |
-| **app** | no registration endpoint, wants a secret | register an application once at the provider, put its id and secret in `.env`. Munim refuses before opening a browser rather than failing at the consent screen |
-| **url** | answered without credentials | either it is open, or the URL carries the credential. Pass it with `connect --url`; it goes to your keychain, never to a file here, and is never printed whole |
-
-All three were found by probing real servers rather than reading about them.
-Cloudflare, Vercel and Resend register on demand. Google's servers, which is
-Gmail, Stitch, Drive and Calendar, all authenticate against `accounts.google.com`,
-which advertises no registration endpoint and wants `client_secret_post`. Zoho
-issues a per-installation endpoint whose path is the credential.
-
-## The tools your agent gets
-
-Eight, and this is the whole surface. Anything not listed here is not reachable, whatever
-else is in the repository.
-
-| Tool | |
-|---|---|
-| `list_clients` | every client and what each is connected to |
-| `find_across_clients` | one deterministic question over all of them at once |
-| `ask_across_clients` | one open question over all of them, using their own accounts, read-only |
-| `audit_all_clients` | the whole catalogue against every client, silent when they all pass |
-| `check` | the 13-check catalogue against a client or a bare domain |
-| `client_status` | what is known about one client |
-| `add_client` | register one |
-| `connect_provider` | store a pasted key, for providers with nothing better |
-| `launch_status` | read a run back |
-| `work_on_client` | do something inside one client's accounts, using their own provider tools |
-| `plan_mail_setup` | what setting up email for a client would change, touching no DNS |
-| `apply_mail_setup` | carry out a plan, with approval required to replace a record somebody put there |
-
-Repair is the last two, and it is deliberately two calls rather than one. A tool call
-returns once, so there is nowhere for a mid-flight question to go: `plan` reads what is
-there and says what would change, `apply` carries out a plan the operator has seen.
-Approval is the gap between them.
-
-`apply` refuses without `approved=true` when the plan would replace or combine a record
-somebody put there on purpose. Creating one that does not exist is not a judgement call;
-changing one that does is, and it is someone else's live mail.
-
-**Eight is now ten**, and the two that were missing are why: the repair code existed,
-was tested, and had no caller outside its own module until an external reviewer pointed
-it out. `agent/mail.py:set_up_mail` still takes a callback and is still unreachable from
-MCP for that reason; `plan_mail_setup` and `apply_mail_setup` are the shape that survives
-the boundary.
-
-## What is implemented
-
-| | State |
+| | |
 |---|---|
 | Per-client credential containers, OS keychain | ✅ |
 | Read across / write within | ✅ |
 | Check catalogue, 13 checks, no credentials needed | ✅ |
-| A session per client against the providers' own MCP servers | ✅ live against Cloudflare |
-| Dynamic client registration, so nothing is registered by hand | ✅ Cloudflare, Vercel, Resend |
-| Client named by the account it was authorised as | ✅ |
-| Strands agent holding every client's provider tools, namespaced | ✅ |
-| Cross-client questions, writes structurally absent | ✅ `ask_across_clients` |
-| Run log with replay | ✅ open the room mid-run, or refresh, and the whole run replays |
-| Resuming an interrupted launch from the log | ⬜ not implemented |
-| Control room, live over SSE | ✅ |
+| **Two accounts on one provider, concurrently, one process** | ✅ **live against two real Cloudflare accounts** |
+| A session per client against the providers' own MCP servers | ✅ live |
+| Dynamic client registration, so nothing is registered by hand | ✅ 7 of 10 providers |
+| Client named and verified by the account it was authorised as | ✅ |
+| Cross-client questions, writes structurally absent | ✅ |
+| Run log with replay, control room live over SSE | ✅ |
 | Launch report for the business owner | ✅ |
-| OAuth connect (PKCE), issuer validated per RFC 9207 | ✅ Vercel live against two real accounts |
-| Two accounts on one provider at once | ◐ registration proven; second sign-in not yet run |
-| Cloudflare DNS writes: idempotent upsert, SPF merge | ✅ tested, including partial-failure behaviour; not yet run against a live zone |
-| Vercel reads: deploys, env scope, env applied | ✅ live |
-| Resend writes: create and verify a sender domain | ✅ |
-| Vercel write operations | ⬜ not yet |
+| OAuth connect (PKCE), issuer validated per RFC 9207 | ✅ |
+| Cloudflare DNS writes: idempotent upsert, SPF merge | ◐ tested, not yet run against a live zone |
+| Resuming an interrupted launch from the log | ⬜ |
+| Vercel write operations | ⬜ |
 
-Re-running a launch after a partial failure does not duplicate anything, which
-is the property people usually mean by resume: every write reads what is there
-first and updates in place, and the SPF merge removes the leftovers before
-writing so a failure part-way leaves one working policy rather than two that
-receivers ignore. Picking a launch up from where it stopped is a different
-thing, and it is not built.
+Known gaps and why they are gaps: [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
-### Why there is no AgentCore deployment
-
-Worth stating rather than leaving as a gap. Bedrock is unreachable on the
-development account: AWS Marketplace cannot complete a model subscription for
-AISPL (India) customers, because RBI rules prevent it storing card details, and
-Bedrock model access is provisioned as a Marketplace subscription. Separately,
-AgentCore Runtime quota defaults to zero and increases take several days.
-
-Strands is model-portable, so the agent runs on a different host with one
-environment variable changed and no code change. That is the property AWS
-advertises; this exercised it under duress. Restoring Bedrock is
-`MUNIM_BEDROCK_MODEL` and nothing else.
-
-**Nothing here is stubbed.** A capability that is not implemented is absent from the tool
-list rather than present and inert. Resend, for example, has no OAuth flow anywhere in this
-codebase because Resend publishes no authorization endpoint, not because it was skipped.
-
-## How it is built
-
-```mermaid
-flowchart TD
-    A["Coding agent<br/>(Claude Code, Codex, Cursor)"] -->|stdio, JSON-RPC| B["Munim MCP server"]
-
-    B --> F["Checks<br/>13, deterministic, no credentials"]
-    B --> G["Strands agent"]
-
-    G --> S1["MCPClient<br/>prefix: acme_ltd"]
-    G --> S2["MCPClient<br/>prefix: ivy_fern"]
-    S1 --> K1[["Container(Acme Ltd)<br/>own registration, own token"]]
-    S2 --> K2[["Container(Ivy &amp; Fern)<br/>own registration, own token"]]
-    K1 --> P["The providers' own MCP servers<br/>mcp.cloudflare.com · mcp.vercel.com · mcp.resend.com"]
-    K2 --> P
-
-    G --> H[("~/.munim/runs/&lt;id&gt;.jsonl<br/>the one source")]
-    F --> H
-    H --> I["Control room<br/>separate process, SSE"]
-    H --> J["Launch report<br/>for the business owner"]
-```
-
-Two clients, one provider, one process. That is the whole thing, and it is not
-engineered: each client registers separately with the provider, so as far as the
-provider is concerned they are two applications and there is nothing shared to
-clobber. A coding agent holds one account per provider because one client id
-shares one token store.
-
-Four decisions carry the design:
-
-**Enumeration is deterministic; only judgement is model work.** The checks decide pass or
-fail from a DNS answer. The agent cannot contradict them, so it cannot invent a record or
-argue a failing check into passing. What it does is the part a rule engine is bad at:
-working out *why* something failed, and saying it to someone non-technical.
-
-**The run log is the one source of truth.** The MCP server speaks JSON-RPC over stdout, so
-it cannot print progress there without corrupting the protocol, and the subprocess dies
-whenever the coding agent reconnects. Writing events to a file instead means the control
-room survives a restart, can be opened mid-run with full replay, and an interrupted launch
-leaves a record to resume from.
-
-**A container is bound to one client at construction and cannot widen.** `"acme"` versus
-`"acme-uk"` would otherwise be a *successful* mutation on the wrong account. Container
-construction fails on an unregistered name, and the raw credential is never returned to
-calling code: a session carries its own registration and its own token, filed under
-`(client, provider)`, so two clients cannot borrow each other's. Where an adapter is used
-instead it receives an authenticated HTTP client, so no log line or stack trace can leak a
-token.
-
-**Read across, write within is a property of which tools exist.** A tool that spans clients
-is built from only those the provider marks `readOnlyHint`, default deny, so one that
-changes something is not present to be called. It used to be a line in a system prompt, and
-an instruction is not a boundary.
-
-## Roadmap
-
-Written down because the gaps are known, not because they are planned away.
-
-**Linux and Windows.** Developed on macOS and the platform assumptions have
-been found rather than guessed at. `doctor` now reports whether a keychain
-backend exists instead of raising, credential reads degrade to "nothing
-connected" rather than a stack trace, and the `claude` executable is resolved
-through `shutil.which` because on Windows it is `claude.cmd`. What remains
-untested is a real run on either: a headless Linux box needs `keyrings.alt` or
-a secret service, and nobody has yet confirmed the browser callback and the
-keychain behave there. CI runs the suite on Linux, which is a start and not the
-same thing.
-
-**Local stdio servers.** Munim holds sessions with remote MCP servers over
-HTTP. A stdio server is a process, not an endpoint, so holding one per client
-means spawning N processes with N environments, which is a different design and
-is what `mcpwarden` does. On one real machine, 20 of 26 configured servers were
-remote and 4 were stdio, so this is a real gap rather than a theoretical one.
-
-**Providers whose authorization server will not register a client.** Every
-Google MCP server, which is Gmail, Stitch, Drive and Calendar, authenticates
-against `accounts.google.com`. It advertises no registration endpoint and
-requires `client_secret_post`, so somebody has to be a registered application.
-In a coding agent that somebody is the agent itself: a Gmail connector works
-without setup because the client, not the operator, holds the Google
-registration. Munim is a client too, so it needs its own, and that is a decision
-about carrying a Google credential rather than a thing to slip in.
-
-**Watch mode.** `audit_all_clients` is the shape of it and runs on demand.
-Running on a schedule and telling somebody only when the answer changes is the
-version an operator would actually leave on.
-
-**Vercel and Resend sessions.** Registration is confirmed against all three
-providers, and only Cloudflare has been connected and used. The other two are
-expected to work and that is not the same as knowing.
-
-**Resuming an interrupted launch.** The run log records enough to do it and
-nothing reads it back for that purpose.
+---
 
 ## Development
 
 ```bash
-uv pip install -e ".[dev]"
+git clone https://github.com/vishalsg42/munim && cd munim
+uv venv && uv pip install -e ".[dev]"
+
 uv run pytest -q                       # the Python suite
 node --test "tests/room/*.test.mjs"    # the control room's reducer
 ```
 
-The control room is one HTML page and one ES module, served as written. There
-is no build step and no `node_modules`: the only reason Node appears at all is
-to run six tests over the reducer, and those need no install.
+The control room is one HTML page and one ES module, served as written. There is
+no build step and no `node_modules`; the only reason Node appears at all is to run
+six tests over the reducer, and those need no install.
 
-To check the claim this project rests on, which is reading two client accounts
-at once with no logout between them, connect two of your own and run:
+To check the claim this project rests on, connect two of your own accounts and run:
 
 ```bash
 uv run python scripts/cross_account_probe.py
 ```
 
-It fails if either account is empty, and fails if the two share a project: two
-grants returning the same projects are one account wearing two names, which
-would make the claim vacuous. Measured on two real Vercel teams in
-[`docs/DECISIONS.md`](docs/DECISIONS.md) D23.
+It fails if either account is empty, and fails if the two return the same
+resources: two grants returning the same thing are one account wearing two names,
+which would make the claim vacuous.
 
-Design decisions and the reasoning behind them are in [`docs/DECISIONS.md`](docs/DECISIONS.md),
-including the ones that were wrong first time.
+## Documentation
+
+| | |
+|---|---|
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | how it is built, and the four decisions that shape it |
+| [`docs/DECISIONS.md`](docs/DECISIONS.md) | every design decision and its reasoning, including the wrong ones |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | what is not done, and why |
+
+---
 
 ## Disclosure
 
-Built with AI assistance (Claude Code), which the hackathon rules permit. No pre-existing
-code was incorporated; the repository was created during the submission period. Prior
-personal projects informed the working method but contributed no source.
+Built with AI assistance (Claude Code), which the hackathon rules permit. No
+pre-existing code was incorporated; the repository was created during the
+submission period. Prior personal projects informed the working method but
+contributed no source.
+
+*A munim is the steward a business owner trusts to keep their books and handle
+their affairs without being asked each time.*
 
 ## Licence
 
