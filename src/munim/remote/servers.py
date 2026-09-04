@@ -26,7 +26,10 @@ from pathlib import Path
 #   url         the endpoint URL contains the credential. Zoho issues a
 #               per-installation path, so there is no OAuth at all and the URL
 #               is the thing to keep secret.
-AUTH_KINDS = ("registers", "app", "url")
+# How a server wants to be authenticated. Four, and the fourth was in front of
+# us the whole time: plenty of MCP servers take an API key in a header, and
+# Munim described one of them as needing a registered OAuth application.
+AUTH_KINDS = ("registers", "app", "url", "header")
 
 
 @dataclass(frozen=True)
@@ -41,6 +44,27 @@ class RemoteServer:
     auth: str = "registers"
     # Set for `app` providers: what has to be registered, and where.
     register_at: str = ""
+    # What to ask this provider for, on the routes where the ask is ours to
+    # make. That is the application route in connect/oauth.py, which builds its
+    # own authorize URL.
+    #
+    # It is NOT the MCP route. The spec defines a Scope Selection Strategy and
+    # the SDK implements it in mcp/client/auth/utils.py: the scope comes from
+    # the WWW-Authenticate challenge, else the resource's scopes_supported,
+    # else the authorization server's, and whatever the client set is
+    # discarded. So on that route the provider decides, and connecting Supabase
+    # asks for database:write and storage:write for a tool that has never
+    # written to Supabase.
+    #
+    # Recorded here anyway, because it is where the intent belongs and because
+    # the app route is exactly where the providers that most need narrowing end
+    # up: Gmail cannot register a client on demand, so it goes that way.
+    scopes: tuple[str, ...] = ()
+    # Set for `header` providers: which header carries the key. Not a detail to
+    # guess at, because X-Goog-Api-Key and Authorization are not
+    # interchangeable and the wrong one returns a 401 that reads like a bad
+    # credential rather than a bad header name.
+    header: str = ""
 
     def __post_init__(self):
         if self.auth not in AUTH_KINDS:
@@ -63,13 +87,41 @@ SERVERS: dict[str, RemoteServer] = {
         provider="vercel",
         url="https://mcp.vercel.com",
         public_client=True,
-        note="registration confirmed: HTTP 201, token_endpoint_auth_method none, "
-             "no secret, despite the authorization server metadata omitting "
-             "`none` from token_endpoint_auth_methods_supported. Asked for "
-             "client_secret_post and was given a public client, so the metadata "
-             "understates it and only registering finds that out. Vercel states "
-             "it supports only clients it has reviewed; whether that rejects a "
-             "dynamically registered one at token exchange is still unverified",
+        # Public, and the metadata says otherwise twice over. Vercel serves two
+        # authorization server documents that disagree with each other:
+        #
+        #   mcp.vercel.com/.well-known/oauth-authorization-server -> ['none']
+        #   vercel.com/.well-known/oauth-authorization-server
+        #       -> ['client_secret_basic', 'client_secret_post', ...]
+        #
+        # RFC 9728 says the resource picks its authorization server and it
+        # picks vercel.com, so reading the spec correctly gives the answer that
+        # is wrong in practice. Registering against either endpoint returns
+        # HTTP 201, token_endpoint_auth_method 'none' and no secret.
+        #
+        # Recorded here because the wrong answer is the well-reasoned one, and
+        # this entry has already been changed to `False` once on the strength
+        # of the metadata before a registration put it back.
+        note="confirmed by registering, not by reading: both "
+             "api.vercel.com/login/oauth/register and "
+             "vercel.com/api/login/oauth/register answer HTTP 201 with "
+             "token_endpoint_auth_method 'none' and no client_secret. The two "
+             "authorization server documents disagree, and the one RFC 9728 "
+             "selects is the one that understates what registration does. "
+             "Connected live: 37 tools, which also answers the question this "
+             "entry used to leave open, whether Vercel rejects a dynamically "
+             "registered client at token exchange. It does not. Its session "
+             "refreshes: the resource advertises only openid, so SEP-2207 "
+             "applies and offline_access is added from the authorization "
+             "server's list, which Vercel documents as issuing a refresh token "
+             "good for 30 days with rotation",
+        # offline_access is not decoration. Narrowing to "openid" alone, which
+        # is all the resource document advertises, produced a session with no
+        # refresh token that died in an hour and needed a full browser login to
+        # come back. The authorization server advertises offline_access even
+        # though the resource does not, and a scope list that omits it turns a
+        # long lived session into a one hour one without saying so.
+        scopes=("openid", "offline_access"),
     ),
     # No single address: each installation gets its own, and the path carries
     # the credential. The URL is therefore per client and lives in the keychain,
@@ -156,13 +208,43 @@ _GOOGLE = {
              "client_secret_basic, so an application must be registered by "
              "hand. Google's installed-application client type treats the "
              "secret as not confidential, which is how every CLI ships one",
+        # The narrowest pair that covers reading a mailbox and putting a draft
+        # in it, which is what Munim is for here: `readonly` to check that a
+        # message arrived and authenticated, `compose` to create, update and
+        # send drafts.
+        #
+        # Deliberately not `https://mail.google.com/`, which Google also
+        # advertises here and which adds permanent deletion, nor `modify`,
+        # which is broader than compose for no gain. Both would have to be
+        # justified one at a time to a human reviewer at verification, and
+        # "it deletes mail" is a claim this tool cannot support.
+        #
+        # All five advertised scopes are restricted either way, so an
+        # application using any of them stays limited to its own test users,
+        # with refresh tokens expiring in seven days, until it passes Google
+        # verification and a CASA assessment. Asking for less does not avoid
+        # that; it makes the application defensible.
+        scopes=("https://www.googleapis.com/auth/gmail.readonly",
+                "https://www.googleapis.com/auth/gmail.compose"),
     ),
+    # Recorded as needing an application registered by hand, on the strength of
+    # sharing an authorization server with gmail. It takes an API key in a
+    # header instead, which is how a coding agent connects to it:
+    #
+    #   stitch: https://stitch.googleapis.com/mcp
+    #   Headers: X-Goog-Api-Key: AQ.Ab8RN6...
+    #
+    # So the entry sent people through ten minutes of Google Cloud, a consent
+    # screen and a test user list, for a server that wanted a header. Sharing an
+    # authorization server turned out to say nothing about whether one is used.
     "stitch": RemoteServer(
         provider="stitch", url="https://stitch.googleapis.com/mcp",
-        public_client=False, auth="app",
-        register_at="https://console.cloud.google.com/apis/credentials",
-        note="confirmed by probing: 15 tools, 5 annotated readOnlyHint. Same authorization server as "
-             "gmail and the same consequence",
+        public_client=False, auth="header", header="X-Goog-Api-Key",
+        note="confirmed by probing: 15 tools, 5 annotated readOnlyHint. Takes "
+             "an API key in X-Goog-Api-Key rather than an OAuth login, so none "
+             "of gmail's consent screen, test user list or seven day token "
+             "expiry applies. Get a key from Google AI Studio and paste it "
+             "with --token",
     ),
 }
 

@@ -63,6 +63,35 @@ read-and-write tool cannot participate in an open cross-client question at all.
 Fixing it properly means a way to prove a call is a read before making it, which
 is a per-provider judgement and not a flag.
 
+**Scopes on the MCP route are the provider's choice, not ours.** Same cause.
+Connecting Supabase grants `database:write`, `storage:write`,
+`edge_functions:write`, `environment:write` and `secrets:read`, because that is
+what its resource advertises, and nothing in a client can ask for less.
+`RemoteServer.scopes` records what Munim would ask for and is honoured on the
+application route, which builds its own authorize URL. The one exception is
+`offline_access`, which SEP-2207 explicitly permits a client to add and which
+`munim/remote/offline.py` does. For a tool whose subject
+is credential isolation this is the least comfortable thing in the project, and
+it is a property of the spec rather than of this implementation.
+
+**Gmail is capped at 100 users until the app is verified.** The seven day
+session expiry that Testing imposes has been removed: the app is published, and
+that needed no verification. What remains is a cap of 100 users granting
+permission while the scopes are unapproved, which Google says "cannot be reset
+or changed", and an unverified app warning screen. The cap does not apply once
+the scopes are approved, so verification lifts it rather than merely softening
+the warning. Getting there needs a homepage and privacy policy on a Search
+Console verified domain, a demo video, and probably a CASA assessment costing
+$500 to $4,500 renewed annually. Whether CASA applies to a local client that
+talks only to Google is not documented either way.
+
+**Adding Gmail test users is manual, and there is no API.** Every mailbox to be
+connected must be listed in the Cloud Console by hand, capped at 100 for the
+lifetime of the app with removals still counted. No Google API manages the
+consent screen audience: the IAP brand resource has no test-user field, and the
+IAP OAuth Admin API that once managed brands was shut down in March 2026. For an
+operator with a dozen clients this is a real ceiling on Gmail specifically.
+
 **A wrong-account guard that survives a token refresh.** Every session verifies
 which account it belongs to before use. What is not proven is the behaviour when
 a refresh token silently returns a session for a different account, which should

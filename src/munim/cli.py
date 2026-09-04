@@ -10,6 +10,7 @@ talks to the callback, and the token goes straight to the keychain.
 import argparse
 import os
 import sys
+from getpass import getpass
 
 from munim.connect.oauth import (PROVIDERS, SHIPPED_CLIENT_IDS,
                                  OAuthConnector)
@@ -353,6 +354,97 @@ def ask_which_client(registry, ask=input, *, account_can_name=False) -> str | No
     return None
 
 
+def add_client(name: str, domain: str | None = None) -> int:
+    """Write down a business you look after, before deciding what to connect.
+
+    Connecting used to be the only way a client came into being, which meant
+    you could not record "I look after this business" until you had an account
+    of theirs in front of you. Both orders reach the same place now.
+    """
+    registry = _registry()
+    try:
+        existing = registry.get(name)
+    except UnknownClient:
+        existing = None
+    if existing is not None:
+        print(f"{existing.name!r} is already registered. Two rows for one "
+              f"business is the split identity `munim clients merge` exists to "
+              f"repair, so nothing was added.", file=sys.stderr)
+        return 2
+
+    record = ClientRecord(name=name, domain=domain or "")
+    registry.add(record)
+    print(f"Added {record.name!r}. Nothing is connected yet:",
+          file=sys.stderr)
+    print(f'  munim connect "{record.name}" cloudflare', file=sys.stderr)
+    return 0
+
+
+def config(action: str, provider: str | None, client_id: str | None) -> int:
+    """The application credential for providers that will not issue one.
+
+    Stored in the keychain rather than a file, because a file has a location
+    and an installed package cannot know which directory you will run from.
+    See munim/appcreds.py.
+
+    The id is a parameter: it is not a secret, it is in the Cloud Console and in
+    every authorize URL. The secret is prompted, because an argument lands in
+    shell history and is visible to anyone who can run `ps` at the time.
+    """
+    from munim.appcreds import forget as forget_app
+    from munim.appcreds import remember, stored
+    from munim.env import load as load_env
+    from munim.remote.servers import SERVERS
+
+    # doctor loads this and config did not, so `config list` said "not set" for
+    # a provider `doctor` reported as configured. Two commands disagreeing about
+    # the same fact is worse than either answer alone.
+    load_env()
+
+    needs_one = sorted(n for n, srv in SERVERS.items() if srv.auth == "app")
+
+    if action == "list":
+        found = stored(needs_one)
+        for name in needs_one:
+            entry = found.get(name)
+            if entry is None:
+                print(f"  {name:10} not set", file=sys.stderr)
+            else:
+                secret = "with a secret" if entry["secret"] else "no secret"
+                print(f"  {name:10} {entry['client_id']}  ({secret}, from the "
+                      f"{entry['from']})", file=sys.stderr)
+        if not needs_one:
+            print("No provider needs an application registered by hand.",
+                  file=sys.stderr)
+        return 0
+
+    if not provider:
+        print(f"name a provider: {', '.join(needs_one)}", file=sys.stderr)
+        return 2
+
+    if action == "unset":
+        if forget_app(provider):
+            print(f"Removed the {provider} application.", file=sys.stderr)
+        else:
+            print(f"Nothing stored for {provider}.", file=sys.stderr)
+        return 0
+
+    if not client_id:
+        print(f"--client-id is required. Find it at "
+              f"{SERVERS[provider].register_at or 'the provider console'}",
+              file=sys.stderr)
+        return 2
+
+    # Prompted, never an argument. An empty secret is legitimate: Google
+    # documents an installed-app secret as not confidential and some providers
+    # issue none at all.
+    secret = getpass(f"{provider} client secret (leave empty if none): ")
+    remember(provider, client_id, secret)
+    print(f"Stored the {provider} application in your keychain. It works from "
+          f"any directory.", file=sys.stderr)
+    return 0
+
+
 def connect_by_url(client: str, provider: str, url: str) -> int:
     """Connect a provider that identifies a client by their own endpoint.
 
@@ -648,33 +740,58 @@ def main(argv: list[str] | None = None) -> int:
                         "endpoint, such as Zoho. The path carries the "
                         "credential, so it goes to your keychain")
 
-    ls = sub.add_parser("clients", help="list registered clients")
+    # Two nouns, and every command reads as one of them. The surface grew a
+    # command at a time and ended up flat, with `add-server` and no `add-client`
+    # beside it, so from the terminal a client could only come into being as a
+    # side effect of connecting something. There was no way to write down "I
+    # look after this business" before deciding what to connect.
+    #
+    # `connect` stays a verb, because it is an event rather than a thing.
+    ls = sub.add_parser("clients", help="the businesses you look after")
+    ls.add_argument("action", nargs="?",
+                    choices=["add", "rename", "forget", "merge"],
+                    help="omit to list them")
+    ls.add_argument("names", nargs="*", metavar="NAME",
+                    help="the client, plus a second name for rename and merge")
+    ls.add_argument("--domain", help="their site, for `add`")
     ls.add_argument("--verbose", action="store_true")
 
-    r = sub.add_parser("rename", help="call a client something else")
-    r.add_argument("old")
-    r.add_argument("new")
-
+    # 0.1.0 shipped these spellings. Breaking a published surface to tidy it is
+    # a bad trade when an alias costs a line, so they still work and only the
+    # grouped form is advertised.
     d = sub.add_parser("disconnect", help="remove stored credentials")
     d.add_argument("client", nargs="?")
     d.add_argument("provider", nargs="?")
     d.add_argument("--all", action="store_true", dest="everything",
                    help="every client and every provider")
 
-    a = sub.add_parser("add-server", help="point Munim at any MCP server")
-    a.add_argument("name")
-    a.add_argument("url")
+    sv = sub.add_parser("servers", help="what a client can be connected to")
+    sv.add_argument("action", nargs="?", choices=["add"],
+                    help="omit to list them")
+    sv.add_argument("names", nargs="*", metavar="ARG",
+                    help="a name and a URL, for `add`")
 
-    sub.add_parser("servers", help="which MCP servers Munim knows about")
-
-    m = sub.add_parser("merge", help="fold one client into another")
-    m.add_argument("source")
-    m.add_argument("target")
-
-    f = sub.add_parser("forget", help="remove a client that holds nothing")
-    f.add_argument("client")
+    c = sub.add_parser("config", help="the application credential for gmail "
+                                      "and stitch, stored in your keychain")
+    c.add_argument("action", choices=["set", "list", "unset"])
+    c.add_argument("provider", nargs="?")
+    c.add_argument("--client-id", dest="client_id",
+                   help="the application's client id. The secret is prompted, "
+                        "never passed as an argument")
 
     sub.add_parser("doctor", help="what is set up, what is not, and the next step")
+
+    # The flat spellings 0.1.0 shipped, rewritten to the grouped form before
+    # parsing. Kept as a rewrite rather than as hidden subparsers because
+    # argparse prints `==SUPPRESS==` for a suppressed subcommand in this
+    # version rather than hiding it, and a help listing that shows the string
+    # ==SUPPRESS== is worse than showing the command.
+    LEGACY = {"rename": "clients", "forget": "clients", "merge": "clients",
+              "add-server": "servers"}
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] in LEGACY:
+        old = argv[0]
+        argv = [LEGACY[old], "add" if old == "add-server" else old, *argv[1:]]
 
     args = parser.parse_args(argv)
 
@@ -703,26 +820,39 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("name a client, or pass --all")
         return disconnect(args.client, args.provider, args.everything)
 
-    if args.command == "add-server":
-        return add_server(args.name, args.url)
-
     if args.command == "servers":
+        if args.action == "add":
+            if len(args.names) != 2:
+                parser.error("servers add takes a name and a URL")
+            return add_server(*args.names)
         return list_servers()
 
-    if args.command == "merge":
-        return merge(args.source, args.target)
-
-    if args.command == "forget":
-        return forget(args.client)
-
-    if args.command == "rename":
-        return rename(args.old, args.new)
+    if args.command == "config":
+        return config(args.action, args.provider, args.client_id)
 
     if args.command == "doctor":
         from munim.doctor import run as doctor_run
         return doctor_run(_registry())
 
     if args.command == "clients":
+        if args.action == "add":
+            if len(args.names) != 1:
+                parser.error('clients add takes one name: '
+                             'munim clients add "Ivy & Fern"')
+            return add_client(args.names[0], args.domain)
+        if args.action == "rename":
+            if len(args.names) != 2:
+                parser.error("clients rename takes the old name and the new one")
+            return rename(*args.names)
+        if args.action == "forget":
+            if len(args.names) != 1:
+                parser.error("clients forget takes one name")
+            return forget(args.names[0])
+        if args.action == "merge":
+            if len(args.names) != 2:
+                parser.error("clients merge takes a source and a target")
+            return merge(*args.names)
+
         from munim.connected import describe
         backend = KeychainBackend()
         for record in _registry().clients():
@@ -779,6 +909,15 @@ def main(argv: list[str] | None = None) -> int:
                 return 2
             # None keeps the old behaviour: authorise first, name after.
             args.client = None if picked == ACCOUNT_NAMES_IT else picked
+
+    # A header-authenticated server has nothing to open a browser for. Saying
+    # so beats starting an OAuth flow against a server that will not answer it.
+    _server = server_for(args.provider)
+    if _server is not None and _server.auth == "header" and not args.token:
+        parser.error(
+            f"{args.provider} authenticates with an API key in "
+            f"{_server.header}, not a browser login. Paste one with: "
+            f"munim connect \"{args.client or '<client>'}\" {args.provider} --token")
 
     # `--token` never reaches here: it is handled above and stores a pasted key.
     if not args.via_app and server_for(args.provider) is not None:

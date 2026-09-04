@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Munim - Privacy Policy</title>
+<style>
+:root{--ink:#17191c;--soft:#57534e;--line:#e7e5e4}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#fbfaf8;color:var(--ink);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:48px 24px}
+main{max-width:44rem;margin:0 auto}
+h1{font-size:30px;letter-spacing:-.025em;margin-bottom:4px}
+h2{font-size:18px;margin:36px 0 10px;letter-spacing:-.01em}
+p,li{margin-bottom:12px}
+ul{padding-left:22px}
+.date{color:var(--soft);font-size:14px;margin-bottom:28px}
+.box{border:1px solid var(--line);border-radius:8px;padding:18px 20px;background:#fff;margin:20px 0}
+code{font:13px ui-monospace,"SF Mono",monospace;background:#f5f4f2;padding:1px 5px;border-radius:4px}
+a{color:#1d4ed8}
+footer{margin-top:44px;padding-top:18px;border-top:1px solid var(--line);color:var(--soft);font-size:14px}
+</style>
+</head>
+<body><main>
+<h1>Privacy Policy</h1>
+<p class="date">Munim &middot; last updated 4 September 2026</p>
+
+<p>Munim is an open source command line tool that runs on your own computer. It
+is not a hosted service. There is no Munim server, no Munim account, and no
+operator of Munim who can see your data.</p>
+
+<div class="box">
+<strong>The short version.</strong> Your credentials stay in your operating
+system's keychain. Data from the services you connect goes between your computer
+and those services directly. If you use the features that reason about that
+data, it is also sent to the AI model provider you choose and configure. Nothing
+is ever sent to the authors of Munim.
+</div>
+
+<h2>What Munim handles</h2>
+<ul>
+<li><strong>Credentials.</strong> When you connect a service, the resulting
+OAuth token or API key is stored in your operating system's keychain, filed
+under an identifier for the client it belongs to. Munim's code never returns a
+raw credential to the code that uses it; adapters receive an already
+authenticated connection.</li>
+<li><strong>Service data.</strong> Whatever the service returns while you are
+using it: DNS records, deployment details, project names. If you connect Gmail,
+that includes message content and metadata your instructions cause it to read,
+and drafts your instructions cause it to write.</li>
+<li><strong>Run logs and reports.</strong> A record of what was done, written to
+<code>~/.munim/runs</code> and <code>~/.munim/reports</code> on your computer.</li>
+</ul>
+
+<h2>Where it goes</h2>
+<p><strong>To the service itself.</strong> Munim talks directly from your
+computer to each provider's own endpoint. Nothing is proxied.</p>
+
+<p><strong>To the AI model provider you configure.</strong> This is the part
+worth reading twice. Munim's checking and reasoning features build an agent
+using the Strands Agents SDK, and that agent runs on a model host you choose:
+Amazon Bedrock, Google Gemini, Anthropic, OpenAI or a local model through
+Ollama. When you invoke those features, the data the agent is working with is
+sent to that provider under your own API key and their terms. If Gmail is
+connected and you ask the agent to work with mail, mail content reaches that
+provider. Choosing a locally hosted model keeps it on your machine.</p>
+
+<p><strong>Nowhere else.</strong> Munim contains no analytics, no telemetry, no
+crash reporting and no update check. It sends nothing to its authors. You can
+confirm this by reading the source.</p>
+
+<h2>Google user data</h2>
+<p>Munim's use of information received from Google APIs adheres to the
+<a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including the Limited Use requirements.</p>
+<p>Specifically: Google user data is used only to provide the features you
+invoke. It is not sold, not transferred to anyone except the AI model provider
+you configure in order to perform those features, not used for advertising, and
+not used to train any model by Munim. Munim's authors have no access to it.</p>
+
+<h2>Keeping and removing it</h2>
+<p>Everything lives on your computer for as long as you leave it there.</p>
+<ul>
+<li><code>munim disconnect "&lt;client&gt;" &lt;service&gt;</code> removes one stored credential.</li>
+<li><code>munim disconnect --all</code> removes every stored credential.</li>
+<li>Deleting <code>~/.munim</code> removes the run logs, reports and the client list.</li>
+<li>Revoking Munim's access at the provider, for example at
+<a href="https://myaccount.google.com/permissions">Google account permissions</a>,
+invalidates the credential regardless of what is on your machine.</li>
+</ul>
+
+<h2>Children</h2>
+<p>Munim is a tool for people administering their own or their clients' web
+infrastructure. It is not directed at children and collects nothing from
+anyone.</p>
+
+<h2>Changes and contact</h2>
+<p>Changes to this policy will be published on this page with a new date, and in
+the project's commit history, which is public.</p>
+<p>Questions: open an issue at
+<a href="https://github.com/vishalsg42/munim/issues">github.com/vishalsg42/munim/issues</a>,
+or use the contact address on the consent screen.</p>
+
+<footer>
+<a href="/">Munim</a> &middot; <a href="/terms.html">Terms of Service</a> &middot;
+<a href="https://github.com/vishalsg42/munim">Source</a> &middot; MIT licensed
+</footer>
+</main></body></html>
