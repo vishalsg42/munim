@@ -263,6 +263,31 @@ is built from only those the provider marks `readOnlyHint`, default deny, so one
 changes something is not present to be called. It used to be a line in a system prompt, and
 an instruction is not a boundary.
 
+## Roadmap
+
+Written down because the gaps are known, not because they are planned away.
+
+**Linux and Windows.** Developed on macOS and the platform assumptions have
+been found rather than guessed at. `doctor` now reports whether a keychain
+backend exists instead of raising, credential reads degrade to "nothing
+connected" rather than a stack trace, and the `claude` executable is resolved
+through `shutil.which` because on Windows it is `claude.cmd`. What remains
+untested is a real run on either: a headless Linux box needs `keyrings.alt` or
+a secret service, and nobody has yet confirmed the browser callback and the
+keychain behave there. CI runs the suite on Linux, which is a start and not the
+same thing.
+
+**Watch mode.** `audit_all_clients` is the shape of it and runs on demand.
+Running on a schedule and telling somebody only when the answer changes is the
+version an operator would actually leave on.
+
+**Vercel and Resend sessions.** Registration is confirmed against all three
+providers, and only Cloudflare has been connected and used. The other two are
+expected to work and that is not the same as knowing.
+
+**Resuming an interrupted launch.** The run log records enough to do it and
+nothing reads it back for that purpose.
+
 ## Development
 
 ```bash

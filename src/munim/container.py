@@ -17,6 +17,7 @@ from typing import Protocol
 
 import httpx
 import keyring
+import keyring.errors
 
 # How each provider carries its credential. Adapters never see this.
 _AUTH: dict[str, tuple[str, str, str]] = {
@@ -51,9 +52,21 @@ class KeychainBackend:
         self._prefix = service_prefix
 
     def get(self, client: str, provider: str) -> str | None:
-        return keyring.get_password(f"{self._prefix}:{provider}", client)
+        """None when nothing is stored, and also when there is nowhere to store.
+
+        A machine with no keychain backend, which is most Linux servers and
+        every CI runner, used to raise out of here and take `doctor` down with
+        it. Reads degrade to "nothing connected"; `doctor` says why, once,
+        rather than every caller discovering it as a stack trace.
+        """
+        try:
+            return keyring.get_password(f"{self._prefix}:{provider}", client)
+        except keyring.errors.KeyringError:
+            return None
 
     def set(self, client: str, provider: str, secret: str) -> None:
+        """Writes still raise. Silently not storing a credential the operator
+        just pasted would be worse than failing in front of them."""
         keyring.set_password(f"{self._prefix}:{provider}", client, secret)
 
 

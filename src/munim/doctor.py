@@ -46,11 +46,14 @@ def _model() -> Finding:
 
 
 def _mcp_registered() -> Finding:
-    if not shutil.which("claude"):
+    # shutil.which resolves the real thing, which on Windows is claude.cmd and
+    # would not have been found by passing the bare name to subprocess.
+    executable = shutil.which("claude")
+    if not executable:
         return Finding(WARN, "Coding agent", "claude CLI not found",
                        fix="add munim-mcp to your agent's MCP config by hand")
     try:
-        out = subprocess.run(["claude", "mcp", "list"], capture_output=True,
+        out = subprocess.run([executable, "mcp", "list"], capture_output=True,
                              text=True, timeout=20).stdout
     except Exception:
         return Finding(WARN, "Coding agent", "could not list MCP servers")
@@ -63,6 +66,28 @@ def _mcp_registered() -> Finding:
                                f"{Path(sys.executable).parent / 'munim-mcp'}")
     return Finding(BAD, "Coding agent", "munim not registered",
                    fix=f"claude mcp add munim -- {Path(sys.executable).parent / 'munim-mcp'}")
+
+
+def _keychain() -> Finding:
+    """Whether there is anywhere to keep a credential.
+
+    Reads degrade to "nothing connected" without one, which is right for a
+    library and wrong for a diagnosis: a client that is connected and reads as
+    disconnected is the most confusing state this tool can be in, and it should
+    say so rather than let somebody reconnect and watch it not stick.
+    """
+    import keyring
+    import keyring.errors
+
+    try:
+        keyring.get_password("munim:probe", "probe")
+    except keyring.errors.KeyringError as exc:
+        return Finding(
+            BAD, "Keychain", f"no backend available: {exc}",
+            fix="on a headless Linux box, install `keyrings.alt` or run a "
+                "secret service. Until then nothing can be connected, and "
+                "anything already connected reads as disconnected.")
+    return Finding(OK, "Keychain", f"{keyring.get_keyring().name}")
 
 
 def _clients(registry: Registry) -> list[Finding]:
@@ -146,7 +171,7 @@ def _room() -> Finding:
 
 def run(registry: Registry | None = None) -> int:
     registry = registry or Registry(Path.home() / ".munim" / "registry.json")
-    findings = [_model(), _mcp_registered(), _room(),
+    findings = [_model(), _mcp_registered(), _room(), _keychain(),
                 *_oauth_apps(), *_clients(registry)]
 
     width = max(len(f.what) for f in findings) + 2

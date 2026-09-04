@@ -68,3 +68,48 @@ def test_an_unconnected_client_is_a_warning_with_the_command(tmp_path):
     unconnected = [f for f in findings if "Ivy & Fern" in f.what][0]
     assert unconnected.status == doctor.WARN
     assert "munim connect" in unconnected.fix
+
+
+def test_the_keychain_is_reported_when_there_is_none(monkeypatch):
+    """A machine with no keychain backend, which is most Linux servers and
+    every CI runner, used to take doctor down with a stack trace.
+
+    Reads degrade to "nothing connected", which is right for a library and
+    wrong for a diagnosis: a client that is connected and reads as disconnected
+    is the most confusing state this tool can be in."""
+    import keyring
+    import keyring.errors
+
+    def boom(*a, **k):
+        raise keyring.errors.NoKeyringError("No recommended backend was available")
+
+    monkeypatch.setattr(keyring, "get_password", boom)
+    finding = doctor._keychain()
+    assert finding.status == doctor.BAD
+    assert "no backend" in finding.detail
+    assert finding.fix, "a diagnosis with no next step is a complaint"
+
+
+def test_a_missing_keychain_does_not_take_the_client_list_down(monkeypatch, tmp_path):
+    import keyring
+    import keyring.errors
+
+    def boom(*a, **k):
+        raise keyring.errors.NoKeyringError("nope")
+
+    monkeypatch.setattr(keyring, "get_password", boom)
+    registry = Registry(tmp_path / "r.json")
+    registry.add(ClientRecord(name="acme"))
+    findings = doctor._clients(registry)          # must not raise
+    assert any("acme" in f.what for f in findings)
+
+
+def test_the_coding_agent_check_resolves_the_executable(monkeypatch):
+    """On Windows it is claude.cmd, which a bare name in a subprocess list does
+    not find."""
+    import inspect
+
+    source = inspect.getsource(doctor._mcp_registered)
+    assert 'shutil.which("claude")' in source
+    assert '["claude", "mcp", "list"]' not in source, \
+        "passing the bare name will not resolve claude.cmd on Windows"

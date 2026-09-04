@@ -8,6 +8,7 @@ time; a registration and a token set per client is what removes it.
 import json
 
 import keyring
+import keyring.errors
 from mcp.client.auth import TokenStorage
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 
@@ -35,7 +36,11 @@ class KeychainTokenStorage(TokenStorage):
         return f"{SERVICE}:{self._provider}:{kind}"
 
     def _read(self, kind: str) -> dict | None:
-        raw = self._backend.get_password(self._service(kind), self._client)
+        try:
+            raw = self._backend.get_password(self._service(kind), self._client)
+        except keyring.errors.KeyringError:
+            # Nowhere to store means nothing stored. See KeychainBackend.get.
+            return None
         return json.loads(raw) if raw else None
 
     def _write(self, kind: str, payload) -> None:
@@ -64,7 +69,10 @@ class KeychainTokenStorage(TokenStorage):
         self._backend.set_password(self._service("account"), self._client, account)
 
     def account(self) -> str | None:
-        return self._backend.get_password(self._service("account"), self._client)
+        try:
+            return self._backend.get_password(self._service("account"), self._client)
+        except keyring.errors.KeyringError:
+            return None
 
     def move_to(self, client: str) -> "KeychainTokenStorage":
         """Re-file this session under another client name.
