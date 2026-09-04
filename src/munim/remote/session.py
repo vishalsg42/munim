@@ -22,6 +22,7 @@ from mcp.client.streamable_http import streamablehttp_client
 from mcp.shared.auth import OAuthClientMetadata
 
 from munim.connect.callback import redirect_uri, serve_until_callback
+from munim.remote.offline import with_offline_access
 from munim.remote.servers import SERVERS, server_for
 from munim.remote.storage import (
     CONFIDENTIAL_AUTH_METHOD,
@@ -32,6 +33,17 @@ from munim.remote.storage import (
 # What OAuthClientProvider allows for the whole flow. The listener matches it
 # rather than undercutting it.
 LOGIN_TIMEOUT = 300.0
+
+
+class NeedsLogin(Exception):
+    """Opening this session would mean authorising, and the caller said no.
+
+    A read-only script that reaches for a browser is not read-only. The
+    cross-account probe did exactly that once a Cloudflare token expired: it
+    opened a browser, printed an authorize URL, and blocked for five minutes
+    waiting for a callback that nobody was there to complete. Anything running
+    unattended wants a legible refusal instead.
+    """
 
 
 class NoRemoteServer(Exception):
@@ -45,6 +57,16 @@ def _metadata(client: str) -> OAuthClientMetadata:
     what appears on the consent screen and on the provider's list of authorised
     applications. Connecting the wrong account is the one failure a person has
     to catch, and this is where they can see it.
+
+    No scope is set here, and setting one would be theatre. The MCP spec
+    defines a Scope Selection Strategy and the SDK implements it: the scope
+    comes from the WWW-Authenticate challenge, else the resource's
+    scopes_supported, else the authorization server's, and whatever the client
+    put in its metadata is overwritten before the authorize request is built.
+
+    So on this route the provider chooses. RemoteServer.scopes records what
+    Munim would ask for and is honoured on the application route, which builds
+    its own authorize URL.
     """
     return OAuthClientMetadata(
         client_name=f"Munim ({client})",
@@ -64,20 +86,49 @@ def _registered_application(provider: str) -> tuple[str, str] | None:
     without setup only because the agent itself is a registered application.
 
     Munim is a client too, so for those providers somebody has to register one.
-    Read from the environment rather than shipped, so nothing here carries a
-    credential that belongs to a provider account.
+    Never shipped, so nothing here carries a credential belonging to a provider
+    account: it comes from the environment, or from the keychain where
+    `munim config set` puts it. See munim/appcreds.py for why the keychain,
+    which is that a file has a location and an installed package does not know
+    which directory you will run from.
     """
-    import os
+    from munim.appcreds import resolve
 
-    prefix = provider.upper().replace("-", "_")
-    client_id = os.environ.get(f"{prefix}_OAUTH_CLIENT_ID")
-    if not client_id:
-        return None
-    return client_id, os.environ.get(f"{prefix}_OAUTH_CLIENT_SECRET", "")
+    return resolve(provider)
+
+
+def _apply_sep_2207() -> None:
+    """Teach the pinned SDK to ask for offline_access.
+
+    The SDK computes the scope in one function and then assigns it, so wrapping
+    that function is the whole change. Idempotent, because auth_for runs per
+    session and wrapping a wrapper would append the scope twice.
+
+    Remove this, and munim/remote/offline.py, once strands-agents allows
+    mcp>=2.0.0: the SDK does it there.
+    """
+    from mcp.client.auth import oauth2
+
+    if getattr(oauth2.get_client_metadata_scopes, "_munim_sep_2207", False):
+        return
+
+    original = oauth2.get_client_metadata_scopes
+
+    def wrapped(www_authenticate_scope, protected_resource_metadata,
+                authorization_server_metadata=None, *args, **kwargs):
+        chosen = original(www_authenticate_scope, protected_resource_metadata,
+                          authorization_server_metadata, *args, **kwargs)
+        return with_offline_access(
+            chosen, authorization_server_metadata,
+            grant_types=["authorization_code", "refresh_token"])
+
+    wrapped._munim_sep_2207 = True
+    oauth2.get_client_metadata_scopes = wrapped
 
 
 def auth_for(client: str, provider: str, *, backend=None,
-             on_url=None, label: str | None = None) -> OAuthClientProvider:
+             on_url=None, label: str | None = None,
+             allow_login: bool = True) -> OAuthClientProvider:
     """The OAuth client for one (client, provider), storing to the keychain.
 
     `client` is the identity credentials are filed under, so it is an id.
@@ -88,6 +139,8 @@ def auth_for(client: str, provider: str, *, backend=None,
     client was being authorised, which is the one thing it is there to say.
     """
     label = label or client
+    _apply_sep_2207()
+
     server = server_for(provider)
     if server is None:
         raise NoRemoteServer(
@@ -105,6 +158,14 @@ def auth_for(client: str, provider: str, *, backend=None,
     pending: dict[str, str | None] = {}
 
     async def redirect(url: str) -> None:
+        if not allow_login:
+            # Raised before the browser opens, not after: the point is that
+            # nothing appears on screen and nothing waits.
+            raise NeedsLogin(
+                f"{client} has no usable {provider} session, and opening one "
+                f"means signing in. Run: munim connect \"{label or client}\" "
+                f"{provider}"
+            )
         query = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
         pending["state"] = query.get("state", [None])[0]
         if on_url is not None:
@@ -154,9 +215,12 @@ def auth_for(client: str, provider: str, *, backend=None,
                 f"{provider} will not register a client on demand, so it needs "
                 f"an application registered by hand"
                 + (f" at {server.register_at}" if server.register_at else "")
-                + f", then {provider.upper()}_OAUTH_CLIENT_ID and "
-                f"{provider.upper()}_OAUTH_CLIENT_SECRET in .env. "
-                f"`munim servers` says which providers need this.")
+                + f". Then: munim config set {provider}"
+                f"  (it prompts, and stores in your keychain rather than a "
+                f"file, so it works from any directory). "
+                f"{provider.upper()}_OAUTH_CLIENT_ID and _CLIENT_SECRET in the "
+                f"environment also work. `munim servers` says which providers "
+                f"need this.")
         storage.seed_client_info(*registered, redirect_uri())
 
     return OAuthClientProvider(
@@ -166,6 +230,31 @@ def auth_for(client: str, provider: str, *, backend=None,
         redirect_handler=redirect,
         callback_handler=callback,
     )
+
+
+def headers_for(client: str, provider: str, backend=None) -> dict | None:
+    """The header this client authenticates to this provider with, if any.
+
+    A fourth way in beside registering a client, registering an application and
+    a URL that carries the credential: an API key in a header. Nothing to
+    authorise and no browser, so the key is pasted once with `--token` and
+    stored per client like any other credential.
+
+    None for every other kind, so callers can pass the result straight through.
+    """
+    server = server_for(provider)
+    if server is None or server.auth != "header":
+        return None
+
+    from munim.container import KeychainBackend
+    backend = backend or KeychainBackend()
+    key = backend.get(client, provider)
+    if not key:
+        raise NeedsLogin(
+            f"{provider} authenticates with an API key and none is stored for "
+            f"this client. Run: munim connect \"<client>\" {provider} --token"
+        )
+    return {server.header: key}
 
 
 def endpoint_for(client: str, provider: str, backend=None) -> str:
@@ -232,7 +321,8 @@ async def _verify_account(session, client: str, provider: str, backend=None) -> 
 
 @asynccontextmanager
 async def session_for(client: str, provider: str, *, backend=None, on_url=None,
-                      verify: bool = True, label: str | None = None):
+                      verify: bool = True, label: str | None = None,
+                      allow_login: bool = True):
     """Open one client's session with one provider's MCP server."""
     server = server_for(provider)
     if server is None:
@@ -240,17 +330,19 @@ async def session_for(client: str, provider: str, *, backend=None, on_url=None,
 
     url = endpoint_for(client, provider, backend)
 
-    if server.auth == "url":
-        # The address is the credential, so there is nothing to authenticate
-        # with and nothing to open a browser for.
-        async with streamablehttp_client(url) as (read, write, _):
+    if server.auth in ("url", "header"):
+        # Neither has anything to authorise and neither opens a browser. For
+        # `url` the address is the credential; for `header` it is a key the
+        # operator pasted once, sent on every request.
+        headers = headers_for(client, provider, backend)
+        async with streamablehttp_client(url, headers=headers) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 yield session
-        return  # a url-authenticated server has no account to drift
+        return  # neither kind has an account that can drift
 
     auth = auth_for(client, provider, backend=backend, on_url=on_url,
-                    label=label)
+                    label=label, allow_login=allow_login)
     try:
         async with streamablehttp_client(url, auth=auth) as (read, write, _):
             async with ClientSession(read, write) as session:
@@ -260,11 +352,13 @@ async def session_for(client: str, provider: str, *, backend=None, on_url=None,
                 yield session
     except BaseExceptionGroup as group:
         # The transport runs inside an anyio task group, so anything raised in
-        # here comes back wrapped. A caller cannot catch WrongAccount through a
-        # group, and this is the one exception they most need to catch.
-        wrong = [e for e in _flatten(group) if isinstance(e, WrongAccount)]
-        if wrong:
-            raise wrong[0] from None
+        # here comes back wrapped. A caller cannot catch these through a group,
+        # and they are the two a caller most needs: the wrong account, and a
+        # session that would have to prompt for a login.
+        surfaced = [e for e in _flatten(group)
+                    if isinstance(e, (WrongAccount, NeedsLogin))]
+        if surfaced:
+            raise surfaced[0] from None
         raise
 
 

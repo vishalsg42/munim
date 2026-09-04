@@ -32,6 +32,28 @@ class Finding:
     fix: str = ""
 
 
+def _config() -> Finding:
+    """Which file the configuration came from, or where to put one.
+
+    Named rather than implied, because the loader consults several places and
+    "it works in one directory and not another" is a mystery until you know
+    which file was read. An installed package finds nothing in site-packages,
+    so this is also how somebody discovers ~/.munim/.env exists.
+    """
+    from munim.env import CONFIG_HOME, load, sources
+
+    used = load()
+    if used:
+        home = Path.home()
+        shown = f"~/{used.relative_to(home)}" if used.is_relative_to(home) else str(used)
+        return Finding(OK, "Config", shown)
+
+    looked = ", ".join(str(p) for p, exists in sources()[:2] if not exists)
+    return Finding(WARN, "Config", "no .env found",
+                   fix=f"create {CONFIG_HOME}, or a .env in the directory you "
+                       f"run from. Looked in {looked} and further up")
+
+
 def _model() -> Finding:
     load_env()
     if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
@@ -131,9 +153,17 @@ def _oauth_apps() -> list[Finding]:
     from munim.remote.servers import SERVERS
 
     out = []
-    for provider in sorted(OAUTH_PROVIDERS):
+
+    # Both lists, because they answer different halves of the question. A
+    # provider in OAUTH_PROVIDERS can be reached by registering an application;
+    # a provider whose auth kind is `app` *must* be. Reading only the first is
+    # how doctor came to say "Everything is set up" on a machine where gmail
+    # and stitch could not be connected at all.
+    needs_app = {name for name, server in SERVERS.items() if server.auth == "app"}
+
+    for provider in sorted(set(OAUTH_PROVIDERS) | needs_app):
         client_id = os.environ.get(f"{provider.upper()}_OAUTH_CLIENT_ID")
-        has_mcp = provider in SERVERS
+        has_mcp = provider in SERVERS and provider not in needs_app
         if client_id:
             out.append(Finding(OK, f"Login: {provider}",
                                "registered application"))
@@ -141,6 +171,18 @@ def _oauth_apps() -> list[Finding]:
             out.append(Finding(
                 OK, f"Login: {provider}",
                 "ready, through the provider's own MCP server"))
+        elif provider in needs_app:
+            # accounts.google.com publishes no registration endpoint, so this
+            # one cannot be issued on demand however long you wait.
+            server = SERVERS[provider]
+            out.append(Finding(
+                WARN, f"Login: {provider}",
+                "needs an application registered by hand",
+                fix=f"uv run python scripts/setup_google_oauth.py --provider "
+                    f"{provider}  (it uses a project you already have and "
+                    f"never creates one). By hand: {server.register_at}, "
+                    f"Desktop app, redirect {REDIRECT_URI}, then "
+                    f"{provider.upper()}_OAUTH_CLIENT_ID and _SECRET in .env"))
         else:
             out.append(Finding(
                 WARN, f"Login: {provider}", "no application, and no MCP server",
@@ -148,6 +190,9 @@ def _oauth_apps() -> list[Finding]:
                     f"{provider.upper()}_OAUTH_CLIENT_ID in .env, or paste a "
                     f"key with `munim connect <client> {provider} --token`"))
 
+    # Resend publishes no OAuth authorization endpoint of its own, so it is not
+    # in OAUTH_PROVIDERS and would otherwise go unmentioned. It runs an MCP
+    # server, which is the whole reason it needs no setup.
     if "resend" in SERVERS:
         out.append(Finding(OK, "Login: resend",
                            "ready, through the provider's own MCP server"))
@@ -169,7 +214,7 @@ def _room() -> Finding:
 
 def run(registry: Registry | None = None) -> int:
     registry = registry or Registry(Path.home() / ".munim" / "registry.json")
-    findings = [_model(), _mcp_registered(), _room(), _keychain(),
+    findings = [_config(), _model(), _mcp_registered(), _room(), _keychain(),
                 *_oauth_apps(), *_clients(registry)]
 
     width = max(len(f.what) for f in findings) + 2
