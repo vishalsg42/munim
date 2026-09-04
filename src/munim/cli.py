@@ -192,6 +192,50 @@ def _redacted(url: str) -> str:
     return f"{parsed.scheme}://{parsed.netloc}/…"
 
 
+def ask_which_client(registry, ask=input) -> str | None:
+    """Which client is this for.
+
+    A URL that carries a credential cannot name itself the way an OAuth login
+    can, so the choice has to come from somewhere. Refusing and telling the
+    operator to type a name they already have on screen is worse than asking.
+
+    Returns a client id, a new name, or None if they backed out.
+    """
+    records = sorted(registry.clients(), key=lambda r: r.name.lower())
+    print("Which client is this for?", file=sys.stderr)
+    for number, record in enumerate(records, 1):
+        print(f"  {number}  {record.name}"
+              + (f"   {record.domain}" if record.domain else ""), file=sys.stderr)
+    print("  n  a client not listed", file=sys.stderr)
+    print("> ", end="", file=sys.stderr, flush=True)
+
+    try:
+        answer = ask().strip()
+    except (EOFError, KeyboardInterrupt):
+        print(file=sys.stderr)
+        return None
+
+    if answer.lower() == "n":
+        print("Name for this client: ", end="", file=sys.stderr, flush=True)
+        try:
+            name = ask().strip()
+        except (EOFError, KeyboardInterrupt):
+            print(file=sys.stderr)
+            return None
+        return name or None
+
+    if answer.isdigit() and 1 <= int(answer) <= len(records):
+        return records[int(answer) - 1].id
+
+    # A name or an id typed straight in, for anyone who knows what they want.
+    for record in records:
+        if answer in (record.id, record.name):
+            return record.id
+    if answer:
+        print(f"{answer!r} is not one of those.", file=sys.stderr)
+    return None
+
+
 def connect_by_url(client: str, provider: str, url: str) -> int:
     """Connect a provider that identifies a client by their own endpoint.
 
@@ -556,10 +600,16 @@ def main(argv: list[str] | None = None) -> int:
     from munim.remote.servers import server_for
 
     if getattr(args, "url", None):
-        if args.client is None:
-            parser.error("--url needs a client name: the URL identifies which "
-                         "client it belongs to, so it cannot name itself")
-        return connect_by_url(args.client, args.provider, args.url)
+        target = args.client
+        if target is None:
+            if not sys.stdin.isatty():
+                parser.error("--url needs a client: the URL cannot name itself, "
+                             "and there is no terminal to ask on")
+            target = ask_which_client(_registry())
+            if target is None:
+                print("Nothing connected.", file=sys.stderr)
+                return 2
+        return connect_by_url(target, args.provider, args.url)
 
     # `--token` never reaches here: it is handled above and stores a pasted key.
     if not args.via_app and server_for(args.provider) is not None:
