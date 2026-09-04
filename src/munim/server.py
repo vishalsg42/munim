@@ -31,7 +31,12 @@ from munim.runlog import RunLog, all_runs, new_run_id
 
 # Tools that change a client's account. The test suite asserts each one takes an
 # explicit `client`; adding a mutating tool without it fails the build.
-MUTATING = {"connect_provider"}
+# Tools that change something. Every one names its client, because a write
+# without a named account is the failure D5 exists to prevent. `plan_mail_setup`
+# is here despite changing no DNS: it creates a sending domain in the operator's
+# Resend account, and a tool that creates anything belongs on this list rather
+# than in an argument about whether it counts.
+MUTATING = {"connect_provider", "plan_mail_setup", "apply_mail_setup"}
 
 # Tools that span more than one client's container. None of them may mutate, and
 # the set is named here rather than inferred, so adding one is a decision
@@ -156,6 +161,59 @@ def build_server(backend=None, registry=None, runs_dir=None,
             "clients_registered": len(records),
             "answer": answer,
         }
+
+    # ---- repair ----------------------------------------------------------
+
+    @server.tool()
+    async def plan_mail_setup(client: str, domain: str) -> dict:
+        """What setting up email for this client's domain would change.
+
+        Reads what is already published and returns every record with the
+        action it would take: create, update, merge or unchanged. Changes no
+        DNS. Pair it with `apply_mail_setup`, which needs the plan id.
+
+        The one write here is creating the sending domain in the operator's own
+        Resend account, because Resend does not publish the DKIM and SPF values
+        a plan is made of until it exists. That adds nothing to anyone's DNS.
+        """
+        from munim.agent.mailplan import plan as make_plan
+
+        record = registry.get(client)
+        log = RunLog(new_run_id(), runs)
+        made = await make_plan(container_for(record.name), record.domain or domain, log)
+        return {**made.to_dict(), "run_id": log.run_id}
+
+    @server.tool()
+    async def apply_mail_setup(client: str, plan_id: str,
+                               approved: bool = False) -> dict:
+        """Carry out a plan from `plan_mail_setup`.
+
+        `approved` is required when the plan would replace or combine a record
+        somebody put there on purpose. Creating one that does not exist is not
+        a judgement call; changing one that does is, and it is someone else's
+        live mail. Show the plan to the operator, then call this.
+        """
+        from munim.agent.mailplan import NotApproved, apply as run_plan, load
+
+        record = registry.get(client)
+        made = load(plan_id)
+        if made.client != record.id and made.client != record.name:
+            # A plan carries the client it was made for. Applying it to another
+            # is a write in the wrong account, which is what D5 exists to stop.
+            raise ValueError(
+                f"plan {plan_id} was made for a different client; make a new "
+                f"one for {record.name!r}")
+
+        log = RunLog(new_run_id(), runs)
+        try:
+            result = await run_plan(container_for(record.name), made, log,
+                                    approved=approved)
+        except NotApproved as exc:
+            log.append(client=record.name, stage="mail", kind="awaiting_confirm",
+                       human_text=str(exc), detail={"plan_id": plan_id})
+            return {"applied": False, "needs_approval": True,
+                    "why": str(exc), "plan_id": plan_id, "run_id": log.run_id}
+        return {"applied": True, **result, "run_id": log.run_id}
 
     # ---- registry --------------------------------------------------------
 

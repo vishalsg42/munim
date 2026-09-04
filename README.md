@@ -143,13 +143,23 @@ else is in the repository.
 | `add_client` | register one |
 | `connect_provider` | store a pasted key, for providers with nothing better |
 | `launch_status` | read a run back |
+| `plan_mail_setup` | what setting up email for a client would change, touching no DNS |
+| `apply_mail_setup` | carry out a plan, with approval required to replace a record somebody put there |
 
-**Repair is not exposed yet, and the code for it exists.** `agent/mail.py:set_up_mail` does
-the Resend-to-Cloudflare handoff and `agent/launch.py:fix_spf` does the approval-gated SPF
-merge, both tested, and neither has a caller outside its own module. They are written and
-unreachable, which is worth saying plainly rather than leaving someone to find out: a
-capability that cannot be invoked is not a capability, and `docs/VIDEO.md` currently scripts
-one of them.
+Repair is the last two, and it is deliberately two calls rather than one. A tool call
+returns once, so there is nowhere for a mid-flight question to go: `plan` reads what is
+there and says what would change, `apply` carries out a plan the operator has seen.
+Approval is the gap between them.
+
+`apply` refuses without `approved=true` when the plan would replace or combine a record
+somebody put there on purpose. Creating one that does not exist is not a judgement call;
+changing one that does is, and it is someone else's live mail.
+
+**Eight is now ten**, and the two that were missing are why: the repair code existed,
+was tested, and had no caller outside its own module until an external reviewer pointed
+it out. `agent/mail.py:set_up_mail` still takes a callback and is still unreachable from
+MCP for that reason; `plan_mail_setup` and `apply_mail_setup` are the shape that survives
+the boundary.
 
 ## What is implemented
 

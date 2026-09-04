@@ -179,3 +179,34 @@ def test_the_readme_lists_every_tool_that_exists(tmp_path):
 
     undocumented = {n for n in surface if f"`{n}`" not in readme}
     assert not undocumented, f"tools nobody reading the README would know about: {undocumented}"
+
+
+async def test_applying_a_plan_made_for_another_client_is_refused(tmp_path, monkeypatch):
+    """A plan carries the client it was made for. Applying it elsewhere is a
+    write in the wrong account, which is exactly what D5 exists to stop."""
+    import munim.agent.mailplan as mod
+
+    monkeypatch.setattr(mod, "PLANS_DIR", tmp_path / "plans")
+    mod._save(mod.MailPlan(plan_id="p9", client="somebody-else",
+                           domain="other.example", changes=[]))
+
+    server, _, _ = _server(tmp_path)
+    with pytest.raises(Exception, match="different client|made for"):
+        await server.call_tool("apply_mail_setup",
+                               {"client": "acme", "plan_id": "p9"})
+
+
+async def test_repair_is_reachable_from_the_tool_surface(tmp_path):
+    """The whole point. The repair code was written, tested, and callable from
+    nothing: an external reviewer found that before we did."""
+    server, _, _ = _server(tmp_path)
+    names = {t.name for t in await server.list_tools()}
+    assert {"plan_mail_setup", "apply_mail_setup"} <= names
+
+
+async def test_every_tool_that_changes_something_names_its_client(tmp_path):
+    server, _, _ = _server(tmp_path)
+    tools = {t.name: t for t in await server.list_tools()}
+    for name in ("plan_mail_setup", "apply_mail_setup"):
+        assert name in MUTATING, f"{name} writes and is not declared mutating"
+        assert "client" in tools[name].inputSchema.get("required", []), name
