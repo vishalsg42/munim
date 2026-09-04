@@ -44,6 +44,92 @@ def _client_id(provider: str) -> tuple[str, str]:
 PROVISIONAL = "…connecting"
 
 
+def merge(source: str, target: str) -> int:
+    """Fold one client into another, credentials and all.
+
+    Needed because connecting an account that is already known under another
+    label makes a second client, and then a call could go to either. Refuses
+    when both hold the same provider: that is two different accounts, not one
+    client recorded twice, and picking a winner would silently drop a
+    credential for a live account.
+    """
+    from munim.container import KeychainBackend
+    from munim.remote.servers import SERVERS
+    from munim.remote.storage import KeychainTokenStorage
+
+    registry = _registry()
+    try:
+        a, b = registry.get(source), registry.get(target)
+    except UnknownClient as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    if a.id == b.id:
+        print("those are the same client", file=sys.stderr)
+        return 2
+
+    backend = KeychainBackend()
+    clash = [p for p in ("cloudflare", "vercel", "resend")
+             if backend.get(a.id, p) and backend.get(b.id, p)]
+    clash += [p for p in sorted(SERVERS)
+              if KeychainTokenStorage(a.id, p)._read("tokens")
+              and KeychainTokenStorage(b.id, p)._read("tokens")]
+    if clash:
+        print(f"both hold {', '.join(sorted(set(clash)))}, so these are two "
+              f"accounts rather than one client twice. Disconnect one side "
+              f"first if you are sure.", file=sys.stderr)
+        return 2
+
+    carried = []
+    for provider in ("cloudflare", "vercel", "resend"):
+        secret = backend.get(a.id, provider)
+        if secret is not None:
+            backend.set(b.id, provider, secret)
+            carried.append(provider)
+    for provider in sorted(SERVERS):
+        store = KeychainTokenStorage(a.id, provider)
+        if store._read("tokens") is not None:
+            store.move_to(b.id)
+            carried.append(f"{provider} (mcp)")
+
+    if a.domain and not b.domain:
+        b.domain = a.domain
+        registry.update(b)
+    registry.remove(a.id)
+
+    print(f"{a.name!r} folded into {b.name!r}"
+          + (f", carrying {', '.join(carried)}" if carried else ""),
+          file=sys.stderr)
+    return 0
+
+
+def forget(client: str) -> int:
+    """Remove a client that holds nothing. Refuses otherwise: a row removed
+    while a credential remains leaves one nothing can reach or name."""
+    from munim.container import KeychainBackend
+    from munim.remote.servers import SERVERS
+    from munim.remote.storage import KeychainTokenStorage
+
+    registry = _registry()
+    try:
+        record = registry.get(client)
+    except UnknownClient as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    backend = KeychainBackend()
+    held = [p for p in ("cloudflare", "vercel", "resend") if backend.get(record.id, p)]
+    held += [f"{p} (mcp)" for p in sorted(SERVERS)
+             if KeychainTokenStorage(record.id, p)._read("tokens")]
+    if held:
+        print(f"{record.name!r} still holds {', '.join(held)}. Merge it into "
+              f"another client, or disconnect it first.", file=sys.stderr)
+        return 2
+
+    registry.remove(record.id)
+    print(f"forgot {record.name!r}", file=sys.stderr)
+    return 0
+
+
 def connect_via_mcp(client: str | None, provider: str) -> int:
     """Connect through the provider's own MCP server.
 
@@ -234,6 +320,13 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("old")
     r.add_argument("new")
 
+    m = sub.add_parser("merge", help="fold one client into another")
+    m.add_argument("source")
+    m.add_argument("target")
+
+    f = sub.add_parser("forget", help="remove a client that holds nothing")
+    f.add_argument("client")
+
     sub.add_parser("doctor", help="what is set up, what is not, and the next step")
 
     args = parser.parse_args(argv)
@@ -256,6 +349,12 @@ def main(argv: list[str] | None = None) -> int:
         else:
             parser.error(f"unknown provider {args.client!r}. "
                          f"Choose from: {', '.join(sorted({*PROVIDERS, 'resend'}))}")
+
+    if args.command == "merge":
+        return merge(args.source, args.target)
+
+    if args.command == "forget":
+        return forget(args.client)
 
     if args.command == "rename":
         return rename(args.old, args.new)

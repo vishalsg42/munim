@@ -71,6 +71,8 @@ it, which is what keeps a name and an account from drifting apart:
 munim connect cloudflare                    # browser login; the account names the client
 munim connect "Balaji Roofings" vercel      # or name it yourself
 munim rename "<account name>" "Balaji Roofings"
+munim merge "<account name>" "Balaji Roofings"   # if they were added twice
+munim forget "<client>"                          # only when it holds nothing
 munim clients                                # what is connected
 munim doctor                                 # what is missing, and the fix
 ```

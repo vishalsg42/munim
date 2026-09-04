@@ -149,6 +149,16 @@ class Registry:
         self.update(record)
         return record
 
+    def remove(self, key: str) -> ClientRecord:
+        """Forget a client. Credentials are not this file's to delete, so the
+        caller deals with those first: removing the row while a token remains
+        leaves a credential nothing can reach and nothing can name."""
+        record = self.get(key)
+        records = self._load()
+        records.pop(record.id, None)
+        self._save(records)
+        return record
+
     def find_by_domain(self, hostname: str) -> ClientRecord | None:
         """Resolve a hostname to its client, matching subdomains.
 
