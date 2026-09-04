@@ -511,3 +511,50 @@ preference. Cloudflare's endpoints are recorded but unused until a client id
 exists; their own MCP server reads one they were issued, and whether registration
 is self-serve is unconfirmed. `TokenConnector` ships regardless, so a provider
 approval that never arrives cannot block the submission.
+
+---
+
+## D23 — The cross-account claim, measured against two real accounts
+
+**Context.** D15's defensible claim is that no prior work performs a task
+spanning two client accounts. Until 2026-09-04 that claim had never been run
+against two real accounts — only against one account plus fixtures. A claim the
+whole submission rests on, resting in turn on nothing.
+
+**What was run.** Two genuine Vercel teams, connected by browser login minutes
+apart, both grants held at once in the OS keychain under `(client, provider)`:
+
+```
+Balaji Roofings: 2 projects   (balajiroofings-quote, balajiroofings-fe-webapp)
+Kloudfirst:     15 projects   (kf-webapp, khatalens, lpg-inventory, …)
+
+read concurrently in 0.94s, no logout between them
+overlap: none
+```
+
+Reproducible by anyone with two accounts: `scripts/cross_account_probe.py`. It
+fails if either account is empty and if the two share a project, because two
+grants returning the same projects are one account wearing two names, which
+would make the claim vacuous.
+
+**What it cost to get there.** Four defects, each found by running the flow
+rather than reading about it:
+
+1. Vercel has two OAuth systems. `/oauth/authorize` serves "Sign in with Vercel"
+   apps (`cl_…`); handed an Integration's `oac_…` id it answers *"The app ID is
+   invalid"*, and even on success returns identity claims rather than access to
+   a team's projects. The integration's external installation flow starts at
+   `/integrations/<slug>/new`, takes only `state`, and exchanges at
+   `/v2/oauth/access_token` with the secret and no PKCE.
+2. The callback listener served exactly one request, so the first thing to touch
+   the port consumed it — a favicon prefetch, a port scan — and the login failed
+   with "no callback received" having received one.
+3. `ClientRecord.providers` was a second copy of a fact the keychain held, and
+   `munim connect` never updated it. Removed rather than synchronised.
+4. `.gitignore`'s `.env.*` had been swallowing `.env.example` since the repo was
+   created, so no clone ever carried the list of variables to set.
+
+**What it also showed.** The first grant landed on the wrong team — the operator
+picked the scope that did not own the client's project. Nothing in the tool can
+catch that: the account picker is the one step only a person can get right,
+which is why `connect` prints the team id it just authorised.
