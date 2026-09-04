@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="Munim">
+  <rect width="256" height="256" rx="56" fill="#17191c"/>
+  <!-- Three ledgers, side by side, separate. The product in one mark: several
+       clients' books held at once, and never mixed. -->
+  <g fill="none" stroke="#fbfaf8" stroke-width="10" stroke-linecap="round">
+    <rect x="46"  y="74" width="46" height="108" rx="8"/>
+    <rect x="105" y="74" width="46" height="108" rx="8"/>
+    <rect x="164" y="74" width="46" height="108" rx="8"/>
+  </g>
+  <g stroke="#8a8578" stroke-width="7" stroke-linecap="round">
+    <path d="M58 104h22M58 126h22"/>
+    <path d="M117 104h22M117 126h22"/>
+    <path d="M176 104h22M176 126h22"/>
+  </g>
+  <!-- One is being worked on. -->
+  <path d="M117 152h22" stroke="#3f9c5b" stroke-width="7" stroke-linecap="round"/>
+</svg>
