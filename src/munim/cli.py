@@ -44,6 +44,54 @@ def _client_id(provider: str) -> tuple[str, str]:
 PROVISIONAL = "…connecting"
 
 
+def add_server(name: str, url: str) -> int:
+    """Point Munim at any MCP server and record what it needs.
+
+    The three built in are not the product. An operator with their own server,
+    or with one of the hundreds now published, gives a URL and this works out
+    the rest by doing what a client does: calling it without credentials and
+    reading the challenge back.
+    """
+    import asyncio
+
+    from munim.remote.discover import NotAnMcpServer, probe
+    from munim.remote.servers import remember
+
+    try:
+        found = asyncio.run(probe(url, name))
+    except NotAnMcpServer as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    remember(found)
+    print(f"Added {name!r} at {url}", file=sys.stderr)
+    print(f"  {found.note}", file=sys.stderr)
+
+    if found.auth == "registers":
+        print(f"  Nothing to set up. Connect a client with: "
+              f"munim connect {name}", file=sys.stderr)
+    elif found.auth == "app":
+        print(f"  This one needs an application registered by hand"
+              + (f" at {found.register_at}" if found.register_at else "")
+              + f", then {name.upper()}_OAUTH_CLIENT_ID and "
+              f"{name.upper()}_OAUTH_CLIENT_SECRET in .env.", file=sys.stderr)
+    else:
+        print("  It answered without credentials. If the URL carries the "
+              "credential, treat it as a secret: it is stored in "
+              "~/.munim/servers.json and should not be shared.", file=sys.stderr)
+    return 0
+
+
+def list_servers() -> int:
+    from munim.remote.servers import SERVERS, all_servers
+
+    for name, server in sorted(all_servers().items()):
+        origin = "built in" if name in SERVERS else "yours"
+        ready = "ready" if server.ready else f"needs {server.auth}"
+        print(f"{name:14} {ready:14} {origin:9} {server.url}")
+    return 0
+
+
 def merge(source: str, target: str) -> int:
     """Fold one client into another, credentials and all.
 
@@ -356,6 +404,12 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("old")
     r.add_argument("new")
 
+    a = sub.add_parser("add-server", help="point Munim at any MCP server")
+    a.add_argument("name")
+    a.add_argument("url")
+
+    sub.add_parser("servers", help="which MCP servers Munim knows about")
+
     m = sub.add_parser("merge", help="fold one client into another")
     m.add_argument("source")
     m.add_argument("target")
@@ -385,6 +439,12 @@ def main(argv: list[str] | None = None) -> int:
         else:
             parser.error(f"unknown provider {args.client!r}. "
                          f"Choose from: {', '.join(sorted({*PROVIDERS, 'resend'}))}")
+
+    if args.command == "add-server":
+        return add_server(args.name, args.url)
+
+    if args.command == "servers":
+        return list_servers()
 
     if args.command == "merge":
         return merge(args.source, args.target)

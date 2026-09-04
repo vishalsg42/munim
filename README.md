@@ -128,6 +128,34 @@ uv run munim-room --port 8986            # if 8977 is taken
 uv run munim-room --runs DIR --reports DIR   # serve a different set of runs
 ```
 
+## Any MCP server, not just these three
+
+Cloudflare, Vercel and Resend are built in because they are what one operator
+needed. They are not the product. The product is a session per client against
+something that speaks MCP, and there is no reason it has to be a server somebody
+else chose.
+
+```bash
+munim add-server acme https://mcp.acme.example/mcp
+munim servers
+```
+
+`add-server` works out what the server needs by doing what a client does: calling
+it without credentials and reading the challenge back. Probing changes nothing on
+the server, and there are three answers it can give.
+
+| | what it means | what you do |
+|---|---|---|
+| **registers** | issues a client on demand (RFC 7591) | nothing. `munim connect acme` opens a browser |
+| **app** | no registration endpoint, wants a secret | register an application once, put its id and secret in `.env` |
+| **url** | answered without credentials | either it is open, or the URL carries the credential. Treat it as a secret |
+
+All three were found by probing real servers rather than reading about them.
+Cloudflare, Vercel and Resend register on demand. Google's servers, which is
+Gmail, Stitch, Drive and Calendar, all authenticate against `accounts.google.com`,
+which advertises no registration endpoint and wants `client_secret_post`. Zoho
+issues a per-installation endpoint whose path is the credential.
+
 ## The tools your agent gets
 
 Eight, and this is the whole surface. Anything not listed here is not reachable, whatever
