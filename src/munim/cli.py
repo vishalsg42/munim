@@ -780,6 +780,15 @@ def main(argv: list[str] | None = None) -> int:
             # None keeps the old behaviour: authorise first, name after.
             args.client = None if picked == ACCOUNT_NAMES_IT else picked
 
+    # A header-authenticated server has nothing to open a browser for. Saying
+    # so beats starting an OAuth flow against a server that will not answer it.
+    _server = server_for(args.provider)
+    if _server is not None and _server.auth == "header" and not args.token:
+        parser.error(
+            f"{args.provider} authenticates with an API key in "
+            f"{_server.header}, not a browser login. Paste one with: "
+            f"munim connect \"{args.client or '<client>'}\" {args.provider} --token")
+
     # `--token` never reaches here: it is handled above and stores a pasted key.
     if not args.via_app and server_for(args.provider) is not None:
         return connect_via_mcp(args.client, args.provider)

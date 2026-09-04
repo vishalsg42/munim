@@ -165,8 +165,9 @@ munim servers                       # what Munim knows about, and what each need
 ```
 
 Built in: Cloudflare, Vercel, Resend, Netlify, Linear, Notion, Sentry, Supabase
-(all zero setup, via dynamic client registration), Gmail and Stitch (need a
-registered application), Zoho (the endpoint URL is the credential).
+(all zero setup, via dynamic client registration), Gmail (needs an application registered
+by hand), Stitch (an API key in a header), Zoho (the endpoint URL is the
+credential).
 
 ### Setting one up
 
@@ -176,7 +177,7 @@ steps and what connecting grants:
 | | |
 |---|---|
 | [Gmail](docs/providers/gmail.md) | An application registered by hand, once. About ten minutes |
-| [Stitch](docs/providers/stitch.md) | The same |
+| [Stitch](docs/providers/stitch.md) | An API key in a header, pasted with `--token` |
 | [Zoho](docs/providers/zoho.md) | No registration: the endpoint URL is the credential |
 
 **[docs/providers/](docs/providers/README.md) has a page for every provider**,

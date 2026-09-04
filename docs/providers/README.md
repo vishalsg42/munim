@@ -28,7 +28,7 @@ the same as knowing.
 | | |
 |---|---|
 | [Gmail](gmail.md) | An application registered by hand, once. About ten minutes |
-| [Stitch](stitch.md) | The same, and unverified |
+| [Stitch](stitch.md) | An API key in a header. No Google Cloud project needed |
 | [Zoho](zoho.md) | No registration: the endpoint URL is the credential |
 
 ## Anything else

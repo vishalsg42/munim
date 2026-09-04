@@ -230,6 +230,31 @@ def auth_for(client: str, provider: str, *, backend=None,
     )
 
 
+def headers_for(client: str, provider: str, backend=None) -> dict | None:
+    """The header this client authenticates to this provider with, if any.
+
+    A fourth way in beside registering a client, registering an application and
+    a URL that carries the credential: an API key in a header. Nothing to
+    authorise and no browser, so the key is pasted once with `--token` and
+    stored per client like any other credential.
+
+    None for every other kind, so callers can pass the result straight through.
+    """
+    server = server_for(provider)
+    if server is None or server.auth != "header":
+        return None
+
+    from munim.container import KeychainBackend
+    backend = backend or KeychainBackend()
+    key = backend.get(client, provider)
+    if not key:
+        raise NeedsLogin(
+            f"{provider} authenticates with an API key and none is stored for "
+            f"this client. Run: munim connect \"<client>\" {provider} --token"
+        )
+    return {server.header: key}
+
+
 def endpoint_for(client: str, provider: str, backend=None) -> str:
     """Where this client's server is.
 
@@ -303,14 +328,16 @@ async def session_for(client: str, provider: str, *, backend=None, on_url=None,
 
     url = endpoint_for(client, provider, backend)
 
-    if server.auth == "url":
-        # The address is the credential, so there is nothing to authenticate
-        # with and nothing to open a browser for.
-        async with streamablehttp_client(url) as (read, write, _):
+    if server.auth in ("url", "header"):
+        # Neither has anything to authorise and neither opens a browser. For
+        # `url` the address is the credential; for `header` it is a key the
+        # operator pasted once, sent on every request.
+        headers = headers_for(client, provider, backend)
+        async with streamablehttp_client(url, headers=headers) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 yield session
-        return  # a url-authenticated server has no account to drift
+        return  # neither kind has an account that can drift
 
     auth = auth_for(client, provider, backend=backend, on_url=on_url,
                     label=label, allow_login=allow_login)

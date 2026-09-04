@@ -26,7 +26,10 @@ from pathlib import Path
 #   url         the endpoint URL contains the credential. Zoho issues a
 #               per-installation path, so there is no OAuth at all and the URL
 #               is the thing to keep secret.
-AUTH_KINDS = ("registers", "app", "url")
+# How a server wants to be authenticated. Four, and the fourth was in front of
+# us the whole time: plenty of MCP servers take an API key in a header, and
+# Munim described one of them as needing a registered OAuth application.
+AUTH_KINDS = ("registers", "app", "url", "header")
 
 
 @dataclass(frozen=True)
@@ -57,6 +60,11 @@ class RemoteServer:
     # the app route is exactly where the providers that most need narrowing end
     # up: Gmail cannot register a client on demand, so it goes that way.
     scopes: tuple[str, ...] = ()
+    # Set for `header` providers: which header carries the key. Not a detail to
+    # guess at, because X-Goog-Api-Key and Authorization are not
+    # interchangeable and the wrong one returns a 401 that reads like a bad
+    # credential rather than a bad header name.
+    header: str = ""
 
     def __post_init__(self):
         if self.auth not in AUTH_KINDS:
@@ -212,12 +220,24 @@ _GOOGLE = {
         scopes=("https://www.googleapis.com/auth/gmail.readonly",
                 "https://www.googleapis.com/auth/gmail.modify"),
     ),
+    # Recorded as needing an application registered by hand, on the strength of
+    # sharing an authorization server with gmail. It takes an API key in a
+    # header instead, which is how a coding agent connects to it:
+    #
+    #   stitch: https://stitch.googleapis.com/mcp
+    #   Headers: X-Goog-Api-Key: AQ.Ab8RN6...
+    #
+    # So the entry sent people through ten minutes of Google Cloud, a consent
+    # screen and a test user list, for a server that wanted a header. Sharing an
+    # authorization server turned out to say nothing about whether one is used.
     "stitch": RemoteServer(
         provider="stitch", url="https://stitch.googleapis.com/mcp",
-        public_client=False, auth="app",
-        register_at="https://console.cloud.google.com/apis/credentials",
-        note="confirmed by probing: 15 tools, 5 annotated readOnlyHint. Same authorization server as "
-             "gmail and the same consequence",
+        public_client=False, auth="header", header="X-Goog-Api-Key",
+        note="confirmed by probing: 15 tools, 5 annotated readOnlyHint. Takes "
+             "an API key in X-Goog-Api-Key rather than an OAuth login, so none "
+             "of gmail's consent screen, test user list or seven day token "
+             "expiry applies. Get a key from Google AI Studio and paste it "
+             "with --token",
     ),
 }
 
