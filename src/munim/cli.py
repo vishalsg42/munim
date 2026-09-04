@@ -404,7 +404,29 @@ def connect_via_mcp(client: str | None, provider: str) -> int:
     # up front was always a guess checked by eye; this makes the account itself
     # the source of the name.
     naming = client is None
-    working_name = client or PROVISIONAL
+
+    # Resolve the label to an id before anything is stored. Credentials are
+    # filed by identity (D26), and this was still handing the store a label:
+    # tokens went under "Kloudfirst" while the account marker went under the
+    # id, so one session lived in two places and a rename would have orphaned
+    # half of it. The migration that runs on every command kept moving the
+    # tokens across afterwards, which is why it never looked broken.
+    registry = _registry()
+    record = None
+    if not naming:
+        try:
+            record = registry.get(client)
+        except UnknownClient:
+            record = ClientRecord(name=client)
+            registry.add(record)
+            print(f"{client!r} was not registered yet. Added it.",
+                  file=sys.stderr)
+        client = record.name  # the stored label, not whatever was typed
+
+    # Without a name there is no id yet: the account has to be authorised
+    # before there is anything to call it. The session waits under a
+    # provisional key and moves to the id once the provider answers.
+    working_key = record.id if record else PROVISIONAL
 
     if naming:
         print(f"Opening your browser. Sign in to the {provider} account you "
@@ -417,7 +439,7 @@ def connect_via_mcp(client: str | None, provider: str) -> int:
               f"\"Munim ({client})\".", file=sys.stderr)
 
     try:
-        tools, account = asyncio.run(connect_and_identify(working_name, provider))
+        tools, account = asyncio.run(connect_and_identify(working_key, provider))
     except NoRemoteServer as exc:
         print(str(exc), file=sys.stderr)
         return 2
@@ -428,13 +450,7 @@ def connect_via_mcp(client: str | None, provider: str) -> int:
     from munim.remote.accounts import holder_of
     from munim.remote.storage import KeychainTokenStorage
 
-    registry = _registry()
-    current_id = None
-    if not naming:
-        try:
-            current_id = registry.get(client).id
-        except UnknownClient:
-            current_id = None
+    current_id = record.id if record else None
 
     if account:
         already = holder_of(registry, provider, account, exclude=current_id)
@@ -462,12 +478,14 @@ def connect_via_mcp(client: str | None, provider: str) -> int:
                   f"name: munim connect \"<client>\" {provider}",
                   file=sys.stderr)
             return 2
-        KeychainTokenStorage(PROVISIONAL, provider).move_to(account)
+        # The record first, so there is an id to move the session onto. This
+        # used to move it onto the account string, which is another label.
         try:
             record = registry.get(account)
         except UnknownClient:
             record = ClientRecord(name=account)
             registry.add(record)
+        KeychainTokenStorage(PROVISIONAL, provider).move_to(record.id)
         client = record.name
         KeychainTokenStorage(record.id, provider).remember_account(account)
 
