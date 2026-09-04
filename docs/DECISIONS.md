@@ -643,8 +643,22 @@ connected while this was being built.
   answers.
 - `dns-analytics.mcp.cloudflare.com/mcp` is read-only, so there is no typed,
   narrower alternative for writes.
-- Resend publishes no MCP server and Vercel's story is the integration flow
-  already built, so any wrapper design is a hybrid rather than a replacement.
+- **Correction, same day.** An earlier draft of this decision said Vercel had no
+  MCP server. It does: `https://mcp.vercel.com`, remote, OAuth, implementing the
+  2026-07-28 authorization spec, and able to deploy code. Written from memory
+  rather than checked, in a decision whose whole subject is failing to check.
+- Vercel's server carries a gate Cloudflare's does not: "Vercel MCP only
+  supports AI clients that have been reviewed and approved by Vercel." A wrapper
+  design makes Munim the client, so Vercel would have to approve it. That is a
+  dependency on someone else's review queue, ten days before a deadline, for a
+  capability we already have working.
+- Connecting to Vercel MCP "grants the AI system you're using the same access as
+  your Vercel user account". The integration we registered is scoped: Projects,
+  Deployments and Domains read-only, environment variables read/write and only
+  their names and scopes. Wrapping would widen what a client's grant covers, not
+  narrow it, which runs against the whole premise (D5, D6).
+- Resend publishes no MCP server, so any wrapper design is a hybrid rather than
+  a replacement whichever way the other two go.
 
 **What wrapping does not buy.** The adapter is not valuable for making HTTP
 calls. It is valuable because `upsert` refuses to append beside existing
@@ -679,3 +693,21 @@ The free version costs the claim the project rests on. The version that keeps
 the claim is not free. Stated plainly so the choice is made on that basis rather
 than on "wrapping is obviously better", which is what it looks like until you
 ask where.
+
+---
+
+## D26: No AWS credits application
+
+**Decided 2026-09-04 by the operator.** The credits form was submitted once
+while unregistered on Devpost and would have needed re-submitting by Sep 11.
+
+**Skipped, and the reason is not laziness.** Bedrock is unreachable on this
+account through an AISPL and Marketplace billing limitation (D17), which credits
+do not lift. Strands is model-portable, so the agent runs on Gemini with one
+environment variable and no code change, and `MUNIM_PREFER=gemini` is now set
+because build_model otherwise constructs a BedrockModel from stale credentials
+and only discovers the problem when the call fails.
+
+Credits would fund a host the account cannot reach. The Strands requirement is
+satisfied by the SDK, not by which model answers, which is the point D17 made
+and this confirms.

@@ -109,6 +109,16 @@ Cloudflare API · Resend · dnspython · Amazon Bedrock *(model host, when reach
 
 ---
 
+## Submission details
+
+- **AWS Builder ID:** `vishal@kloudfirst.com` (Vishal Gupta)
+- **AWS credits:** not applied for. The application form was skipped
+  deliberately: Bedrock is unreachable on this account for billing reasons
+  (D17) and the agent runs on Gemini through Strands' model portability, so
+  credits would change nothing that is being submitted.
+
+---
+
 ## Try it out
 
 - **Repository:** https://github.com/vishalsg42/munim
