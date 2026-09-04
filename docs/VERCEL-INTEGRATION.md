@@ -32,6 +32,7 @@ the public marketplace requires review, and 500 installs.
 | **EULA URL** | `https://github.com/vishalsg42/munim/blob/main/brand/EULA.md` |
 | **Privacy Policy URL** | `https://github.com/vishalsg42/munim/blob/main/brand/PRIVACY.md` |
 | **Redirect URL** | `http://localhost:8976/oauth/callback` |
+| **Accent colour** | optional, skip |
 | **Webhook URL** | leave blank — Munim consumes no webhooks |
 | **Configuration URL** | leave blank |
 
@@ -59,16 +60,17 @@ Request only what is used, and nothing that can spend money or change billing:
 |---|---|
 | **Projects: Read** | List projects; find the one a client's site is on |
 | **Deployments: Read** | Tell whether the live site is the last successful build |
-| **Environment Variables: Read** | Detect a variable changed after the last build, or scoped only to Preview. **Names and scopes only — Munim never reads values** |
+| **Project Environment Variables: Read/Write** | Vercel offers **no read-only option** for this scope. Munim only ever reads, and only names and scopes, never values. Say so plainly in Instructions rather than letting the permission speak for itself |
 | **Domains: Read** | Check a custom domain is attached and its certificate is valid |
 
 Add **Domains: Read/Write** and **Deployments: Read/Write** only when the write
 path ships. Asking for less than you need is easy to widen; asking for more than
 you need is what makes people decline an install.
 
-### Feature Media (1–8 images, 16:9)
+### Feature Media (1–8 images, 16:9, **minimum 1920x1080**)
 
-Reuse the gallery stills — see `docs/stills/README.md`. Three are ready:
+`docs/stills/feature-01-the-finding.png` is ready and correctly sized. Reuse the
+rest of the gallery stills — see `docs/stills/README.md`:
 
 1. The launch mid-flight, check grid lighting up
 2. The SPF finding, with raw resolver output and timestamp
