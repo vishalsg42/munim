@@ -102,23 +102,120 @@ async def test_writing_beside_existing_duplicates_is_refused():
             ZONE, type="TXT", name="acme.example", content="v=spf1 include:x ~all")
 
 
+class _Zone:
+    """A Cloudflare zone that remembers what was written to it.
+
+    A fake that answers every list with the same fixed rows cannot tell a merge
+    that worked from one that left both policies in place, which is the only
+    thing this function has to get right. It has to hold state.
+    """
+
+    def __init__(self, records):
+        self.rows = {r["id"]: r for r in records}
+        self.deleted = []
+        self.updated = []
+        self.fail_delete = None            # record id whose delete is rejected
+        self.fail_put = False              # the write is rejected
+        self.pretend_deletes_worked = False  # 200 OK, nothing actually removed
+
+    def install(self):
+        respx.get(f"{API}/zones/{ZONE}/dns_records").mock(
+            side_effect=lambda request: _list(list(self.rows.values())))
+        respx.put(url__startswith=f"{API}/zones/{ZONE}/dns_records/").mock(
+            side_effect=self._put)
+        respx.delete(url__startswith=f"{API}/zones/{ZONE}/dns_records/").mock(
+            side_effect=self._delete)
+        return self
+
+    def _id(self, request):
+        return str(request.url).rsplit("/", 1)[-1]
+
+    def _put(self, request):
+        import json as _json
+        rid = self._id(request)
+        if self.fail_put:
+            return httpx.Response(200, json={
+                "success": False, "errors": [{"message": "rejected"}], "result": None})
+        body = _json.loads(request.content)
+        self.rows[rid] = {**self.rows[rid], **body, "id": rid}
+        self.updated.append(rid)
+        return _one(self.rows[rid])
+
+    def _delete(self, request):
+        rid = self._id(request)
+        if self.fail_delete == rid:
+            return httpx.Response(200, json={
+                "success": False, "errors": [{"message": "rate limited"}], "result": None})
+        if self.pretend_deletes_worked:
+            self.deleted.append(rid)
+            return httpx.Response(200, json={"success": True, "errors": [], "result": {}})
+        self.rows.pop(rid, None)
+        self.deleted.append(rid)
+        return httpx.Response(200, json={"success": True, "errors": [], "result": {}})
+
+    def spf(self):
+        return [r for r in self.rows.values()
+                if r["content"].lower().startswith("v=spf1")]
+
+
 @respx.mock
 async def test_merging_leaves_exactly_one_record():
-    respx.get(f"{API}/zones/{ZONE}/dns_records").mock(return_value=_list([
+    zone = _Zone([
         _record("r1", "v=spf1 include:_spf.google.com ~all"),
         _record("r2", "v=spf1 include:amazonses.com ~all"),
-    ]))
+    ]).install()
     merged = "v=spf1 include:_spf.google.com include:amazonses.com ~all"
-    update = respx.put(f"{API}/zones/{ZONE}/dns_records/r1").mock(
-        return_value=_one(_record("r1", merged)))
-    delete = respx.delete(f"{API}/zones/{ZONE}/dns_records/r2").mock(
-        return_value=httpx.Response(200, json={"success": True, "errors": [], "result": {}}))
 
     record, action = await Cloudflare(_container()).merge_spf(ZONE, "acme.example", merged)
 
     assert action == "merged"
-    assert update.called and delete.called
     assert record.content == merged
+    assert len(zone.spf()) == 1, f"left {len(zone.spf())} policies behind"
+    assert zone.spf()[0]["content"] == merged
+
+
+@respx.mock
+async def test_a_failed_write_leaves_one_policy_not_three():
+    """Deleting before writing is what makes a partial failure survivable.
+
+    Write-then-delete and delete-then-write fail equally badly when a *delete*
+    fails: either way two policies are left and receivers ignore both. They
+    differ when the *write* fails. Write first and nothing has been removed, so
+    the domain keeps every policy it had and mail stays broken. Delete first and
+    the leftovers are already gone, so the domain is left with one intact
+    policy: not the merge that was wanted, but a working one.
+    """
+    zone = _Zone([
+        _record("r1", "v=spf1 include:_spf.google.com ~all"),
+        _record("r2", "v=spf1 include:amazonses.com ~all"),
+        _record("r3", "v=spf1 include:mailgun.org ~all"),
+    ]).install()
+    zone.fail_put = True
+    merged = "v=spf1 include:_spf.google.com include:amazonses.com ~all"
+
+    with pytest.raises(CloudflareError):
+        await Cloudflare(_container()).merge_spf(ZONE, "acme.example", merged)
+
+    left = zone.spf()
+    assert len(left) == 1, f"a failed write left {len(left)} policies in place"
+    assert left[0]["content"] == "v=spf1 include:_spf.google.com ~all"
+
+
+@respx.mock
+async def test_a_merge_that_did_not_take_is_reported_not_assumed():
+    """An API that answers success without changing anything must not read as a
+    successful merge. The caller's whole reason for calling is that there ends
+    up being one policy, so that is read back rather than inferred from
+    two HTTP 200s."""
+    zone = _Zone([
+        _record("r1", "v=spf1 include:_spf.google.com ~all"),
+        _record("r2", "v=spf1 include:amazonses.com ~all"),
+    ]).install()
+    zone.pretend_deletes_worked = True   # 200 OK, nothing removed
+    merged = "v=spf1 include:_spf.google.com include:amazonses.com ~all"
+
+    with pytest.raises(CloudflareError, match="2 sender policies after the merge"):
+        await Cloudflare(_container()).merge_spf(ZONE, "acme.example", merged)
 
 
 @respx.mock

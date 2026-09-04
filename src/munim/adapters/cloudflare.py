@@ -127,20 +127,47 @@ class Cloudflare:
 
     async def merge_spf(self, zone: str, domain: str, merged: str) -> tuple[Record, str]:
         """Replace every SPF record with one. The only safe way to end up with
-        a single policy when a domain already carries more than one."""
+        a single policy when a domain already carries more than one.
+
+        Order matters, though not where it first appears to. A failed *delete*
+        is equally bad either way: two policies remain and receivers ignore
+        both. The orders differ when the *write* fails. Write first and nothing
+        has been removed yet, so the domain keeps every policy it had and mail
+        stays broken. Delete first and the leftovers are already gone, so what
+        remains is one intact policy: not the merge that was wanted, but a
+        working one. That is the most a partial write can be.
+
+        The read-back at the end is separate, and covers the case neither order
+        helps with: an API that answers 200 without changing anything. Two
+        successful responses are not evidence that one policy is left, and one
+        policy is the only thing this function promises.
+        """
         spf = [r for r in await self.records(zone, type="TXT", name=domain)
                if r.content.lower().startswith("v=spf1")]
         if not spf:
             return await self.upsert(zone, type="TXT", name=domain, content=merged)
 
+        survivor, leftovers = spf[0], spf[1:]
         async with self._container.http("cloudflare") as http:
-            payload = _ok((await http.put(
-                f"/zones/{zone}/dns_records/{spf[0].id}",
-                json={"type": "TXT", "name": domain, "content": merged, "ttl": 1})).json())
-            for extra in spf[1:]:
+            for extra in leftovers:
                 _ok((await http.delete(f"/zones/{zone}/dns_records/{extra.id}")).json())
+            payload = _ok((await http.put(
+                f"/zones/{zone}/dns_records/{survivor.id}",
+                json={"type": "TXT", "name": domain, "content": merged, "ttl": 1})).json())
+
+        # Read back rather than trust the writes. A merge that silently left two
+        # policies is indistinguishable, from the caller's side, from one that
+        # worked, and the whole point of this function is that there is one.
+        remaining = [r for r in await self.records(zone, type="TXT", name=domain)
+                     if r.content.lower().startswith("v=spf1")]
+        if len(remaining) != 1:
+            raise CloudflareError(
+                f"{domain} has {len(remaining)} sender policies after the merge, "
+                f"not one. Nothing further was written. The records now are: "
+                + "; ".join(r.content for r in remaining)
+            )
 
         self._note("mutation",
                    f"Merged {len(spf)} sender policies into one",
-                   check="spf_single", action="merged", removed=len(spf) - 1)
+                   check="spf_single", action="merged", removed=len(leftovers))
         return Record.from_api(payload["result"]), "merged"
