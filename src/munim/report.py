@@ -59,22 +59,31 @@ def _e(text: str) -> str:
 def render(log: RunLog, *, domain: str, business: str) -> str:
     events: list[LaunchEvent] = list(log.read())
     findings = [e for e in events if e.kind == "finding"]
-    resolved = {e.detail.get("check") for e in events if e.kind == "resolved"}
+    # Keep the text, not just the name: a repaired check has to be described by
+    # what is true now, not by the problem it used to have.
+    resolved_text = {e.detail.get("check"): e.human_text
+                     for e in events if e.kind == "resolved"}
+    resolved = set(resolved_text)
     passed = [e for e in events if e.kind == "observation" and e.detail.get("check")]
 
     outstanding = [e for e in findings if e.detail.get("check") not in resolved]
     fixed = [e for e in findings if e.detail.get("check") in resolved]
     checked = len({e.detail.get("check") for e in passed} | {e.detail.get("check") for e in findings})
 
+    # "We checked 1 things" - the outstanding headline below pluralises and the
+    # subtitle did not, which is the same half-done job as "2 things needs your
+    # attention" was.
+    noun = "thing" if checked == 1 else "things"
+
     if outstanding:
         many = len(outstanding) > 1
         headline = (f"{len(outstanding)} things need your attention" if many
                     else "One thing needs your attention")
-        sub = (f"We checked {checked} things about {domain}. Most were fine. "
+        sub = (f"We checked {checked} {noun} about {domain}. Most were fine. "
                f"These were not, and they are the kind that break quietly.")
     else:
         headline = "Everything checks out"
-        sub = (f"We checked {checked} things about {domain}, including the ones "
+        sub = (f"We checked {checked} {noun} about {domain}, including the ones "
                "that fail without anyone noticing.")
 
     cards = []
@@ -92,6 +101,12 @@ def render(log: RunLog, *, domain: str, business: str) -> str:
     items = []
     for e in passed:
         items.append(f"<li>{_e(e.human_text)}</li>")
+    for e in fixed:
+        # Ticked, because it passes now - so it is described by what is true
+        # now. Showing the finding text under a green tick told the owner their
+        # domain still had the problem that had just been fixed for them.
+        says = resolved_text.get(e.detail.get("check")) or e.human_text
+        items.append(f"<li>{_e(says)}</li>")
     for e in outstanding:
         items.append(f'<li class="no">{_e(e.human_text)}</li>')
 
@@ -106,8 +121,7 @@ def render(log: RunLog, *, domain: str, business: str) -> str:
   <h1>{_e(headline)}</h1>
   <p class="sub">{_e(sub)}</p>
   {"".join(cards) if cards else ""}
-  <h2>Everything we looked at</h2>
-  <ul class="checks">{"".join(items)}</ul>
+  {f'<h2>Everything we looked at</h2><ul class="checks">{"".join(items)}</ul>' if items else ""}
   <footer>
     Checked automatically for {_e(business)} &middot; <code>{_e(domain)}</code><br>
     Run {_e(log.run_id)}. Every result here came from a live lookup, not a guess.

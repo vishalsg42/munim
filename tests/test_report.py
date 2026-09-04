@@ -44,3 +44,52 @@ def test_business_and_domain_are_escaped(tmp_path):
     page = render(_log(tmp_path), domain="<script>x</script>", business="A & B")
     assert "<script>" not in page
     assert "A &amp; B" in page
+
+
+def _log_from(tmp_path, events):
+    """A run log built from (kind, check, text) triples."""
+    log = RunLog(new_run_id(), tmp_path)
+    for kind, check, text in events:
+        log.append(client="Ivy & Fern Studio", stage="mail", kind=kind,
+                   human_text=text, detail={"check": check} if check else {})
+    return log
+
+
+def test_one_check_is_a_thing_not_things(tmp_path):
+    """"We checked 1 things" - the headline pluralised and the subtitle did not."""
+    log = _log_from(tmp_path, [("observation", "mx_present", "Mail can reach you.")])
+    page = render(log, domain="ivyandfern.co.uk", business="Ivy & Fern Studio")
+    assert "1 thing about" in page
+    assert "1 things" not in page
+
+
+def test_two_checks_are_things(tmp_path):
+    log = _log_from(tmp_path, [("observation", "mx_present", "Mail can reach you."),
+                               ("observation", "dmarc_present", "Mail is signed.")])
+    page = render(log, domain="ivyandfern.co.uk", business="Ivy & Fern Studio")
+    assert "2 things about" in page
+
+
+def test_a_repaired_finding_appears_in_what_we_looked_at(tmp_path):
+    """It showed in a card and nowhere else, so a run whose only event was a
+    repair printed "Everything we looked at" above an empty list - against this
+    module's own rule that the size of the net has to be visible."""
+    log = _log_from(tmp_path, [
+        ("finding", "spf_single", "This domain has more than one sender policy."),
+        ("resolved", "spf_single", "One sender policy now, covering every sender."),
+    ])
+    page = render(log, domain="ivyandfern.co.uk", business="Ivy & Fern Studio")
+    assert "Everything we looked at" in page
+    body = page.split("Everything we looked at", 1)[1]
+    assert "<li>" in body, "the repaired check is missing from the list"
+    # Ticked and described by what is true now. Showing the finding text under a
+    # green tick told the owner their domain still had the fixed problem.
+    assert "One sender policy now" in body
+    assert "more than one sender policy" not in body
+
+
+def test_no_heading_over_an_empty_list(tmp_path):
+    """A run that checked nothing must not promise everything it looked at."""
+    log = _log_from(tmp_path, [("stage_start", None, "Checking email authentication")])
+    page = render(log, domain="ivyandfern.co.uk", business="Ivy & Fern Studio")
+    assert "Everything we looked at" not in page
