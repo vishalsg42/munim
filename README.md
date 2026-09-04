@@ -305,6 +305,21 @@ a secret service, and nobody has yet confirmed the browser callback and the
 keychain behave there. CI runs the suite on Linux, which is a start and not the
 same thing.
 
+**Local stdio servers.** Munim holds sessions with remote MCP servers over
+HTTP. A stdio server is a process, not an endpoint, so holding one per client
+means spawning N processes with N environments, which is a different design and
+is what `mcpwarden` does. On one real machine, 20 of 26 configured servers were
+remote and 4 were stdio, so this is a real gap rather than a theoretical one.
+
+**Providers whose authorization server will not register a client.** Every
+Google MCP server, which is Gmail, Stitch, Drive and Calendar, authenticates
+against `accounts.google.com`. It advertises no registration endpoint and
+requires `client_secret_post`, so somebody has to be a registered application.
+In a coding agent that somebody is the agent itself: a Gmail connector works
+without setup because the client, not the operator, holds the Google
+registration. Munim is a client too, so it needs its own, and that is a decision
+about carrying a Google credential rather than a thing to slip in.
+
 **Watch mode.** `audit_all_clients` is the shape of it and runs on demand.
 Running on a schedule and telling somebody only when the answer changes is the
 version an operator would actually leave on.
