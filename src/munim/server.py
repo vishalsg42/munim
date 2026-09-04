@@ -36,11 +36,16 @@ MUTATING = {"connect_provider"}
 PROVIDERS = ("cloudflare", "vercel", "resend")
 
 
-def build_server(backend=None, registry=None, runs_dir=None) -> FastMCP:
+def build_server(backend=None, registry=None, runs_dir=None,
+                 reports_dir=None) -> FastMCP:
     server = FastMCP("munim")
     backend = backend or KeychainBackend()
     registry = registry or Registry(Path.home() / ".munim" / "registry.json")
     runs = Path(runs_dir) if runs_dir else None
+    # A caller that redirects the run log means it away from the real home;
+    # leaving reports behind wrote test output into ~/.munim/reports for every
+    # check a test ran.
+    reports = Path(reports_dir) if reports_dir else None
 
     def container_for(client: str) -> Container:
         return Container.for_client(registry, client, backend)
@@ -180,7 +185,8 @@ def build_server(backend=None, registry=None, runs_dir=None) -> FastMCP:
         failures = [r for r in results if r.status == "fail"]
         log.append(client=client, stage="verify", kind="run_done",
                    human_text=f"Checked {target_domain}.")
-        report = write_report(log, domain=target_domain, business=client)
+        report = write_report(log, domain=target_domain, business=client,
+                              out_dir=reports)
         return {
             "client": client,
             "domain": target_domain,
