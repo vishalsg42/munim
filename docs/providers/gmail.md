@@ -85,7 +85,8 @@ as test users, which is the next step.
 
 Application type: **Desktop app**. Name it anything. Create.
 
-Copy the two values into `.env`:
+Copy the two values into `~/.munim/.env`, which is the location that works
+regardless of where you run from:
 
 ```
 GMAIL_OAUTH_CLIENT_ID=...apps.googleusercontent.com

@@ -137,7 +137,9 @@ The rest is by hand, because Google publishes no API for it.
   1. https://console.cloud.google.com/auth/clients/create?project={project}
   2. Application type: Desktop app
   3. Name it whatever you like. Create.
-  4. Copy the client ID and client secret into .env:
+  4. Copy the client ID and client secret into ~/.munim/.env, which is the
+     location Munim reads regardless of where you run from (a .env in the
+     current directory works too):
 
        {key}_OAUTH_CLIENT_ID=...apps.googleusercontent.com
        {key}_OAUTH_CLIENT_SECRET=...

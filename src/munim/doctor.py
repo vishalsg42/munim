@@ -32,6 +32,28 @@ class Finding:
     fix: str = ""
 
 
+def _config() -> Finding:
+    """Which file the configuration came from, or where to put one.
+
+    Named rather than implied, because the loader consults several places and
+    "it works in one directory and not another" is a mystery until you know
+    which file was read. An installed package finds nothing in site-packages,
+    so this is also how somebody discovers ~/.munim/.env exists.
+    """
+    from munim.env import CONFIG_HOME, load, sources
+
+    used = load()
+    if used:
+        home = Path.home()
+        shown = f"~/{used.relative_to(home)}" if used.is_relative_to(home) else str(used)
+        return Finding(OK, "Config", shown)
+
+    looked = ", ".join(str(p) for p, exists in sources()[:2] if not exists)
+    return Finding(WARN, "Config", "no .env found",
+                   fix=f"create {CONFIG_HOME}, or a .env in the directory you "
+                       f"run from. Looked in {looked} and further up")
+
+
 def _model() -> Finding:
     load_env()
     if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
@@ -192,7 +214,7 @@ def _room() -> Finding:
 
 def run(registry: Registry | None = None) -> int:
     registry = registry or Registry(Path.home() / ".munim" / "registry.json")
-    findings = [_model(), _mcp_registered(), _room(), _keychain(),
+    findings = [_config(), _model(), _mcp_registered(), _room(), _keychain(),
                 *_oauth_apps(), *_clients(registry)]
 
     width = max(len(f.what) for f in findings) + 2

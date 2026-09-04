@@ -43,15 +43,22 @@ The control room ships inside the package, so there is nothing to compile.
 ### Three steps to something useful
 
 **1. Point it at a model.** Any Strands-supported provider works: Amazon Bedrock,
-Gemini, Anthropic, OpenAI, Ollama. Put one key in `.env` in the directory you run
-from (see [`.env.example`](.env.example)):
+Gemini, Anthropic, OpenAI, Ollama.
 
-```
-GEMINI_API_KEY=...
+```bash
+mkdir -p ~/.munim && echo "GEMINI_API_KEY=..." >> ~/.munim/.env
 ```
 
-Only the tools that reason need this: `check`, `work_on_client` and
-`ask_across_clients`. Connecting accounts and reading them needs no model.
+`~/.munim/.env` is the one that always works, because the MCP server is spawned
+by your coding agent and inherits neither your shell nor your working directory.
+Munim reads, in order: `$MUNIM_ENV` if you set it, then `.env` in the directory
+you run from and its parents, then `~/.munim/.env`. A variable already exported
+in your environment always wins, so CI needs no file at all.
+
+`munim doctor` prints which file it read, on the first line.
+
+Only the tools that reason need a model: `check`, `work_on_client` and
+`ask_across_clients`. Connecting accounts and reading them needs none.
 
 **2. Connect a client.** A browser opens, you sign in, and that is the setup. No
 application to register, no client secret anywhere in this project, because the
