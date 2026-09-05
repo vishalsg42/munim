@@ -10,7 +10,9 @@ import platform
 import shutil
 import subprocess
 import sys
+import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -149,6 +151,46 @@ def _agents() -> list[Finding]:
     out.append(Finding(BAD, "Agents", "on, but no model host can be built",
                        fix=_why_nothing_is_usable(state)))
     return out
+
+
+@contextmanager
+def spinner(label: str):
+    """A loader for the one check that is slow enough to need one.
+
+    `claude mcp list` takes about fifteen seconds to start, which is nearly all
+    of this command's runtime and is Claude Code's cost rather than ours. There
+    is nothing to make faster, so the wait is shown instead of hidden.
+
+    Terminal only. Frames redrawn with a carriage return are noise in a pipe or
+    a log, where the return is not honoured and the half-erased text survives
+    into whatever reads it. It also clears the line on the way out rather than
+    leaving the last frame behind, and runs as a daemon thread so a Ctrl-C
+    cannot leave the spinner running after the command has gone.
+    """
+    if not sys.stderr.isatty():
+        yield
+        return
+
+    stop = threading.Event()
+
+    def spin() -> None:
+        frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+        turn = 0
+        while not stop.is_set():
+            sys.stderr.write(f"\r  {frames[turn % len(frames)]} {label}")
+            sys.stderr.flush()
+            turn += 1
+            stop.wait(0.08)
+        sys.stderr.write("\r" + " " * (len(label) + 6) + "\r")
+        sys.stderr.flush()
+
+    thread = threading.Thread(target=spin, daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        thread.join(timeout=1)
 
 
 _LISTING: list[str] | None = None
@@ -448,21 +490,19 @@ def run(registry: Registry | None = None, verbose: bool = False) -> int:
     # Only on a terminal. A progress line redrawn with \r is noise in a pipe or
     # a log, where the carriage return is not honoured and the half-erased text
     # survives into whatever reads it.
-    slow = shutil.which("claude") is not None and sys.stderr.isatty()
-    if slow:
-        print("  asking your coding agent which MCP servers are registered…",
-              end="\r", file=sys.stderr, flush=True)
-
     health = [timed("config", _config), timed("settings", _settings_file),
-              *timed("agents", _agents), timed("coding agent", _mcp_registered),
-              *timed("interpreter", _one_interpreter), timed("control room", _room),
-              timed("keychain", _keychain)]
+              *timed("agents", _agents)]
+
+    # Only this one gets a spinner, because only this one is slow. Wrapping the
+    # whole report would flicker through eight instant checks to reach it.
+    with spinner("checking your coding agent"):
+        health.append(timed("coding agent", _mcp_registered))
+        health += timed("interpreter", _one_interpreter)
+
+    health += [timed("control room", _room), timed("keychain", _keychain)]
     inventory = ([*timed("providers", _oauth_apps),
                   *timed("clients", lambda: _clients(registry))]
                  if verbose else [])
-
-    if slow:
-        print(" " * 60, end="\r", file=sys.stderr, flush=True)
 
     print()
 
