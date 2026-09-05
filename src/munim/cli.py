@@ -407,6 +407,20 @@ def ask_which_client(registry, ask=input, *, account_can_name=False) -> str | No
     out.
     """
     records = sorted(registry.clients(), key=lambda r: r.name.lower())
+    # Nothing to choose from is not a choice. Printing "Which client is this
+    # for?" above a single line reading "a client not listed" is a menu with no
+    # items on it, and the operator has to work out that the answer is `n`
+    # before they can type the name they already knew.
+    if not records:
+        print("No clients yet, so this one is new.", file=sys.stderr)
+        print("Name for this client: ", end="", file=sys.stderr, flush=True)
+        try:
+            name = ask().strip()
+        except (EOFError, KeyboardInterrupt):
+            print(file=sys.stderr)
+            return None
+        return name or None
+
     print("Which client is this for?", file=sys.stderr)
     for number, record in enumerate(records, 1):
         print(f"  {number}  {record.name}"

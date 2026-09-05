@@ -46,10 +46,16 @@ def test_an_existing_client_can_adopt_the_session(estate, monkeypatch, capsys):
     assert record is not None and record.name == "Acme"
 
 
-def test_a_client_can_be_created_for_it(estate, monkeypatch, capsys):
+def test_a_client_can_be_created_alongside_existing_ones(estate, monkeypatch, capsys):
     """Refusing because the name is new would mean logging in again for no
-    reason. The login has already happened."""
+    reason. The login has already happened.
+
+    A client is registered first so that the menu exists: with an empty registry
+    there is no "not listed" step, because there is nothing listed to be absent
+    from, and the prompt asks for a name directly.
+    """
     reg, _ = estate
+    reg.add(ClientRecord(name="Acme"))
     answers = iter(["n", "Ivy & Fern"])
 
     record = cli.adopt_provisional(reg, "vercel", ask=lambda: next(answers))
@@ -108,3 +114,49 @@ def test_nothing_is_left_under_the_provisional_key_when_declined(estate):
 class _Token:
     def __init__(self, value): self.value = value
     def model_dump_json(self): return '{"access_token": "%s"}' % self.value
+
+
+# ---- the picker with nothing to pick -------------------------------------
+
+def test_an_empty_registry_asks_for_a_name_rather_than_offering_a_menu(estate, capsys):
+    """Printing "Which client is this for?" above a single line reading "a
+    client not listed" is a menu with no items on it. The operator has to work
+    out that the answer is `n` before they can type the name they already knew.
+    """
+    reg, _ = estate
+
+    assert cli.ask_which_client(reg, ask=lambda: "Ivy & Fern") == "Ivy & Fern"
+    asked = capsys.readouterr().err
+    assert "Name for this client" in asked
+    assert "Which client is this for" not in asked
+    assert "a client not listed" not in asked
+
+
+def test_the_menu_comes_back_as_soon_as_there_is_something_to_pick(estate, capsys):
+    """The other direction. Asserting only that the menu is hidden would pass
+    if the menu had been deleted."""
+    reg, _ = estate
+    reg.add(ClientRecord(name="Acme", domain="acme.test"))
+
+    chosen = cli.ask_which_client(reg, ask=lambda: "1")
+    assert chosen == reg.get("Acme").id, "the menu must return an id, not a label"
+    asked = capsys.readouterr().err
+    assert "Which client is this for" in asked
+    assert "Acme" in asked and "acme.test" in asked
+
+
+def test_an_empty_name_backs_out_rather_than_registering_nothing(estate):
+    reg, _ = estate
+    assert cli.ask_which_client(reg, ask=lambda: "   ") is None
+
+
+def test_adoption_uses_the_name_typed_into_an_empty_registry(estate):
+    """End to end: a first connection on a fresh install has no menu, and the
+    session still ends up filed under a real client id."""
+    reg, _ = estate
+    record = cli.adopt_provisional(reg, "vercel", ask=lambda: "Ivy & Fern")
+
+    assert record is not None
+    assert record.name == "Ivy & Fern"
+    assert record.id.startswith("c_"), "credentials are filed by identity"
+    assert reg.get("Ivy & Fern").id == record.id
