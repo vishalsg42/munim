@@ -474,84 +474,29 @@ def _room() -> Finding:
 # How long one provider gets to answer before the probe gives up on it. Short
 # on purpose: this runs on every `doctor`, and a provider that has not answered
 # in this long is not going to make the report more useful by answering later.
-PROBE_TIMEOUT = 8.0
-
-
-async def _probe_one(client_id: str, name: str, provider: str) -> tuple | None:
-    """(name, provider, why) if this session cannot be opened, else None."""
-    import asyncio
-
-    from munim.remote.session import NeedsLogin, NoRemoteServer, session_for
-
-    try:
-        async with asyncio.timeout(PROBE_TIMEOUT):
-            async with session_for(client_id, provider, allow_login=False,
-                                   verify=False) as session:
-                await session.list_tools()
-        return None
-    except NeedsLogin:
-        return (name, provider, "the session expired")
-    except NoRemoteServer:
-        # Nothing to probe rather than something broken.
-        return None
-    except (TimeoutError, asyncio.TimeoutError):
-        return (name, provider, f"no answer in {PROBE_TIMEOUT:.0f}s")
-    except Exception as other:
-        # Offline, DNS down, a provider having an outage. Reported as what it
-        # is rather than as an expired session, because telling somebody to
-        # reconnect when their wifi is off sends them through a browser login
-        # for nothing.
-        return (name, provider, f"could not be reached ({type(other).__name__})")
-
-
 def _sessions(registry: Registry) -> list[Finding]:
     """Which stored sessions actually still open.
 
     Everything else in this file reads local state. This one goes out to each
-    provider, because a dead session is not visible any other way: OAuth grants
-    a token and says nothing more, and the only authority on whether a
-    credential still works is the party that issued it.
-
-    That is a real cost and it is why the checks run concurrently. Serially
-    this is one round trip after another and grows with every client; together
-    it is bounded by the slowest provider, so a person with eight clients waits
-    about as long as a person with one.
+    provider, because a dead session is not visible any other way. The probes
+    and their reasoning live in munim/health.py, shared with the navigable
+    client view, so there is one answer to "is this live" rather than two.
     """
-    import asyncio
+    from munim import health
 
-    backend = KeychainBackend()
-    work = []
-    for record in registry.clients():
-        try:
-            _, sessions = connections(record.id, backend)
-        except Exception:
-            continue    # _keychain already reports an unreadable store
-        work += [(record.id, record.name, p) for p in sessions]
-
-    if not work:
+    results = health.check_all(registry)
+    if not results:
         return []
 
-    async def everything():
-        return await asyncio.gather(*(_probe_one(*item) for item in work))
-
-    try:
-        results = asyncio.run(everything())
-    except RuntimeError:
-        # Already inside a loop, which doctor never is from the CLI. Skipping
-        # beats crashing the whole report over one check.
-        return []
-
-    dead = [r for r in results if r is not None]
+    dead = [r for r in results if not r.live]
     if not dead:
-        return [Finding(OK, "Sessions",
-                        f"{len(work)} checked, all still open")]
+        return [Finding(OK, "Sessions", f"{len(results)} checked, all still open")]
 
-    # One line each rather than a single finding listing them. Each dead
-    # session has its own fix, and a semicolon-separated run of commands is
-    # something a person has to unpick before they can act on any of it.
-    return [Finding(WARN, "Session", f"{name}/{provider}: {why}",
-                    f'munim connect "{name}" {provider}')
-            for name, provider, why in dead]
+    # One line each rather than a single finding listing them all. Each has its
+    # own fix, and a semicolon-separated run of commands is something a person
+    # has to unpick before they can act on any of it.
+    return [Finding(WARN, "Session", f"{r.client}/{r.provider}: {r.detail}", r.fix)
+            for r in dead]
 
 
 def run(registry: Registry | None = None, verbose: bool = False) -> int:

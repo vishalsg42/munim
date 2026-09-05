@@ -1553,6 +1553,17 @@ def main(argv: list[str] | None = None) -> int:
             print(json_module.dumps(out, indent=2))
             return 0
 
+        # On a terminal this is navigable: the flat list tells you what is
+        # stored, and stored is not the same as working, which is how two dead
+        # sessions read as connected all day. Piped or redirected it stays
+        # exactly the table it was, because that is what scripts read and what
+        # every existing test asserts.
+        from munim import pick
+
+        if pick.interactive():
+            from munim.browse import walk
+            return walk(_registry())
+
         for record in records:
             print(f"{record.name:32} {record.domain or '-':32} "
                   f"{describe(record.id, backend)}")

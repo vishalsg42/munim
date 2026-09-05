@@ -314,6 +314,11 @@ def menu(title: str, rows: list, *, subtitle: str = "",
     with confidence. Pass an iterable of keypresses and raw mode is skipped
     entirely, so the drawing and the navigation stay testable without a
     terminal.
+
+    Pass an *iterator* when several menus make up one walk. iter() on a list
+    restarts it, so handing the same list to each screen replays the same
+    keypresses forever; iter() on an iterator returns the same object, which
+    is what lets position carry across screens.
     """
     order = _selectable(rows)
     if not order:

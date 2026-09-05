@@ -12,10 +12,11 @@ probes run concurrently.
 """
 
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
 
 import pytest
 
-from munim import doctor
+from munim import doctor, health
 from munim.registry import ClientRecord, Registry
 from munim.remote.session import NeedsLogin, NoRemoteServer
 
@@ -30,7 +31,7 @@ def two_clients(tmp_path, monkeypatch):
 
 def sessions_are(monkeypatch, held, behaviour):
     """`held` is what is stored; `behaviour` decides what opening one does."""
-    monkeypatch.setattr(doctor, "connections",
+    monkeypatch.setattr(health, "connections",
                         lambda cid, backend=None: ([], list(held)))
 
     @asynccontextmanager
@@ -41,7 +42,10 @@ def sessions_are(monkeypatch, held, behaviour):
 
         class Session:
             async def list_tools(self):
-                return []
+                # The real one returns an object with `.tools`, not a bare
+                # list. A double narrower than the thing it replaces hides
+                # exactly the breakage it is meant to catch.
+                return SimpleNamespace(tools=[])
         yield Session()
 
     monkeypatch.setattr("munim.remote.session.session_for", fake)
@@ -109,7 +113,7 @@ def test_a_provider_with_no_mcp_server_is_not_a_problem(two_clients, monkeypatch
 def test_nothing_connected_means_nothing_to_say(tmp_path, monkeypatch):
     """A fresh install must not grow a Sessions line it cannot act on."""
     reg = Registry(tmp_path / "r.json")
-    monkeypatch.setattr(doctor, "connections", lambda cid, backend=None: ([], []))
+    monkeypatch.setattr(health, "connections", lambda cid, backend=None: ([], []))
 
     assert doctor._sessions(reg) == []
 
@@ -121,7 +125,7 @@ def test_an_unreadable_credential_store_does_not_crash_the_report(
     def explode(cid, backend=None):
         raise RuntimeError("credentials unreadable")
 
-    monkeypatch.setattr(doctor, "connections", explode)
+    monkeypatch.setattr(health, "connections", explode)
 
     assert doctor._sessions(two_clients) == []
 
@@ -132,7 +136,7 @@ def test_the_probes_run_together_rather_than_one_after_another(
     import asyncio
     import time
 
-    monkeypatch.setattr(doctor, "connections",
+    monkeypatch.setattr(health, "connections",
                         lambda cid, backend=None: ([], ["cloudflare", "vercel"]))
 
     @asynccontextmanager
@@ -157,8 +161,8 @@ def test_a_hanging_provider_is_given_up_on(two_clients, monkeypatch):
     """A report that waits forever on one provider is worse than an incomplete one."""
     import asyncio
 
-    monkeypatch.setattr(doctor, "PROBE_TIMEOUT", 0.1)
-    monkeypatch.setattr(doctor, "connections",
+    monkeypatch.setattr(health, "TIMEOUT", 0.1)
+    monkeypatch.setattr(health, "connections",
                         lambda cid, backend=None: ([], ["cloudflare"]))
 
     @asynccontextmanager
