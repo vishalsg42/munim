@@ -87,7 +87,15 @@ async def tools_for(client: str, provider: str, *, backend=None) -> list[dict]:
     async with session_for(client, provider, backend=backend,
                            allow_login=False) as session:
         listing = await session.list_tools()
-    return [_described(t) for t in listing.tools]
+    described = [_described(t) for t in listing.tools]
+
+    # Remembered so an expired session is not a dead end. Both providers here
+    # refuse `initialize` without a token, so there is no way to ask again once
+    # the credential dies, and this is the only moment the answer exists. Names
+    # and schemas only: nothing about the account and no result of any call.
+    from munim import toolcache
+    toolcache.remember(client, provider, described)
+    return described
 
 
 async def describe_tool(client: str, provider: str, tool: str, *,

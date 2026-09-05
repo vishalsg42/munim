@@ -82,20 +82,39 @@ def _render(options: list[tuple[str, str]], cursor: int, typed: str,
 def _read_key() -> str:
     """One keypress, including the three bytes an arrow key arrives as.
 
-    Esc is both a key and the first byte of every arrow, and telling them apart
-    means waiting to see whether more follows. Reading two bytes unconditionally
-    blocks until the operator presses something else, so pressing Esc did
-    nothing at all until the next keystroke and the picker looked frozen. A
-    short wait separates them: an arrow's remaining bytes are already in the
-    buffer, a person's finger is not.
+    Read straight from the file descriptor, never through `sys.stdin`. Python's
+    text layer reads ahead, so an arrow's trailing "[B" ended up in *its*
+    buffer while `select` asked the kernel, saw nothing waiting, and concluded
+    the Esc was on its own. Pressing Down went back a screen.
+
+    Esc is both a key and the first byte of every arrow, so telling them apart
+    means waiting to see whether more follows. An arrow sends all three bytes
+    in a single write and they are already here; a finger is slower than any
+    terminal. Reading two bytes unconditionally instead made a bare Esc block
+    on bytes that were never coming, which looked like the picker had frozen.
+
+    A UTF-8 lead byte says how many continuation bytes to expect, because a
+    typed name may not be ASCII and half a character is not a keypress.
     """
-    first = sys.stdin.read(1)
-    if first != ESC:
-        return first
-    if not select.select([sys.stdin], [], [], ESCAPE_TAIL)[0]:
-        return ESC
-    rest = sys.stdin.read(2)            # arrows are ESC [ A/B
-    return first + rest if rest else ESC
+    fd = sys.stdin.fileno()
+    data = os.read(fd, 1)
+    if not data:
+        return CTRL_C                   # the terminal went away
+
+    if data == ESC.encode():
+        if select.select([fd], [], [], ESCAPE_TAIL)[0]:
+            data += os.read(fd, 2)      # arrows are ESC [ A/B
+        return data.decode("utf-8", "replace")
+
+    lead = data[0]
+    need = (4 if lead >= 0xF0 else 3 if lead >= 0xE0 else
+            2 if lead >= 0xC0 else 1)
+    while len(data) < need:
+        more = os.read(fd, need - len(data))
+        if not more:
+            break
+        data += more
+    return data.decode("utf-8", "replace")
 
 
 def _live(prompt: str, options: list[tuple[str, str]], allow_new: bool,

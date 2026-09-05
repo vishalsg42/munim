@@ -41,6 +41,8 @@ def _agents_are_off_and_no_host_is_real(tmp_path, monkeypatch):
     # Credentials live in a file now, so this is the door that matters. Read on
     # every call rather than captured at import, so import order cannot defeat it.
     monkeypatch.setenv("MUNIM_CREDENTIALS", str(tmp_path / "credentials.json"))
+    # The remembered tool list is the third file munim writes to ~/.munim.
+    monkeypatch.setenv("MUNIM_TOOL_CACHE", str(tmp_path / "tools.json"))
     for name in ("MUNIM_AI", "MUNIM_AI_HOST", "MUNIM_PREFER",
                  "MUNIM_BEDROCK_MODEL", "MUNIM_GEMINI_MODEL",
                  "MUNIM_ANTHROPIC_MODEL", "GEMINI_API_KEY", "GOOGLE_API_KEY",

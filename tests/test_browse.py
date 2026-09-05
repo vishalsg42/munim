@@ -271,3 +271,57 @@ def test_json_never_reaches_the_navigable_path(estate, monkeypatch, capsys):
     assert cli.main(["clients", "--json"]) == 0
     assert json.loads(capsys.readouterr().out)
     assert called == [], "--json opened network sessions"
+
+
+# ---- a dead session is no longer a dead end ---------------------------
+
+
+def test_a_remembered_list_is_shown_when_the_session_is_dead(
+        estate, monkeypatch, capsys):
+    """Both providers refuse `initialize` without a token, so the list cannot
+    be fetched again once the credential dies. It was known once."""
+    from munim import toolcache
+
+    record = ClientRecord(name="Balaji Roofings")
+    toolcache.remember(record.id, "cloudflare",
+                       [{"tool": "execute", "does": "Run JS",
+                         "read_only": None, "arguments": {}}])
+    dead = status("Balaji Roofings", "cloudflare", health.EXPIRED, tools=0,
+                  detail="the session expired")
+
+    browse._tools_walk(record, dead, keys=[pick.ESC])
+
+    err = capsys.readouterr().err
+    assert "execute" in err, "the remembered tool was not shown"
+    assert "Remembered from" in err, "a cached list must say that it is cached"
+    assert "still needs a live session" in err, \
+        "browsing from memory must not imply you can call from memory"
+
+
+def test_nothing_remembered_still_explains_rather_than_showing_nothing(
+        estate, monkeypatch):
+    dead = status("Balaji Roofings", "cloudflare", health.EXPIRED, tools=0,
+                  detail="the session expired")
+
+    said = browse._tools_walk(ClientRecord(name="Nobody Here"), dead)
+
+    assert isinstance(said, str) and "Cannot list tools" in said
+
+
+def test_a_live_listing_carries_no_stale_banner(estate, monkeypatch, capsys):
+    """The banner is deliberately loud, so it must never appear when the list
+    was read a moment ago."""
+    import asyncio
+
+    live = status("Balaji Roofings", "cloudflare", health.LIVE)
+    monkeypatch.setattr(
+        "munim.remote.passthrough.tools_for",
+        lambda *a, **k: asyncio.sleep(0, result=[
+            {"tool": "execute", "does": "", "read_only": None, "arguments": {}}]))
+
+    browse._tools_walk(ClientRecord(name="Balaji Roofings"), live,
+                       keys=[pick.ESC])
+
+    err = capsys.readouterr().err
+    assert "execute" in err
+    assert "Remembered from" not in err

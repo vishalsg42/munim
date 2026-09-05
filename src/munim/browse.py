@@ -249,16 +249,35 @@ def _tools_walk(record, status, *, keys=None):
     from munim.remote.session import NeedsLogin, NoRemoteServer
 
     if not status.live:
-        # Returned so the caller can show it inside the next frame. Printing it
-        # here and returning put a line on screen that the very next redraw
-        # covered, which read as the menu doing nothing when you chose it.
-        return (f"Cannot list tools: {status.detail}."
-                + (f"  Run: {status.fix}" if status.fix else ""))
+        # A dead session cannot be asked, but it was asked once. Showing what
+        # it said then beats a dead end, as long as the screen says plainly
+        # that this is a memory and how old it is.
+        from munim import toolcache
+
+        held = toolcache.recall(record.id, status.provider)
+        if held is None:
+            return (f"Cannot list tools: {status.detail}."
+                    + (f"  Run: {status.fix}" if status.fix else ""))
+        tools, age = held
+        return _tools_menu(record, status, tools, stale=age, keys=keys)
 
     try:
         tools = asyncio.run(tools_for(record.id, status.provider))
     except (NeedsLogin, NoRemoteServer) as why:
         return f"Cannot list tools: {why}"
+
+    return _tools_menu(record, status, tools, stale=None, keys=keys)
+
+
+def _tools_menu(record, status, tools, *, stale, keys):
+    """The tools screen, live or remembered.
+
+    One function for both, so a remembered list cannot quietly drift into
+    looking different from a live one. The only difference is the banner, and
+    it is deliberately loud: a cached list can be wrong, because a provider may
+    ship a new tool or vary its tools per account.
+    """
+    from munim import toolcache
 
     while True:
         rows = [Item(t["tool"],
@@ -266,7 +285,15 @@ def _tools_walk(record, status, *, keys=None):
                          t["read_only"]],
                      value=t)
                 for t in tools]
-        chosen = menu(f"Tools for {status.provider}", rows,
+        header = []
+        if stale is not None:
+            header = ["",
+                      f"  ⚠ Remembered from a session {toolcache.age_in_words(stale)}. "
+                      f"Not read live.",
+                      f"    {status.detail}."
+                      + (f"  Run: {status.fix}" if status.fix else ""),
+                      "    Calling one still needs a live session."]
+        chosen = menu(f"Tools for {status.provider}", rows, header=header,
                       subtitle=f"{len(tools)} tools · {record.name}", keys=keys)
         if chosen is None:
             return None

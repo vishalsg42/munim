@@ -661,10 +661,27 @@ def list_tools(client: str, provider: str, tool: str | None = None,
             return 0
         tools = asyncio.run(tools_for(record.id, provider))
     except NeedsLogin:
-        print(f"{provider} is not connected for {record.name!r}, or the session "
-              f"expired.", file=sys.stderr)
-        print(f'  munim connect "{record.name}" {provider}', file=sys.stderr)
-        return 2
+        # Both providers refuse `initialize` without a token, so the list
+        # cannot be fetched again once the credential dies. What it said last
+        # time is better than nothing, provided the answer says so out loud.
+        from munim import toolcache
+
+        held = toolcache.recall(record.id, provider)
+        if held is None or tool is not None:
+            print(f"{provider} is not connected for {record.name!r}, or the "
+                  f"session expired.", file=sys.stderr)
+            print(f'  munim connect "{record.name}" {provider}', file=sys.stderr)
+            return 2
+        tools, age = held
+        stale = (f"Remembered from a session {toolcache.age_in_words(age)}. "
+                 f"Not read live, so it may be out of date, and calling one "
+                 f"still needs a live session. Reconnect with: "
+                 f'munim connect "{record.name}" {provider}')
+        if as_json:
+            print(json.dumps({"stale": True, "age_seconds": round(age),
+                              "tools": tools}, indent=2))
+            return 0
+        print(f"⚠ {stale}\n", file=sys.stderr)
     except NoRemoteServer as unknown:
         print(str(unknown), file=sys.stderr)
         return 2

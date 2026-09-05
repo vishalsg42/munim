@@ -214,41 +214,65 @@ def test_the_numbered_fallback_is_untouched(capsys):
 # ---- a bare Esc must not wait for an arrow that is not coming ---------
 
 
+def keypress(monkeypatch, chunks, pending=True):
+    """Feed _read_key raw bytes, the way the file descriptor does."""
+    queue = list(chunks)
+    monkeypatch.setattr(pick.sys, "stdin",
+                        type("S", (), {"fileno": staticmethod(lambda: 0)})())
+    monkeypatch.setattr(pick.os, "read", lambda fd, n: queue.pop(0))
+    monkeypatch.setattr(pick.select, "select",
+                        lambda *a, **k: (([0], [], []) if pending
+                                         else ([], [], [])))
+    return queue
+
+
 def test_a_bare_escape_does_not_block_waiting_for_an_arrow_tail(monkeypatch):
     """Esc is both a key and the first byte of every arrow.
 
-    `_read_key` read two more bytes unconditionally, so pressing Esc blocked
-    until the operator pressed something else. Nothing happened, then two keys
-    later something did: indistinguishable from the picker being frozen. Only a
-    real terminal shows it, because a scripted key list never blocks.
+    Reading two more bytes unconditionally blocked until the operator pressed
+    something else: nothing happened, then two keys later something did, which
+    is indistinguishable from a frozen picker.
     """
-    reads = []
-
-    class Stdin:
-        def fileno(self): return 0
-        def read(self, n):
-            reads.append(n)
-            return pick.ESC if n == 1 else "!!"
-
-    monkeypatch.setattr(pick.sys, "stdin", Stdin())
-    # Nothing further is waiting, which is what a bare Esc looks like.
-    monkeypatch.setattr(pick.select, "select", lambda *a, **k: ([], [], []))
+    left = keypress(monkeypatch, [b"\x1b", b"[B"], pending=False)
 
     assert pick._read_key() == pick.ESC
-    assert reads == [1], "it read past the Esc when nothing was buffered"
+    assert left == [b"[B"], "it read past the Esc when nothing was waiting"
 
 
 def test_an_arrow_is_still_read_whole(monkeypatch):
-    """The three bytes arrive together, so the wait never costs anything."""
-    class Stdin:
-        def fileno(self): return 0
-        def read(self, n): return pick.ESC if n == 1 else "[A"
-
-    monkeypatch.setattr(pick.sys, "stdin", Stdin())
-    monkeypatch.setattr(pick.select, "select",
-                        lambda *a, **k: ([Stdin()], [], []))
-
+    """All three bytes arrive in one write, so the wait never costs anything."""
+    keypress(monkeypatch, [b"\x1b", b"[A"], pending=True)
     assert pick._read_key() == pick.UP
+
+
+def test_keys_are_read_from_the_descriptor_not_through_sys_stdin(monkeypatch):
+    """The bug that made Down go back a screen.
+
+    Python's text layer reads ahead, so an arrow's trailing "[B" landed in
+    *its* buffer while select asked the kernel, saw nothing waiting, and
+    concluded the Esc stood alone. Reading the descriptor directly is the fix,
+    so a stdin whose .read would answer must never be consulted.
+    """
+    class Trap:
+        def fileno(self): return 0
+        def read(self, n):
+            raise AssertionError("_read_key went through the buffered layer")
+
+    monkeypatch.setattr(pick.sys, "stdin", Trap())
+    monkeypatch.setattr(pick.os, "read", lambda fd, n: b"q")
+    assert pick._read_key() == "q"
+
+
+def test_a_multibyte_character_is_read_whole(monkeypatch):
+    """A typed client name need not be ASCII, and half a character is not a key."""
+    keypress(monkeypatch, ["é".encode()[:1], "é".encode()[1:]])
+    assert pick._read_key() == "é"
+
+
+def test_a_closed_terminal_reads_as_a_cancel(monkeypatch):
+    """Otherwise the loop spins on an endless stream of empty reads."""
+    keypress(monkeypatch, [b""])
+    assert pick._read_key() == pick.CTRL_C
 
 
 def test_owning_the_screen_homes_instead_of_counting_lines_back(monkeypatch,
