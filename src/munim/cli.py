@@ -447,6 +447,35 @@ def ask_which_client(registry, ask=input, *, account_can_name=False) -> str | No
     return None
 
 
+def adopt_provisional(registry, provider: str, ask=None):
+    """Who does this session belong to, when the provider will not say.
+
+    Returns the client record to file it under, or None if there is nobody to
+    ask or the operator backed out. Creating a client here is deliberate: the
+    login has already happened, and refusing because the name is new would mean
+    doing it again for no reason.
+    """
+    if not sys.stdin.isatty():
+        print(f"{provider} did not say which account was authorised, and there "
+              f"is no terminal to ask on. Nothing was kept. Run it again with a "
+              f"name: munim connect \"<client>\" {provider}", file=sys.stderr)
+        return None
+
+    print(f"{provider} does not report which account that was.", file=sys.stderr)
+    chosen = ask_which_client(registry, ask or input)
+    if chosen is None:
+        print("Nothing connected.", file=sys.stderr)
+        return None
+
+    try:
+        return registry.get(chosen)
+    except UnknownClient:
+        record = ClientRecord(name=chosen)
+        registry.add(record)
+        print(f"Added {record.name!r}.", file=sys.stderr)
+        return record
+
+
 def add_client(name: str, domain: str | None = None) -> int:
     """Write down a business you look after, before deciding what to connect.
 
@@ -840,11 +869,33 @@ def connect_via_mcp(client: str | None, provider: str) -> int:
 
     if naming:
         if not account:
-            print(f"{provider} did not say which account was authorised, so "
-                  f"there is nothing to name this after. Run it again with a "
-                  f"name: munim connect \"<client>\" {provider}",
+            # The provider authorised us and will not say who it authorised.
+            # Vercel grants `openid offline_access` and nothing that names an
+            # account, which is the narrowest scope of any provider here.
+            #
+            # This used to print "run it again with a name" and return 2, which
+            # threw away a completed browser login and left its tokens filed
+            # under the provisional key, where nothing could name them and
+            # nothing would ever clean them up. A live credential orphaned by a
+            # command that reported failure.
+            #
+            # Ask instead. The operator knows which client this is, the session
+            # is already open, and `ask_which_client` is the same picker
+            # `connect` uses when a URL cannot name itself.
+            record = adopt_provisional(registry, provider)
+            if record is None:
+                # Backed out, or nothing to ask on. Either way the session goes:
+                # keeping tokens nobody chose an owner for is how the orphans
+                # this project already had to sweep up came to exist.
+                KeychainTokenStorage(PROVISIONAL, provider).forget()
+                return 2
+            KeychainTokenStorage(PROVISIONAL, provider).move_to(record.id)
+            print(f"Connected {provider} for {record.name}: {len(tools)} tools.",
                   file=sys.stderr)
-            return 2
+            print(f"  {provider} does not report which account was authorised, "
+                  f"so this is filed where you said rather than where it said.",
+                  file=sys.stderr)
+            return 0
         # The record first, so there is an id to move the session onto. This
         # used to move it onto the account string, which is another label.
         try:
