@@ -17,7 +17,10 @@ Writes to stderr throughout, like every other prompt here, so a chooser cannot
 contaminate output something is parsing.
 """
 
+import os
+import shutil
 import sys
+from dataclasses import dataclass
 
 try:
     import termios
@@ -179,3 +182,188 @@ def choose(prompt: str, options: list[tuple[str, str]], ask=None,
     if ask is None and interactive():
         return _live(prompt, options, allow_new, new_hint)
     return _numbered(prompt, options, ask, resolve, allow_new, new_hint)
+
+
+# ---------------------------------------------------------------------------
+# The navigable menu.
+#
+# `choose` above answers one question and returns. This answers "where do you
+# want to go", which is a different shape: rows are grouped under headers, a
+# long list has to page rather than scroll off, Esc means "up one level" rather
+# than "give up", and the footer has to say so because none of that is
+# guessable.
+#
+# Kept beside `choose` rather than folded into it. Every existing caller asks
+# one flat question, and giving them headers, paging and a back sentinel they
+# never use would put the risk of this change into paths that did not need it.
+# ---------------------------------------------------------------------------
+
+# Backing out one level. Distinct from None on purpose: `choose` returns None
+# for both Esc and Ctrl-C, so a caller could never tell "go up" from "quit",
+# and a nested view needs to.
+BACK = object()
+
+# Rows the cursor cannot land on, and the lines around the list, all cost
+# vertical space that the viewport has to leave room for.
+CHROME = 6
+
+
+@dataclass(frozen=True)
+class Head:
+    """A group label. Not selectable."""
+    text: str
+
+
+@dataclass(frozen=True)
+class Item:
+    label: str
+    hint: str = ""
+    value: object = None
+    mark: str = ""          # a status glyph, already coloured
+
+
+@dataclass(frozen=True)
+class Blank:
+    """Vertical space between groups."""
+
+
+GREEN, RED, AMBER = "\x1b[32m", "\x1b[31m", "\x1b[33m"
+DIM, BOLD, CYAN, RESET = "\x1b[2m", "\x1b[1m", "\x1b[36m", "\x1b[0m"
+
+
+def coloured() -> bool:
+    """Whether to emit colour at all.
+
+    NO_COLOR is honoured because it is the convention, and stderr being a pipe
+    matters more: this whole module writes there, and escape codes in something
+    being parsed is the bug that makes people distrust a tool's output.
+    """
+    return not os.environ.get("NO_COLOR") and sys.stderr.isatty()
+
+
+def paint(text: str, code: str) -> str:
+    return f"{code}{text}{RESET}" if coloured() else text
+
+
+def _selectable(rows) -> list[int]:
+    return [i for i, row in enumerate(rows) if isinstance(row, Item)]
+
+
+def _viewport(rows, cursor: int, height: int) -> tuple[int, int]:
+    """Which slice of rows to draw, keeping the cursor inside it."""
+    if len(rows) <= height:
+        return 0, len(rows)
+    half = height // 2
+    start = max(0, min(cursor - half, len(rows) - height))
+    return start, start + height
+
+
+def _draw(title, subtitle, rows, cursor, footer, numbered, drawn, height):
+    if drawn:
+        sys.stderr.write(f"\x1b[{drawn}A")
+
+    lines = [paint(title, BOLD)]
+    if subtitle:
+        lines.append(paint(subtitle, DIM))
+    lines.append("")
+
+    start, end = _viewport(rows, cursor, height)
+    lines.append(paint(f"  ↑ {start} more above", DIM) if start else "")
+
+    order = _selectable(rows)
+    for index in range(start, end):
+        row = rows[index]
+        if isinstance(row, Blank):
+            lines.append("")
+            continue
+        if isinstance(row, Head):
+            lines.append("  " + paint(row.text, BOLD))
+            continue
+
+        here = index == cursor
+        pointer = paint("❯", CYAN) if here else " "
+        # Numbered only when every row is reachable by one keypress. Offering
+        # "7" on a list of forty is a promise the keyboard cannot keep.
+        number = f"{order.index(index) + 1}. " if numbered else ""
+        label = paint(row.label, CYAN) if here else row.label
+        body = label + (f" · {row.mark}" if row.mark else "")
+        if row.hint:
+            body += "   " + paint(row.hint, DIM)
+        lines.append(f" {pointer} {number}{body}")
+
+    below = len(rows) - end
+    lines.append(paint(f"  ↓ {below} more below", DIM) if below else "")
+    lines.append("")
+    lines.append(paint(footer, DIM))
+
+    for line in lines:
+        sys.stderr.write(f"\x1b[2K{line}\n")
+    sys.stderr.flush()
+    return len(lines)
+
+
+def menu(title: str, rows: list, *, subtitle: str = "",
+         can_go_back: bool = True, keys=None):
+    """Navigate a grouped list. Returns the chosen Item's value, BACK, or None.
+
+    None is Ctrl-C, which quits from any depth. BACK is Esc, which the caller
+    turns into "up one level", or into a quit at the top.
+
+    `keys` is the seam, and it is here for the reason `ask` is on `choose`: a
+    raw-mode loop that can only be driven by hand is one nobody will change
+    with confidence. Pass an iterable of keypresses and raw mode is skipped
+    entirely, so the drawing and the navigation stay testable without a
+    terminal.
+    """
+    order = _selectable(rows)
+    if not order:
+        return BACK if can_go_back else None
+    if keys is None and not interactive():
+        return BACK
+
+    numbered = len(order) <= 9
+    move = "↑/↓ or 1-9" if numbered else "↑/↓ navigate"
+    footer = f"{move} · Enter select · Esc {'back' if can_go_back else 'quit'}"
+
+    height = max(3, shutil.get_terminal_size().lines - CHROME
+                 - (2 if subtitle else 1))
+    at, drawn = 0, 0
+    scripted = iter(keys) if keys is not None else None
+
+    saved = termios.tcgetattr(sys.stdin) if scripted is None else None
+    try:
+        if scripted is None:
+            tty.setraw(sys.stdin.fileno())
+        while True:
+            if scripted is None:
+                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, saved)
+            drawn = _draw(title, subtitle, rows, order[at], footer,
+                          numbered, drawn, height)
+            if scripted is None:
+                tty.setraw(sys.stdin.fileno())
+
+            if scripted is None:
+                key = _read_key()
+            else:
+                # Running out of scripted keys means the caller expected the
+                # menu to have returned by now. Backing out beats blocking.
+                key = next(scripted, ESC)
+            if key == CTRL_C:
+                return None
+            if key == ESC:
+                return BACK
+            if key in (ENTER, RETURN):
+                return rows[order[at]].value
+            if key == UP:
+                at = (at - 1) % len(order)
+            elif key == DOWN:
+                at = (at + 1) % len(order)
+            elif numbered and key.isdigit() and key != "0":
+                wanted = int(key) - 1
+                if wanted < len(order):
+                    return rows[order[wanted]].value
+    finally:
+        if scripted is None:
+            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, saved)
+        sys.stderr.write("\n")
+        sys.stderr.flush()
