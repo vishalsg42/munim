@@ -475,7 +475,9 @@ def adopt_provisional(registry, provider: str, ask=None):
               f"name: munim connect \"<client>\" {provider}", file=sys.stderr)
         return None
 
-    print(f"{provider} does not report which account that was.", file=sys.stderr)
+    # The reason was given before the browser opened, which is the only moment
+    # it could have changed anything. Repeating it here and again at the end
+    # said the same sentence three times in one command.
     chosen = ask_which_client(registry, ask or input)
     if chosen is None:
         print("Nothing connected.", file=sys.stderr)
@@ -917,9 +919,6 @@ def connect_via_mcp(client: str | None, provider: str) -> int:
                 return 2
             KeychainTokenStorage(PROVISIONAL, provider).move_to(record.id)
             print(f"Connected {provider} for {record.name}: {len(tools)} tools.",
-                  file=sys.stderr)
-            print(f"  {provider} does not report which account was authorised, "
-                  f"so this is filed where you said rather than where it said.",
                   file=sys.stderr)
             return 0
         # The record first, so there is an id to move the session onto. This

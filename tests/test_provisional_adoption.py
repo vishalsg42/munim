@@ -195,6 +195,8 @@ def test_a_provider_that_cannot_name_itself_says_so_before_the_login(
     assert "will be named after it" not in opening, \
         "it promised a name vercel cannot supply"
     assert "does not report which account" in said
+    assert said.count("does not report") == 1, \
+        f"the same sentence more than once:\n{said}"
 
 
 def test_cloudflare_still_promises_the_name_it_can_deliver(estate, monkeypatch, capsys):
