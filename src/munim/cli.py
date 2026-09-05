@@ -17,6 +17,7 @@ from munim.connect.oauth import (PROVIDERS, SHIPPED_CLIENT_IDS,
 from munim.connect.token import TokenConnector
 from munim.container import KEY_PROVIDERS, KeychainBackend
 from munim.env import load as load_env
+from munim.pick import choose
 from munim.registry import ClientRecord, Registry, UnknownClient
 
 REGISTRY = None  # resolved at call time so tests can point it elsewhere
@@ -407,58 +408,55 @@ def ask_which_client(registry, ask=input, *, account_can_name=False) -> str | No
     out.
     """
     records = sorted(registry.clients(), key=lambda r: r.name.lower())
-    # Nothing to choose from is not a choice. Printing "Which client is this
-    # for?" above a single line reading "a client not listed" is a menu with no
-    # items on it, and the operator has to work out that the answer is `n`
-    # before they can type the name they already knew.
+
+    # Nothing to choose from is not a choice. Asking "which client is this for?"
+    # above a single line reading "a client not listed" is a menu with no items
+    # on it, and the operator has to work out that the answer is `n` before they
+    # can type the name they already knew.
     if not records:
         print("No clients yet, so this one is new.", file=sys.stderr)
-        print("Name for this client: ", end="", file=sys.stderr, flush=True)
-        try:
-            name = ask().strip()
-        except (EOFError, KeyboardInterrupt):
-            print(file=sys.stderr)
-            return None
-        return name or None
+        return _name_typed(ask)
 
-    print("Which client is this for?", file=sys.stderr)
-    for number, record in enumerate(records, 1):
-        print(f"  {number}  {record.name}"
-              + (f"   {record.domain}" if record.domain else ""), file=sys.stderr)
+    options = [(record.name, record.domain or "") for record in records]
     if account_can_name:
-        print("  a  a new client, named after the account I sign in to",
-              file=sys.stderr)
-    print("  n  a client not listed", file=sys.stderr)
-    print("> ", end="", file=sys.stderr, flush=True)
+        options.append(("a new client, named after the account I sign in to", ""))
+    options.append(("a client not listed", ""))
 
+    def resolve(answer: str) -> int | None:
+        """The answers this prompt has always taken, beyond a row number.
+
+        `n` and `a` are published shortcuts, and an id or a name typed straight
+        in is how somebody who already knows the client skips reading the list.
+        """
+        lowered = answer.lower()
+        if lowered == "n":
+            return len(options) - 1
+        if account_can_name and lowered == "a":
+            return len(records)
+        for index, record in enumerate(records):
+            if answer in (record.id, record.name):
+                return index
+        return None
+
+    picked = choose("Which client is this for?", options, ask=ask,
+                    resolve=resolve)
+    if picked is None:
+        return None
+    if picked < len(records):
+        return records[picked].id
+    if account_can_name and picked == len(records):
+        return ACCOUNT_NAMES_IT
+    return _name_typed(ask)
+
+
+def _name_typed(ask=None) -> str | None:
+    print("Name for this client: ", end="", file=sys.stderr, flush=True)
     try:
-        answer = ask().strip()
+        name = (ask or input)().strip()
     except (EOFError, KeyboardInterrupt):
         print(file=sys.stderr)
         return None
-
-    if account_can_name and answer.lower() == "a":
-        return ACCOUNT_NAMES_IT
-
-    if answer.lower() == "n":
-        print("Name for this client: ", end="", file=sys.stderr, flush=True)
-        try:
-            name = ask().strip()
-        except (EOFError, KeyboardInterrupt):
-            print(file=sys.stderr)
-            return None
-        return name or None
-
-    if answer.isdigit() and 1 <= int(answer) <= len(records):
-        return records[int(answer) - 1].id
-
-    # A name or an id typed straight in, for anyone who knows what they want.
-    for record in records:
-        if answer in (record.id, record.name):
-            return record.id
-    if answer:
-        print(f"{answer!r} is not one of those.", file=sys.stderr)
-    return None
+    return name or None
 
 
 def adopt_provisional(registry, provider: str, ask=None):
