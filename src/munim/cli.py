@@ -1539,18 +1539,46 @@ def main(argv: list[str] | None = None) -> int:
                              'munim clients add "Ivy & Fern"')
             return add_client(args.names[0], args.domain)
         if args.action == "rename":
-            if len(args.names) != 2:
+            if len(args.names) == 2:
+                return rename(*args.names)
+            if len(args.names) == 1:
                 parser.error("clients rename takes the old name and the new one")
-            return rename(*args.names)
+            old_name = _pick_client(_registry(), "Rename which client?")
+            if old_name is None:
+                return CANCELLED
+            print(f"New name for {old_name!r}: ", end="", file=sys.stderr,
+                  flush=True)
+            try:
+                fresh = input().strip()
+            except (EOFError, KeyboardInterrupt):
+                print(file=sys.stderr)
+                return CANCELLED
+            if not fresh:
+                return CANCELLED
+            return rename(old_name, fresh)
         if args.action == "forget":
             name = args.names[0] if args.names else _pick_client(_registry())
             if name is None:
                 return 2
             return forget(name)
         if args.action == "merge":
-            if len(args.names) != 2:
+            if len(args.names) == 2:
+                return merge(*args.names)
+            if len(args.names) == 1:
                 parser.error("clients merge takes a source and a target")
-            return merge(*args.names)
+            # Two pickers rather than one, because merge is not symmetric: the
+            # source is emptied into the target and then stops existing. Asking
+            # twice, in that order, is what makes which is which visible.
+            source = _pick_client(_registry(), "Merge which client away?")
+            if source is None:
+                return CANCELLED
+            target = _pick_client(_registry(), f"Into which client?")
+            if target is None:
+                return CANCELLED
+            if source == target:
+                print("A client cannot be merged into itself.", file=sys.stderr)
+                return 2
+            return merge(source, target)
         if args.action == "domain":
             if len(args.names) == 2:
                 return set_domain(*args.names)

@@ -81,14 +81,13 @@ async def check(client_id: str, name: str, provider: str) -> Status:
                       f"could not be reached ({type(other).__name__})")
 
 
-def check_all(registry, backend=None) -> list[Status]:
-    """Every stored session for every client, probed together.
+def _stored(registry, backend) -> list[tuple[str, str, str]]:
+    """(client id, client name, provider) for everything with a credential.
 
-    Returns [] rather than raising when credentials cannot be read at all:
-    `doctor._keychain` already reports that, and one broken check must not take
-    the whole report down with it.
+    Skips a client whose credentials cannot be read rather than raising:
+    `doctor._keychain` already reports an unreadable store, and one broken
+    check must not take the whole report down with it.
     """
-    backend = backend or KeychainBackend()
     work = []
     for record in registry.clients():
         try:
@@ -96,16 +95,25 @@ def check_all(registry, backend=None) -> list[Status]:
         except Exception:
             continue
         work += [(record.id, record.name, p) for p in sessions]
+    return work
 
+
+async def check_all_async(registry, backend=None) -> list[Status]:
+    """Every stored session for every client, probed together.
+
+    The async entry point, for the MCP server, which is already inside a loop.
+    """
+    work = _stored(registry, backend or KeychainBackend())
     if not work:
         return []
+    return list(await asyncio.gather(*(check(*item) for item in work)))
 
-    async def everything():
-        return await asyncio.gather(*(check(*item) for item in work))
 
+def check_all(registry, backend=None) -> list[Status]:
+    """The same, for callers with no event loop of their own: doctor and the CLI."""
     try:
-        return list(asyncio.run(everything()))
+        return asyncio.run(check_all_async(registry, backend))
     except RuntimeError:
-        # Already inside a loop, which no caller of this is. Skipping beats
-        # crashing whatever asked.
+        # Called from inside a running loop, which means the caller wanted
+        # check_all_async. Skipping beats crashing whatever asked.
         return []

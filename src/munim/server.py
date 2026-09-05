@@ -51,6 +51,32 @@ CROSS_CLIENT = {"find_across_clients", "ask_across_clients",
 PROVIDERS = ("cloudflare", "vercel", "resend")
 
 
+def _shaped(record, stored: list[str], found) -> dict:
+    """One client's row: what is stored, and what actually opens.
+
+    Both are reported. `connected` answers "can I use this right now", which is
+    what a caller acts on; `stored` answers "is there a credential here", which
+    is what `munim disconnect` acts on. Collapsing them is what let two dead
+    sessions read as connected, and dropping `stored` would hide a credential
+    that exists but no longer works.
+    """
+    from munim import health
+
+    mine = {s.provider: s for s in found if s.client == record.name}
+    return {
+        "client": record.name,
+        "domain": record.domain,
+        "checked": True,
+        "stored": stored,
+        "connected": sorted(p for p in stored
+                            if p in mine and mine[p].live),
+        "needs_login": sorted(p for p in stored if p in mine
+                              and mine[p].state == health.EXPIRED),
+        "unreachable": sorted(p for p in stored if p in mine
+                              and mine[p].state == health.UNREACHABLE),
+    }
+
+
 def build_server(backend=None, registry=None, runs_dir=None,
                  reports_dir=None) -> FastMCP:
     server = FastMCP("munim")
@@ -96,16 +122,30 @@ def build_server(backend=None, registry=None, runs_dir=None,
     # ---- read across -----------------------------------------------------
 
     @server.tool()
-    def list_clients() -> list[dict]:
-        """List every client container and which providers each has connected."""
-        out = []
-        for record in registry.clients():
-            out.append({
-                "client": record.name,
-                "domain": record.domain,
-                "connected": reachable(record.id, backend),
-            })
-        return out
+    async def list_clients(check: bool = True) -> list[dict]:
+        """List every client and which providers each can actually reach.
+
+        `connected` means the session opens right now, not that a credential is
+        filed. Those are different facts, and reporting the second as the first
+        is how two dead sessions read as connected for a day: nothing local can
+        tell them apart, because OAuth grants a token and never says another
+        word about it.
+
+        So this asks each provider, concurrently. Pass `check=false` to skip
+        that and report only what is stored, which is instant and was the old
+        behaviour.
+        """
+        from munim import health
+
+        records = registry.clients()
+        stored = {r.name: reachable(r.id, backend) for r in records}
+        if not check:
+            return [{"client": r.name, "domain": r.domain,
+                     "stored": stored[r.name], "checked": False}
+                    for r in records]
+
+        found = await health.check_all_async(registry, backend)
+        return [_shaped(r, stored[r.name], found) for r in records]
 
     @server.tool()
     async def find_across_clients(need: str) -> list[dict]:
@@ -405,16 +445,25 @@ def build_server(backend=None, registry=None, runs_dir=None,
         return {"client": name, "domain": domain or None}
 
     @server.tool()
-    def client_status(client: str) -> dict:
-        """What is known about one client. Never returns a credential."""
+    async def client_status(client: str, check: bool = True) -> dict:
+        """What is known about one client. Never returns a credential.
+
+        `connected` is the live answer, for the same reason as `list_clients`.
+        """
+        from munim import health
+
         record = registry.get(client)
-        container = container_for(client)
-        return {
-            "client": record.name,
-            "domain": record.domain,
-            "connected": reachable(record.id, backend),
-            "oauth_available": [p for p in PROVIDERS if p in OAUTH_PROVIDERS],
-        }
+        stored = reachable(record.id, backend)
+        available = [p for p in PROVIDERS if p in OAUTH_PROVIDERS]
+        if not check:
+            return {"client": record.name, "domain": record.domain,
+                    "stored": stored, "checked": False,
+                    "oauth_available": available}
+
+        found = await asyncio.gather(
+            *(health.check(record.id, record.name, p) for p in stored))
+        return {**_shaped(record, stored, found),
+                "oauth_available": available}
 
     # ---- write within ----------------------------------------------------
 
