@@ -32,8 +32,8 @@ def estate(tmp_path, monkeypatch):
     ring = Ring()
     reg = Registry(tmp_path / "r.json")
     monkeypatch.setattr(cli, "_registry", lambda: reg)
-    monkeypatch.setattr("munim.remote.storage.keyring", ring)
-    monkeypatch.setattr("munim.container.keyring", ring)
+    monkeypatch.setattr("munim.remote.storage.vault", ring)
+    monkeypatch.setattr("munim.container.vault", ring)
     monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: True)
     return reg, ring
 

@@ -36,8 +36,8 @@ def estate(tmp_path, monkeypatch):
     reg = Registry(tmp_path / "r.json")
     reg.add(ClientRecord(name="Acme"))
     monkeypatch.setattr(cli, "_registry", lambda: reg)
-    monkeypatch.setattr("munim.remote.storage.keyring", ring)
-    monkeypatch.setattr("munim.container.keyring", ring)
+    monkeypatch.setattr("munim.remote.storage.vault", ring)
+    monkeypatch.setattr("munim.container.vault", ring)
     # Shells out to `security dump-keychain` otherwise, which is slow and reads
     # the machine the suite happens to run on.
     monkeypatch.setattr(cli, "find_orphans", lambda known: [])

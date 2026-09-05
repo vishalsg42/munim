@@ -32,7 +32,7 @@ def world(tmp_path, monkeypatch):
     keys, ring = Keys(), Ring()
     monkeypatch.setattr(cli, "_registry", lambda: registry)
     monkeypatch.setattr("munim.container.KeychainBackend", lambda: keys)
-    monkeypatch.setattr("munim.remote.storage.keyring", ring)
+    monkeypatch.setattr("munim.remote.storage.vault", ring)
     return registry, keys, ring
 
 

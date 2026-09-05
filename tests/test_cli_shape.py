@@ -22,7 +22,7 @@ from munim.registry import Registry
 def registry(tmp_path, monkeypatch):
     reg = Registry(tmp_path / "r.json")
     monkeypatch.setattr(cli, "_registry", lambda: reg)
-    monkeypatch.setattr("munim.remote.storage.keyring", _Ring())
+    monkeypatch.setattr("munim.remote.storage.vault", _Ring())
     return reg
 
 
