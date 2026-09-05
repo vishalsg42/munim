@@ -103,3 +103,52 @@ Two things worth knowing about where the switch is read from:
   what the MCP server does, because the server is a subprocess and does not
   inherit your shell. `doctor` says so rather than letting the two disagree
   quietly.
+
+## Installing it, and why macOS may ask for your keychain password
+
+Install it once, and use that one install for both the CLI and the MCP server.
+That sentence is the whole of the advice, and the rest of this section is why it
+matters more than it sounds.
+
+```bash
+uv tool install munim          # or: pipx install munim
+claude mcp add munim "$(dirname "$(command -v munim)")/munim-mcp"
+```
+
+**A fresh install asks for nothing.** macOS files an access rule against each
+keychain item naming the binary that may read it, and the binary that *stores* a
+credential is on that rule automatically. So the interpreter that ran `munim
+connect` reads the result back with no prompt, on that connection and on every
+one after it. Verified rather than assumed: writing an item and reading it back
+in the same interpreter returns the value with no dialog.
+
+**Two installs is what causes the prompts.** The keychain sees two different
+binaries, not two copies of munim. Each asks approval for every item the other
+created, neither ever inherits the other's, and no amount of clicking converges,
+because both keep writing new items the other has not been approved for. This is
+easy to arrive at by accident: install munim into a project venv, install it
+again with pipx for convenience, and now the MCP server your coding agent spawns
+and the `munim` on your PATH are different Pythons.
+
+`munim doctor` reports this directly:
+
+```
+! One interpreter    the MCP server and this command are different Pythons,
+                     so the keychain will keep asking for your password
+```
+
+**What else re-prompts, once you are on one install.** Only the interpreter
+changing underneath you. A pipx or uv venv symlinks to a real Python rather than
+copying it, so uninstalling and reinstalling munim keeps the same identity and
+costs nothing. Upgrading the Python it points at is a different binary, and so is
+moving between 3.12 and 3.13, and both mean approving again.
+
+**If you do get asked, "Always Allow" is the right button.** It adds that
+interpreter to the item's rule permanently. Be aware of what it grants: any
+Python script run by that same interpreter can then read those credentials
+without a prompt. That is the trade the keychain offers and there is no version
+of it that is both silent and narrow.
+
+**Linux and Windows do not have this.** Secret Service and Windows Credential
+Manager have no per-item, per-binary rule, so none of the above applies and
+`doctor` stays quiet about it there.
