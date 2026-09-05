@@ -97,3 +97,47 @@ def test_windows_has_no_raw_mode_and_says_so():
     source = inspect.getsource(pick)
     assert "except ImportError" in source
     assert "RAW_AVAILABLE" in source
+
+
+# ---- typing something new, instead of a "not listed" row ------------------
+
+def test_an_unmatched_answer_becomes_a_new_name():
+    """This is what removed the "a client not listed" row. Choosing that row
+    only ever led to a second prompt asking for the name, so the operator had
+    to announce they were about to type a name before typing it."""
+    assert pick.choose("Which?", OPTIONS, ask=lambda: "Thornbury Ltd",
+                       allow_new=True) == "Thornbury Ltd"
+
+
+def test_an_unmatched_answer_is_refused_when_new_things_are_not_allowed():
+    """The other direction: `allow_new` has to mean something."""
+    assert pick.choose("Which?", OPTIONS, ask=lambda: "Thornbury Ltd") is None
+
+
+def test_an_existing_label_still_selects_rather_than_creating_a_twin():
+    assert pick.choose("Which?", OPTIONS, ask=lambda: "Acme",
+                       allow_new=True) == 0
+
+
+def test_a_number_out_of_range_is_a_mistake_not_a_name():
+    """A mistyped selection must not become something called "9"."""
+    assert pick.choose("Which?", OPTIONS, ask=lambda: "9", allow_new=True) is None
+
+
+def test_blank_input_backs_out_even_when_new_things_are_allowed():
+    assert pick.choose("Which?", OPTIONS, ask=lambda: "   ", allow_new=True) is None
+
+
+def test_a_list_with_nothing_in_it_can_still_take_a_new_name():
+    """A first connection on a fresh install has no rows and still needs to be
+    able to name the client."""
+    assert pick.choose("Which?", [], ask=lambda: "Ivy & Fern",
+                       allow_new=True) == "Ivy & Fern"
+
+
+def test_typing_filters_the_list():
+    """What the arrow keys navigate once something has been typed."""
+    assert pick._visible(OPTIONS, "") == [0, 1, 2]
+    assert pick._visible(OPTIONS, "ivy") == [1]
+    assert pick._visible(OPTIONS, "test") == [0, 2], "hints are searched too"
+    assert pick._visible(OPTIONS, "zzz") == [], "nothing matching is a new name"

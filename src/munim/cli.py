@@ -420,7 +420,6 @@ def ask_which_client(registry, ask=input, *, account_can_name=False) -> str | No
     options = [(record.name, record.domain or "") for record in records]
     if account_can_name:
         options.append(("a new client, named after the account I sign in to", ""))
-    options.append(("a client not listed", ""))
 
     def resolve(answer: str) -> int | None:
         """An id or a name typed straight in, for somebody who already knows
@@ -436,15 +435,20 @@ def ask_which_client(registry, ask=input, *, account_can_name=False) -> str | No
                 return index
         return None
 
+    # `allow_new` is what removed the "a client not listed" row. Choosing that
+    # row only ever led to a second prompt asking for the name, so the operator
+    # had to announce they were about to type a name before typing it. Typing it
+    # is the announcement.
     picked = choose("Which client is this for?", options, ask=ask,
-                    resolve=resolve)
+                    resolve=resolve, allow_new=True,
+                    new_hint="a name for a new client")
     if picked is None:
         return None
+    if isinstance(picked, str):
+        return picked                       # a name for a client not yet known
     if picked < len(records):
         return records[picked].id
-    if account_can_name and picked == len(records):
-        return ACCOUNT_NAMES_IT
-    return _name_typed(ask)
+    return ACCOUNT_NAMES_IT
 
 
 def _name_typed(ask=None) -> str | None:
