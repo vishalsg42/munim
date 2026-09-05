@@ -1057,7 +1057,9 @@ def main(argv: list[str] | None = None) -> int:
                    help="the application's client id, for `app set`. The "
                         "secret is prompted, never passed as an argument")
 
-    sub.add_parser("doctor", help="what is set up, what is not, and the next step")
+    dr = sub.add_parser("doctor", help="what is wrong with this installation")
+    dr.add_argument("--verbose", "-v", action="store_true",
+                    help="also list what is connected")
 
     # The flat spellings 0.1.0 shipped, rewritten to the grouped form before
     # parsing. Kept as a rewrite rather than as hidden subparsers because
@@ -1135,7 +1137,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "doctor":
         from munim.doctor import run as doctor_run
-        return doctor_run(_registry())
+        return doctor_run(_registry(), verbose=args.verbose)
 
     if args.command == "clients":
         # Accepted-and-ignored is worse than refused. `--json` only shapes the

@@ -50,10 +50,12 @@ def _config() -> Finding:
         shown = f"~/{used.relative_to(home)}" if used.is_relative_to(home) else str(used)
         return Finding(OK, "Config", shown)
 
-    looked = ", ".join(str(p) for p, exists in sources()[:2] if not exists)
-    return Finding(WARN, "Config", "no .env found",
-                   fix=f"create {CONFIG_HOME}, or a .env in the directory you "
-                       f"run from. Looked in {looked} and further up")
+    # Not a problem. A fresh install has no .env and does not need one: agents
+    # are off, and nothing else reads it until you configure a provider that
+    # does. Reporting the normal state of a working install as a warning is how
+    # people learn to ignore the whole report.
+    return Finding(OK, "Config", f"none yet, and nothing needs one "
+                                 f"(would read {CONFIG_HOME})")
 
 
 def _settings_file() -> Finding:
@@ -346,12 +348,15 @@ def _oauth_apps() -> list[Finding]:
             out.append(Finding(
                 WARN, f"Login: {provider}",
                 "needs an application registered by hand",
-                fix=f"uv run python scripts/setup_google_oauth.py --provider "
-                    f"{provider}  (it uses a project you already have and "
-                    f"never creates one). By hand: {server.register_at}, "
-                    f"Desktop app, redirect {REDIRECT_URI}, then "
-                    f"`munim config set {provider} --client-id ...`, which "
-                    f"prompts for the secret and stores both in your keychain"))
+                # Led with `uv run python scripts/setup_google_oauth.py`, which
+                # only exists in a source checkout: pyproject ships src/munim
+                # and nothing else. The advice was undoable by exactly the
+                # person reading it, somebody who installed the package.
+                fix=f"{server.register_at}, Desktop app, redirect "
+                    f"{REDIRECT_URI}, then `munim config app set {provider} "
+                    f"--client-id ...`, which prompts for the secret and stores "
+                    f"both in your keychain. From a source checkout, "
+                    f"scripts/setup_google_oauth.py does the first half"))
         else:
             out.append(Finding(
                 WARN, f"Login: {provider}", "no application, and no MCP server",
@@ -381,26 +386,55 @@ def _room() -> Finding:
                    fix="reinstall munim; the control room ships with it")
 
 
-def run(registry: Registry | None = None) -> int:
+def run(registry: Registry | None = None, verbose: bool = False) -> int:
+    """What is wrong with this installation, and nothing else.
+
+    This used to print thirteen lines on a healthy machine: every provider's
+    login route, every client, the keychain backend, the control room. All true,
+    none of it a problem, each with a fix beside it, closing on "1 thing(s) need
+    fixing before this works" when the thing worked fine.
+
+    `audit_all_clients` has been documented from the start as silent when
+    everything passes and a list when it does not. `doctor` now behaves the same
+    way. What is connected is inventory rather than health, `munim clients`
+    already answers it, and it is behind --verbose here.
+    """
     registry = registry or Registry(Path.home() / ".munim" / "registry.json")
-    findings = [_config(), _settings_file(), *_agents(), _mcp_registered(),
-                *_one_interpreter(), _room(), _keychain(), *_oauth_apps(),
-                *_clients(registry)]
 
-    width = max(len(f.what) for f in findings) + 2
-    for f in findings:
-        print(f"{MARK[f.status]} {f.what.ljust(width)}{f.detail}")
-        if f.fix:
-            print(f"{' ' * (width + 2)}→ {f.fix}")
+    from munim import settings
+    from munim.cli import installed_version
 
-    bad = sum(1 for f in findings if f.status == BAD)
-    warn = sum(1 for f in findings if f.status == WARN)
+    health = [_config(), _settings_file(), *_agents(), _mcp_registered(),
+              *_one_interpreter(), _room(), _keychain()]
+    inventory = [*_oauth_apps(), *_clients(registry)] if verbose else []
+
+    state = settings.ai()
+    print(f"munim {installed_version()}, python "
+          f"{sys.version_info.major}.{sys.version_info.minor}, agents "
+          f"{'on' if state.enabled else 'off'}"
+          f"{'' if state.enabled else ' (local)'}")
     print()
+
+    shown = [f for f in health if f.status != OK or verbose] + inventory
+    if shown:
+        width = max(len(f.what) for f in shown) + 2
+        for f in shown:
+            print(f"{MARK[f.status]} {f.what.ljust(width)}{f.detail}")
+            if f.fix:
+                print(f"{' ' * (width + 2)}→ {f.fix}")
+        print()
+
+    bad = sum(1 for f in health if f.status == BAD)
+    warn = sum(1 for f in health if f.status == WARN)
+
     if bad:
-        print(f"{bad} thing(s) need fixing before this works.")
+        print(f"{bad} problem{'s' if bad > 1 else ''} to fix"
+              + (f", and {warn} thing{'s' if warn > 1 else ''} worth a look"
+                 if warn else "") + ".")
         return 1
     if warn:
-        print(f"Working. {warn} thing(s) would make it better.")
+        print(f"Working. {warn} thing{'s' if warn > 1 else ''} worth a look.")
         return 0
-    print("Everything is set up.")
+    print("No problems found." + ("" if verbose else
+          "  Run with --verbose to see what is connected."))
     return 0
