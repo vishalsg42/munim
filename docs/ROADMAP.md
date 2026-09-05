@@ -96,3 +96,16 @@ operator with a dozen clients this is a real ceiling on Gmail specifically.
 which account it belongs to before use. What is not proven is the behaviour when
 a refresh token silently returns a session for a different account, which should
 be impossible and is the kind of thing that is impossible until it happens.
+
+**Shell completion, and machine-readable output beyond `clients`.** Client names
+and provider names are exactly what an operator cannot recall, which makes
+completion the highest-value missing affordance here, and there is none.
+`munim clients --json` exists; `servers` and `doctor` both produce structured
+data that is currently prose only, and `doctor` is what a script would want to
+gate on.
+
+**`--yes` is a convention on one command, not the surface.** `disconnect --all`
+lists what it will remove and asks. `clients forget` destroys and `clients merge`
+moves credentials between identities, and neither confirms nor takes `--yes`.
+Either they should, or the flag is a patch rather than a rule.
+

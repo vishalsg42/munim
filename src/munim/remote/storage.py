@@ -126,6 +126,25 @@ class KeychainTokenStorage(TokenStorage):
         except keyring.errors.KeyringError:
             return None
 
+    def holds(self) -> list[str]:
+        """Which kinds this session actually has stored. Read only.
+
+        The counterpart to `forget`, iterating the same four kinds, so that a
+        caller can be told what removing this session would take before it takes
+        it. Asking `_read("tokens")` instead was the mistake this exists to
+        prevent: Zoho stores an endpoint and no tokens at all, so a session that
+        looks empty by that test is a credential nobody can rebuild from a
+        browser login.
+        """
+        found = []
+        for kind in ("client", "tokens", "account", "endpoint"):
+            try:
+                if self._backend.get_password(self._service(kind), self._client):
+                    found.append(kind)
+            except keyring.errors.KeyringError:
+                return []
+        return found
+
     def forget(self) -> list[str]:
         """Remove this client's session with this provider. Returns what went.
 
