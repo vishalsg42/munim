@@ -296,3 +296,42 @@ def test_full_screen_is_skipped_when_there_is_no_terminal(capsys):
     with pick.full_screen():
         pass
     assert capsys.readouterr().err == ""
+
+
+def test_the_cursor_is_hidden_for_the_length_of_a_walk(monkeypatch, capsys):
+    """It has nowhere useful to sit in a menu, and left visible it skids down
+    the frame on every redraw."""
+    class Tty:
+        def isatty(self): return True
+        def write(self, text): captured.append(text)
+        def flush(self): pass
+
+    captured = []
+    monkeypatch.setattr(pick, "interactive", lambda: True)
+    monkeypatch.setattr(pick.sys, "stderr", Tty())
+
+    with pick.full_screen():
+        pass
+    text = "".join(captured)
+
+    assert text.index(pick.CURSOR_OFF) < text.index(pick.CURSOR_ON), \
+        "the cursor was shown before it was hidden"
+    assert text.endswith(pick.ALT_OFF), "the terminal was not handed back last"
+
+
+def test_suspending_gives_the_cursor_back(monkeypatch, capsys):
+    """An action that prompts needs a cursor the operator can see."""
+    class Tty:
+        def isatty(self): return True
+        def write(self, text): captured.append(text)
+        def flush(self): pass
+
+    captured = []
+    monkeypatch.setattr(pick, "interactive", lambda: True)
+    monkeypatch.setattr(pick.sys, "stderr", Tty())
+
+    with pick.full_screen():
+        captured.clear()
+        with pick.suspended():
+            mid = "".join(captured)
+    assert pick.CURSOR_ON in mid and pick.ALT_OFF in mid

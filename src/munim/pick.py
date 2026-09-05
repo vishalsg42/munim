@@ -270,6 +270,11 @@ class Blank:
 # each other and the one you were looking at was the one furthest down.
 ALT_ON, ALT_OFF = "\x1b[?1049h", "\x1b[?1049l"
 
+# The cursor is hidden for the length of a walk. It has nowhere useful to sit
+# in a menu, and leaving it visible makes it skid down the frame on every
+# redraw. Claude Code hides it for the same reason.
+CURSOR_OFF, CURSOR_ON = "\x1b[?25l", "\x1b[?25h"
+
 # Whether a walk currently owns the whole screen. When it does, each frame
 # homes the cursor and erases below rather than counting lines back, which is
 # both simpler and immune to a frame whose height changed.
@@ -283,14 +288,14 @@ def full_screen():
     if not interactive():
         yield
         return
-    sys.stderr.write(ALT_ON)
+    sys.stderr.write(ALT_ON + CURSOR_OFF)
     sys.stderr.flush()
     _owns_screen = True
     try:
         yield
     finally:
         _owns_screen = False
-        sys.stderr.write(ALT_OFF)
+        sys.stderr.write(CURSOR_ON + ALT_OFF)
         sys.stderr.flush()
 
 
@@ -308,12 +313,12 @@ def suspended():
         yield
         return
     _owns_screen = False
-    sys.stderr.write(ALT_OFF)
+    sys.stderr.write(CURSOR_ON + ALT_OFF)
     sys.stderr.flush()
     try:
         yield
     finally:
-        sys.stderr.write(ALT_ON)
+        sys.stderr.write(ALT_ON + CURSOR_OFF)
         sys.stderr.flush()
         _owns_screen = True
 
