@@ -16,6 +16,8 @@ The operator knows which client it is. Ask them.
 
 import pytest
 
+from mcp.shared.auth import OAuthToken
+
 from munim import cli
 from munim.registry import ClientRecord, Registry
 
@@ -112,9 +114,16 @@ def test_nothing_is_left_under_the_provisional_key_when_declined(estate):
     assert not [k for k in ring.s if cli.PROVISIONAL in k[1]]
 
 
-class _Token:
-    def __init__(self, value): self.value = value
-    def model_dump_json(self): return '{"access_token": "%s"}' % self.value
+def _Token(value):
+    """The real model, not a stand-in.
+
+    This was a hand-rolled fake with only `model_dump_json`. When storage
+    started writing through `model_dump` so it could record the token's issue
+    time alongside, the fake was the only thing that broke, and it broke for a
+    reason no real caller could hit. A test double narrower than the thing it
+    replaces hides exactly this.
+    """
+    return OAuthToken(access_token=value, token_type="Bearer")
 
 
 # ---- the picker with nothing to pick -------------------------------------

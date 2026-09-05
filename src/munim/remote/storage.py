@@ -6,6 +6,7 @@ time; a registration and a token set per client is what removes it.
 """
 
 import json
+import time
 
 from mcp.client.auth import TokenStorage
 
@@ -13,6 +14,10 @@ from munim import vault
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 
 SERVICE = "munim-mcp"
+
+# Munim's own key inside the stored token record. Underscored like
+# `_seeded` so it reads as bookkeeping rather than something a provider sent.
+ISSUED_AT = "_obtained_at"
 
 
 # How Munim authenticates when a provider issues it a secret. Named once and
@@ -50,16 +55,53 @@ class KeychainTokenStorage(TokenStorage):
             return None
         return json.loads(raw) if raw else None
 
-    def _write(self, kind: str, payload) -> None:
+    def _write(self, kind: str, payload, **extra) -> None:
+        # Written through the dict rather than the model so Munim's own
+        # bookkeeping can ride along in the same record. `get_tokens` and
+        # `get_client_info` pop their key back out, so nothing the provider
+        # defined is touched and no model needs an extra field.
+        record = payload.model_dump(mode="json")
+        record.update(extra)
         self._backend.set_password(self._service(kind), self._client,
-                                   payload.model_dump_json())
+                                   json.dumps(record))
 
     async def get_tokens(self) -> OAuthToken | None:
         data = self._read("tokens")
-        return OAuthToken(**data) if data else None
+        if not data:
+            return None
+        data.pop(ISSUED_AT, None)   # our bookkeeping, not the provider's
+        return OAuthToken(**data)
 
     async def set_tokens(self, tokens: OAuthToken) -> None:
-        self._write("tokens", tokens)
+        self._write("tokens", tokens, **{ISSUED_AT: time.time()})
+
+    def expires_at(self) -> float | None:
+        """When the stored access token stops being accepted, or None if unknown.
+
+        The reason this exists is a bug that made every session look like it
+        expired in a day. OAuth grants `expires_in`, a duration, and the SDK
+        turns it into an absolute time on the object it is holding
+        (`_TokenContext.update_token_expiry`). That object dies with the
+        process. Nothing wrote the absolute time down, so the next run loaded a
+        token with no idea how old it was.
+
+        `is_token_valid()` treats "no expiry known" as valid, so a fresh
+        process believed a day-old token, sent it, got a 401, and the SDK went
+        straight to a full browser login without ever trying the refresh token
+        sitting beside it. A one-hour token therefore read as "you must sign in
+        again", daily, for as long as this was unfixed.
+
+        Recording the issue time is the whole fix. Tokens stored before this
+        existed have no issue time and return None, which reproduces exactly
+        the old behaviour for them rather than guessing an age.
+        """
+        data = self._read("tokens")
+        if not data:
+            return None
+        issued, lasts = data.get(ISSUED_AT), data.get("expires_in")
+        if issued is None or lasts is None:
+            return None
+        return float(issued) + float(lasts)
 
     async def get_client_info(self) -> OAuthClientInformationFull | None:
         data = self._read("client")

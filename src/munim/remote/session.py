@@ -127,6 +127,37 @@ def _apply_sep_2207() -> None:
     oauth2.get_client_metadata_scopes = wrapped
 
 
+class _RemembersExpiry(OAuthClientProvider):
+    """An OAuth client that knows how old the tokens it just loaded are.
+
+    The SDK computes an absolute expiry only when it obtains tokens itself
+    (`_TokenContext.update_token_expiry`, called from the authorization and
+    refresh handlers). `_initialize` loads tokens from storage and sets
+    `current_tokens` without ever setting `token_expiry_time`.
+
+    That is benign in a long-lived process and wrong in this one. Every `munim`
+    command is a fresh process, and `is_token_valid()` reads
+
+        not self.token_expiry_time or time.time() <= self.token_expiry_time
+
+    so an unset expiry means "valid". A day-old access token therefore passed
+    the check, went out on the wire, came back 401, and the SDK's 401 branch is
+    a full authorization rather than a refresh. The refresh token sat unused on
+    disk while Munim demanded a browser.
+
+    So the one-hour token behaved like a one-hour *account*: reconnect, work,
+    come back tomorrow, sign in again. Filling in the expiry the store recorded
+    is what lets the refresh branch fire instead.
+    """
+
+    async def _initialize(self) -> None:
+        await super()._initialize()
+        expires = getattr(self.context.storage, "expires_at", None)
+        when = expires() if callable(expires) else None
+        if when is not None:
+            self.context.token_expiry_time = when
+
+
 def auth_for(client: str, provider: str, *, backend=None,
              on_url=None, label: str | None = None,
              allow_login: bool = True) -> OAuthClientProvider:
@@ -224,7 +255,7 @@ def auth_for(client: str, provider: str, *, backend=None,
                 f"need this.")
         storage.seed_client_info(*registered, redirect_uri())
 
-    return OAuthClientProvider(
+    return _RemembersExpiry(
         server_url=server.url,
         client_metadata=meta,
         storage=storage,
