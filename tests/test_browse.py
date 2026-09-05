@@ -226,19 +226,101 @@ def test_the_reason_is_shown_inside_the_next_frame(estate, monkeypatch, capsys):
     assert "munim connect" in err
 
 
-def test_the_action_menu_prints_commands_rather_than_running_them(
+def test_disconnect_asks_first_and_then_actually_removes(
         estate, monkeypatch, capsys):
-    """A browser login or a deletion behind one keypress is a consequential
-    action hidden in a menu."""
+    """The menu used to print `munim disconnect ...` and return, so clicking it
+    did nothing. It acts now, and the confirmation is the gate that earns it."""
+    called = []
+    monkeypatch.setattr("munim.cli.disconnect",
+                        lambda *a, **k: called.append(a) or 0)
+
     live = status("Balaji Roofings", "cloudflare")
     record = ClientRecord(name="Balaji Roofings")
 
-    # Down to "Disconnect", Enter, then Esc out.
+    # Down twice to Disconnect, Enter, then Down to "Yes", Enter.
     browse._provider_walk(record, live,
-                          keys=[pick.DOWN, pick.DOWN, pick.ENTER, pick.ESC])
+                          keys=[pick.DOWN, pick.DOWN, pick.ENTER,
+                                pick.DOWN, pick.ENTER])
 
-    err = capsys.readouterr().err
-    assert 'Run: munim disconnect "Balaji Roofings" cloudflare' in err
+    assert called, "Disconnect did not run anything"
+    assert called[0][:2] == ("Balaji Roofings", "cloudflare")
+
+
+def test_declining_the_confirmation_removes_nothing(estate, monkeypatch):
+    called = []
+    monkeypatch.setattr("munim.cli.disconnect",
+                        lambda *a, **k: called.append(a) or 0)
+
+    browse._provider_walk(ClientRecord(name="Balaji Roofings"),
+                          status("Balaji Roofings", "cloudflare"),
+                          keys=[pick.DOWN, pick.DOWN, pick.ENTER,
+                                pick.ENTER,      # lands on Cancel
+                                pick.ESC])
+
+    assert called == [], "a credential was removed without a yes"
+
+
+def test_reconnect_runs_the_login_and_re_probes(estate, monkeypatch, capsys):
+    ran = []
+    monkeypatch.setattr("munim.cli.connect",
+                        lambda client, provider: ran.append((client, provider)) or 0)
+    monkeypatch.setattr(health, "check_all_for",
+                        lambda record, provider, backend=None:
+                        status("Balaji Roofings", provider, health.LIVE))
+
+    browse._provider_walk(ClientRecord(name="Balaji Roofings"),
+                          status("Balaji Roofings", "cloudflare", health.EXPIRED,
+                                 detail="the session expired"),
+                          keys=[pick.DOWN, pick.ENTER, pick.ESC])
+
+    assert ran == [("Balaji Roofings", "cloudflare")]
+    assert "Reconnected." in capsys.readouterr().err
+
+
+def test_a_failed_reconnect_says_so_rather_than_claiming_success(
+        estate, monkeypatch, capsys):
+    monkeypatch.setattr("munim.cli.connect", lambda client, provider: 2)
+
+    browse._provider_walk(ClientRecord(name="Balaji Roofings"),
+                          status("Balaji Roofings", "cloudflare", health.EXPIRED,
+                                 detail="the session expired"),
+                          keys=[pick.DOWN, pick.ENTER, pick.ESC])
+
+    assert "was not reconnected" in capsys.readouterr().err
+
+
+def test_set_domain_writes_it(estate, monkeypatch, capsys):
+    written = []
+    monkeypatch.setattr("munim.cli.set_domain",
+                        lambda name, site: written.append((name, site)) or 0)
+    monkeypatch.setattr("builtins.input", lambda: "newsite.test")
+    monkeypatch.setattr(
+        "munim.registry.Registry.get",
+        lambda self, key: ClientRecord(name="Balaji Roofings",
+                                       domain="newsite.test"))
+
+    browse._provider_walk(ClientRecord(name="Balaji Roofings"),
+                          status("Balaji Roofings", "cloudflare"),
+                          keys=[pick.DOWN, pick.DOWN, pick.DOWN, pick.ENTER,
+                                pick.ESC])
+
+    assert written == [("Balaji Roofings", "newsite.test")]
+    assert "newsite.test" in capsys.readouterr().err
+
+
+def test_an_empty_domain_changes_nothing(estate, monkeypatch, capsys):
+    written = []
+    monkeypatch.setattr("munim.cli.set_domain",
+                        lambda name, site: written.append(site) or 0)
+    monkeypatch.setattr("builtins.input", lambda: "")
+
+    browse._provider_walk(ClientRecord(name="Balaji Roofings"),
+                          status("Balaji Roofings", "cloudflare"),
+                          keys=[pick.DOWN, pick.DOWN, pick.DOWN, pick.ENTER,
+                                pick.ESC])
+
+    assert written == []
+    assert "unchanged" in capsys.readouterr().err
 
 
 # ---- nothing changed for anything without a terminal ------------------

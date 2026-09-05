@@ -18,7 +18,7 @@ import textwrap
 
 from munim import health
 from munim.pick import (AMBER, BACK, BOLD, Blank, DIM, GREEN, Head, Item,
-                        RED, full_screen, menu, paint)
+                        RED, full_screen, menu, paint, suspended)
 
 # What a tool's description is wrapped to. Cloudflare's `execute` carries about
 # 1200 characters of TypeScript interfaces, and they are the only thing telling
@@ -229,15 +229,90 @@ def _provider_walk(record, status, *, keys=None):
                 return None
             if isinstance(outcome, str):
                 note = outcome
-        else:
-            # The commands exist and are the documented way in. Running a
-            # browser login or a deletion from inside a menu would hide a
-            # consequential action behind a keypress.
-            said = {"connect": f'munim connect "{record.name}" {status.provider}',
-                    "disconnect": f'munim disconnect "{record.name}" '
-                                  f'{status.provider}',
-                    "domain": f'munim clients domain "{record.name}" <site>'}
-            note = f"Run: {said[chosen]}"
+        elif chosen == "connect":
+            status, note = _reconnect(record, status, keys=keys)
+        elif chosen == "disconnect":
+            done, note = _disconnect(record, status, keys=keys)
+            if done:
+                return 0        # there is no provider left to stand on
+        elif chosen == "domain":
+            record, note = _set_domain(record, keys=keys)
+
+
+# ---- the actions, which used to only print the command ----------------
+#
+# The first version printed `munim connect ...` and returned, on the grounds
+# that a browser login or a deletion behind one keypress hides a consequential
+# action. The gate is worth keeping; refusing to act at all was not. So the
+# destructive one asks first, in its own frame, and every one of them steps out
+# of the full screen to run, because a browser prompt or a progress line cannot
+# happen inside something that redraws over it.
+
+
+def _confirm(question: str, yes: str, *, keys=None) -> bool:
+    """A frame whose only job is to make somebody say yes on purpose."""
+    picked = menu(question,
+                  [Item("Cancel", value=False), Item(yes, value=True)],
+                  keys=keys)
+    return picked is True
+
+
+def _reconnect(record, status, *, keys=None):
+    from munim.cli import connect
+
+    with suspended():
+        print(file=sys.stderr)
+        code = connect(record.name, status.provider)
+    if code != 0:
+        return status, f"{status.provider} was not reconnected."
+
+    fresh = health.check_all_for(record, status.provider)
+    return fresh, ("Reconnected." if fresh.live
+                   else f"Reconnected, but the session still will not open: "
+                        f"{fresh.detail}")
+
+
+def _disconnect(record, status, *, keys=None):
+    """True when the credential is gone, so the caller leaves this screen."""
+    from munim.cli import disconnect
+
+    if not _confirm(
+            f"Remove {record.name}'s {status.provider} credential?",
+            f"Yes, disconnect {status.provider}", keys=keys):
+        return False, ""
+
+    with suspended():
+        print(file=sys.stderr)
+        code = disconnect(record.name, status.provider, False,
+                          assume_yes=True, dry_run=False)
+    if code != 0:
+        return False, f"Nothing was removed from {status.provider}."
+    from munim import toolcache
+    toolcache.forget(record.id, status.provider)
+    return True, ""
+
+
+def _set_domain(record, *, keys=None):
+    from munim.cli import set_domain
+    from munim.registry import Registry
+
+    with suspended():
+        print(f"\nSite for {record.name} (blank to keep "
+              f"{record.domain or 'none'}): ", end="", file=sys.stderr,
+              flush=True)
+        try:
+            typed = input().strip()
+        except (EOFError, KeyboardInterrupt):
+            typed = ""
+        code = set_domain(record.name, typed) if typed else 1
+    if not typed:
+        return record, "Domain unchanged."
+    if code != 0:
+        return record, "The domain was not changed."
+
+    from pathlib import Path
+    fresh = Registry(Path.home() / ".munim" / "registry.json").get(record.id)
+    return fresh, f"Domain set to {fresh.domain}."
 
 
 def _tools_walk(record, status, *, keys=None):

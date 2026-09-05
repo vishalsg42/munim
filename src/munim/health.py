@@ -109,6 +109,19 @@ async def check_all_async(registry, backend=None) -> list[Status]:
     return list(await asyncio.gather(*(check(*item) for item in work)))
 
 
+def check_all_for(record, provider: str, backend=None) -> Status:
+    """One client's one provider, probed now.
+
+    After a reconnect the cached status is stale by definition, and re-probing
+    every client to refresh one of them would make the menu pay for the whole
+    estate on every action.
+    """
+    try:
+        return asyncio.run(check(record.id, record.name, provider))
+    except RuntimeError:
+        return Status(record.name, provider, UNREACHABLE, "could not be checked")
+
+
 def check_all(registry, backend=None) -> list[Status]:
     """The same, for callers with no event loop of their own: doctor and the CLI."""
     try:

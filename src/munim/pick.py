@@ -294,6 +294,30 @@ def full_screen():
         sys.stderr.flush()
 
 
+@contextmanager
+def suspended():
+    """Step out of the full screen, run something, and come back.
+
+    An action that opens a browser, prompts, or prints progress cannot happen
+    inside a frame that redraws over it. The first version of this menu dodged
+    the problem by refusing to act at all and printing the command for the
+    operator to run themselves, which meant every item on it did nothing.
+    """
+    global _owns_screen
+    if not _owns_screen:
+        yield
+        return
+    _owns_screen = False
+    sys.stderr.write(ALT_OFF)
+    sys.stderr.flush()
+    try:
+        yield
+    finally:
+        sys.stderr.write(ALT_ON)
+        sys.stderr.flush()
+        _owns_screen = True
+
+
 GREEN, RED, AMBER = "\x1b[32m", "\x1b[31m", "\x1b[33m"
 DIM, BOLD, CYAN, RESET = "\x1b[2m", "\x1b[1m", "\x1b[36m", "\x1b[0m"
 
