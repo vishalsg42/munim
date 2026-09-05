@@ -601,6 +601,145 @@ def config(action: str, provider: str | None, client_id: str | None) -> int:
     return 0
 
 
+def _resolved(client: str):
+    """The client record, or None with the reason already printed."""
+    try:
+        return _registry().get(client)
+    except UnknownClient as unknown:
+        print(str(unknown), file=sys.stderr)
+        return None
+
+
+def _tool_names(client: str, provider: str) -> list[str] | None:
+    """The provider's tool names, for the picker. None if it could not be asked."""
+    import asyncio
+
+    from munim.remote.passthrough import tools_for
+    from munim.remote.session import NeedsLogin, NoRemoteServer
+
+    record = _resolved(client)
+    if record is None:
+        return None
+    try:
+        return [t["tool"] for t in asyncio.run(tools_for(record.id, provider))]
+    except NeedsLogin:
+        print(f"{provider} is not connected for {record.name!r}, or the session "
+              f"expired.", file=sys.stderr)
+        print(f'  munim connect "{record.name}" {provider}', file=sys.stderr)
+        return None
+    except NoRemoteServer as unknown:
+        print(str(unknown), file=sys.stderr)
+        return None
+
+
+def list_tools(client: str, provider: str, as_json: bool = False) -> int:
+    """What this client's provider account can be asked to do.
+
+    The counterpart to `munim call`. Every provider here runs its own MCP
+    server and publishes its own tools, so this reads that list rather than
+    Munim keeping a copy that goes stale the moment the provider ships one.
+    """
+    import asyncio
+    import json
+
+    from munim.remote.passthrough import known_providers, tools_for
+    from munim.remote.session import NeedsLogin, NoRemoteServer
+
+    record = _resolved(client)
+    if record is None:
+        return 2
+
+    try:
+        tools = asyncio.run(tools_for(record.id, provider))
+    except NeedsLogin:
+        print(f"{provider} is not connected for {record.name!r}, or the session "
+              f"expired.", file=sys.stderr)
+        print(f'  munim connect "{record.name}" {provider}', file=sys.stderr)
+        return 2
+    except NoRemoteServer as unknown:
+        print(str(unknown), file=sys.stderr)
+        return 2
+
+    if as_json:
+        print(json.dumps(tools, indent=2))
+        return 0
+
+    if not tools:
+        print(f"{provider} exposes no tools for {record.name}.", file=sys.stderr)
+        return 0
+
+    print(f"{provider} tools for {record.name}:", file=sys.stderr)
+    for tool in tools:
+        # Three states, not two. A provider that annotates nothing is not the
+        # same as one that says a tool writes, and printing "write" for both
+        # would be Munim asserting something the provider never said.
+        mark = {True: "read", False: "write", None: "?"}[tool["read_only"]]
+        first = (tool["does"].splitlines() or [""])[0][:70]
+        print(f"  {mark:<5} {tool['tool']:<28} {first}", file=sys.stderr)
+    print(f"\n{len(tools)} tools. To call one:", file=sys.stderr)
+    print(f'  munim call "{record.name}" {provider} <tool> --args \'{{...}}\'',
+          file=sys.stderr)
+    return 0
+
+
+def call_tool(client: str, provider: str, tool: str, args_json: str | None,
+              as_json: bool = False) -> int:
+    """Call one provider tool with one client's credentials.
+
+    No model anywhere in this path, which is the point: it works with agents
+    off. The arguments go to the provider exactly as given, and the call lands
+    in the run log with the tool and its arguments, because per-call isolation
+    is only as good as the record of what was called (D31).
+    """
+    import asyncio
+    import json
+
+    from munim.remote.passthrough import UnknownTool, call_tool as invoke
+    from munim.remote.session import NeedsLogin, NoRemoteServer
+    from munim.runlog import RunLog, new_run_id
+
+    record = _resolved(client)
+    if record is None:
+        return 2
+
+    try:
+        arguments = json.loads(args_json) if args_json else {}
+    except ValueError as bad:
+        print(f"--args is not JSON: {bad}", file=sys.stderr)
+        return 2
+    if not isinstance(arguments, dict):
+        print("--args must be a JSON object, because tool arguments are named.",
+              file=sys.stderr)
+        return 2
+
+    log = RunLog(new_run_id())
+    try:
+        result = asyncio.run(invoke(record.id, provider, tool, arguments, log=log))
+    except NeedsLogin:
+        print(f"{provider} is not connected for {record.name!r}, or the session "
+              f"expired.", file=sys.stderr)
+        print(f'  munim connect "{record.name}" {provider}', file=sys.stderr)
+        return 2
+    except NoRemoteServer as unknown:
+        print(str(unknown), file=sys.stderr)
+        return 2
+    except UnknownTool as missing:
+        print(str(missing), file=sys.stderr)
+        print(f'  munim tools "{record.name}" {provider}', file=sys.stderr)
+        return 2
+
+    # The result goes to stdout and everything else to stderr, so piping this
+    # into jq works without a flag for it.
+    print(json.dumps(result["result"] if not as_json else result,
+                     indent=2, default=str))
+    if result["failed"]:
+        print(f"{provider}.{tool} refused. Recorded as {log.run_id}.",
+              file=sys.stderr)
+        return 1
+    print(f"Recorded as {log.run_id}.", file=sys.stderr)
+    return 0
+
+
 def set_domain(client: str, domain: str) -> int:
     """Record which site a client is, or correct the one recorded.
 
@@ -1195,6 +1334,25 @@ def main(argv: list[str] | None = None) -> int:
                    help="the application's client id, for `app set`. The "
                         "secret is prompted, never passed as an argument")
 
+    # The first two operational verbs this CLI has had. Everything before them
+    # is setup: connect an account, name a client, check the install. These do
+    # work, and they do it by forwarding the provider's own tools rather than
+    # growing a verb per operation (D31).
+    tl = sub.add_parser("tools", help="what a provider can be asked to do")
+    tl.add_argument("client", nargs="?")
+    tl.add_argument("provider", nargs="?")
+    tl.add_argument("--json", action="store_true", dest="as_json",
+                    help="machine-readable, for scripts")
+
+    cl = sub.add_parser("call", help="call one of a provider's tools")
+    cl.add_argument("client", nargs="?")
+    cl.add_argument("provider", nargs="?")
+    cl.add_argument("tool", nargs="?")
+    cl.add_argument("--args", dest="args_json",
+                    help="the tool's arguments as a JSON object")
+    cl.add_argument("--json", action="store_true", dest="as_json",
+                    help="wrap the result with the client, tool and run id")
+
     dr = sub.add_parser("doctor", help="what is wrong with this installation")
     dr.add_argument("--verbose", "-v", action="store_true",
                     help="also list what is connected")
@@ -1306,6 +1464,33 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "doctor":
         from munim.doctor import run as doctor_run
         return doctor_run(_registry(), verbose=args.verbose)
+
+    if args.command in ("tools", "call"):
+        from munim.remote.passthrough import known_providers
+
+        client = args.client or _pick_client(_registry(),
+                                             "Whose account?")
+        if client is None:
+            return CANCELLED if args.client is None else 2
+        provider = args.provider or choose_one("Which provider?",
+                                               known_providers())
+        if provider is None:
+            return CANCELLED
+        if args.command == "tools":
+            return list_tools(client, provider, args.as_json)
+
+        tool = args.tool
+        if tool is None:
+            # Picking the tool from the live list is the whole shape of this
+            # command: the provider's tools are what you choose from, and
+            # Munim never has to know their names.
+            names = _tool_names(client, provider)
+            if names is None:
+                return 2
+            tool = choose_one(f"Which {provider} tool?", names)
+            if tool is None:
+                return CANCELLED
+        return call_tool(client, provider, tool, args.args_json, args.as_json)
 
     if args.command == "clients":
         # Accepted-and-ignored is worse than refused. `--json` only shapes the

@@ -56,11 +56,28 @@ which of my clients has a domain expiring this quarter?
 check ivyandfern.co.uk for Ivy & Fern Studio
 ```
 
+## Doing the work, not just the diagnosis
+
+Munim does not wrap each provider in verbs of its own. Every provider here runs
+its own MCP server with its own tools, so Munim forwards them and supplies the
+credential:
+
+```bash
+munim tools "Ivy & Fern" cloudflare          # what that account can be asked to do
+munim call  "Ivy & Fern" cloudflare execute --args '{"code": "..."}'
+```
+
+Your coding agent gets the same two as `list_provider_tools` and
+`call_provider_tool`. There is no model in this path, so it works with agents
+off, and every call is written to the run log with the tool and its arguments.
+A call names one client and resolves that client's credentials alone.
+
 **Munim is local by default.** The checks, the audit and the mail plan are
-deterministic: they never needed a model and never call one. Three tools can
-also reason about what they find (`check`, `work_on_client`,
-`ask_across_clients`), and that is switched off until you ask for it, so having
-a key lying around is not the same as consenting to use it.
+deterministic: they never needed a model and never call one, and neither does
+the passthrough above. Three tools can also reason about what they find
+(`check`, `work_on_client`, `ask_across_clients`), and that is switched off
+until you ask for it, so having a key lying around is not the same as
+consenting to use it.
 
 ```bash
 munim config ai key gemini   # prompts, stored in ~/.munim/credentials.json

@@ -37,6 +37,28 @@ munim disconnect --all --dry-run             # what it would remove, removing no
 munim disconnect --all --yes                 # skip the question, for scripts
 ```
 
+**Doing the work, by calling the provider's own tools**
+
+```bash
+munim tools "Ivy & Fern" cloudflare          # what that account can be asked to do
+munim call  "Ivy & Fern" cloudflare execute --args '{"code": "..."}'
+munim call  "Ivy & Fern" vercel list_projects
+```
+
+Omit any argument and you get the picker. `munim tools` lists what the provider
+itself publishes, so it is never out of date with what the provider shipped
+today, and `munim call` invokes one of those tools with that client's
+credentials, forwarding the arguments untouched.
+
+No model is involved, so this works with agents off. The result goes to stdout
+and everything else to stderr, so `munim call ... | jq` needs no flag. Every call
+is written to the run log with the tool and its arguments; the command prints the
+run id, and `munim-room` or `launch_status` reads it back.
+
+Both are also MCP tools, `list_provider_tools` and `call_provider_tool`, so your
+coding agent can do the same thing. See [TOOLS.md](TOOLS.md) and D31 in
+[DECISIONS.md](DECISIONS.md) for what this changes about the isolation guarantee.
+
 **Everything else**
 
 ```bash
@@ -83,10 +105,13 @@ munim-room --runs DIR --reports DIR     # serve a different set of runs
 ## Agents are off by default
 
 `check`, `work_on_client` and `ask_across_clients` can explain what they find,
-and that needs a model host. It is switched off until you ask for it, so a key
+and that needs a model host. `munim call` and `munim tools` do not: they forward
+the provider's own tools, so changing a client's account never depends on a model
+being configured. It is switched off until you ask for it, so a key
 sitting in a file is not the same as deciding to use one. Everything else in
 Munim is deterministic and unaffected: the thirteen checks, `audit_all_clients`,
-`find_across_clients` and the mail plan all work with no key and no model call.
+`find_across_clients`, the mail plan and the whole passthrough all work with no
+key and no model call.
 
 `munim config ai on` takes effect on the next tool call. There is no need to
 reconnect your coding agent: the setting is read when a tool runs, not when the

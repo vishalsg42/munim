@@ -39,3 +39,40 @@ async def test_the_message_says_how_to_fix_it():
         async with session_for("c_never_connected", "cloudflare",
                                backend=Ring(), allow_login=False):
             pass
+
+
+async def test_the_refusal_is_not_buried_under_a_traceback(caplog):
+    """A legible refusal is the whole point, so the SDK's traceback is dropped.
+
+    `mcp.client.auth.oauth2` ends its flow with `logger.exception("OAuth flow
+    error")` and re-raises. For a real failure that is right. For this one it
+    printed fourteen lines of traceback above a one-line "run munim connect",
+    which is the opposite of what allow_login=False is for.
+    """
+    import logging
+
+    with caplog.at_level(logging.ERROR, logger="mcp.client.auth.oauth2"):
+        with pytest.raises(NeedsLogin):
+            async with session_for("c_never_connected", "cloudflare",
+                                   backend=Ring(), allow_login=False):
+                pass
+
+    assert "OAuth flow error" not in caplog.text
+
+
+async def test_a_real_oauth_failure_still_logs(caplog):
+    """Only the deliberate refusal is quieted. Hiding a fault would be the bug."""
+    import logging
+
+    from munim.remote.session import _QuietRefusal
+
+    quiet = _QuietRefusal()
+
+    def record(error):
+        made = logging.LogRecord("mcp.client.auth.oauth2", logging.ERROR,
+                                 __file__, 1, "OAuth flow error", (), None)
+        made.exc_info = (type(error), error, None)
+        return made
+
+    assert quiet.filter(record(NeedsLogin("asked for"))) is False
+    assert quiet.filter(record(ValueError("a real one"))) is True

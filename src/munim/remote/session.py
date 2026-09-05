@@ -13,8 +13,9 @@ a session for a client that is not registered.
 """
 
 import asyncio
+import logging
 import urllib.parse
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 
 from mcp import ClientSession
 from mcp.client.auth import OAuthClientProvider
@@ -319,6 +320,39 @@ async def _verify_account(session, client: str, provider: str, backend=None) -> 
         )
 
 
+class _QuietRefusal(logging.Filter):
+    """Drop the SDK's traceback for a refusal Munim asked for on purpose.
+
+    `mcp.client.auth.oauth2` ends its flow with `logger.exception("OAuth flow
+    error")` and re-raises, which is right for a real failure. With
+    `allow_login=False` the failure is `NeedsLogin`, and that is the designed
+    outcome, not a fault: a fourteen-line traceback printed above a one-line
+    "run munim connect" is the opposite of the legible refusal the flag exists
+    to produce.
+
+    Only that exception is dropped. Any other OAuth error still logs in full,
+    because those are faults and hiding them would be the real bug.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        info = record.exc_info
+        return not (info and isinstance(info[1], NeedsLogin))
+
+
+@contextmanager
+def _quiet_refusals(active: bool):
+    if not active:
+        yield
+        return
+    logger = logging.getLogger("mcp.client.auth.oauth2")
+    quiet = _QuietRefusal()
+    logger.addFilter(quiet)
+    try:
+        yield
+    finally:
+        logger.removeFilter(quiet)
+
+
 @asynccontextmanager
 async def session_for(client: str, provider: str, *, backend=None, on_url=None,
                       verify: bool = True, label: str | None = None,
@@ -344,12 +378,13 @@ async def session_for(client: str, provider: str, *, backend=None, on_url=None,
     auth = auth_for(client, provider, backend=backend, on_url=on_url,
                     label=label, allow_login=allow_login)
     try:
-        async with streamablehttp_client(url, auth=auth) as (read, write, _):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                if verify:
-                    await _verify_account(session, client, provider, backend)
-                yield session
+        with _quiet_refusals(not allow_login):
+            async with streamablehttp_client(url, auth=auth) as (read, write, _):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    if verify:
+                        await _verify_account(session, client, provider, backend)
+                    yield session
     except BaseExceptionGroup as group:
         # The transport runs inside an anyio task group, so anything raised in
         # here comes back wrapped. A caller cannot catch these through a group,

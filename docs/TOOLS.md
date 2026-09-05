@@ -1,10 +1,61 @@
 # The tools your agent gets
 
-Twelve, and this is the whole surface. Anything not listed here is not reachable,
-whatever else is in the repository.
+Fourteen, and this is the whole surface. Anything not listed here is not
+reachable, whatever else is in the repository.
 
 | Tool | |
-|---|---|
+|## The passthrough: `list_provider_tools` and `call_provider_tool`
+
+The two that make Munim able to change something without a model of its own.
+
+Every provider here runs its own MCP server with its own tools. Cloudflare's has
+three, one of which takes JavaScript; Vercel's has thirty-seven. Munim does not
+wrap them. `list_provider_tools` asks a client's live session what it exposes,
+and `call_provider_tool` invokes one of those tools with that client's
+credentials.
+
+```
+list_provider_tools(client="Balaji Roofings", provider="cloudflare")
+call_provider_tool(client="Balaji Roofings", provider="cloudflare",
+                   tool="execute", arguments={"code": "..."})
+```
+
+**No model host is involved**, so this works with agents off. That is the point:
+the model was doing a job nobody needed it to do. You are already an agent with a
+model; Munim was starting a second one to decide which Cloudflare tool to call.
+
+**Any provider Munim knows**, not only the three the mail tools use. Supabase,
+Linear, Notion, Sentry, Netlify, Zoho, Gmail and Stitch are all reachable through
+these two tools with no per-provider work.
+
+**`read_only` is reported, not enforced.** `list_provider_tools` passes on what
+the provider says about each of its own tools, including that it said nothing
+(`null`). Filtering writes out here would defeat the purpose: naming a client is
+what unlocks writing, and that is the D5 rule, not a rule about which tools exist.
+
+**Every call is recorded.** `call_provider_tool` writes the tool, the client and
+the arguments to the run log before returning, and gives you the `run_id`.
+`launch_status` reads it back. A tool the provider marks read-only is logged as an
+observation; everything else, including anything unannotated, is logged as a
+mutation. That log is the compensating control for a guarantee that changed shape:
+see D31.
+
+**It never opens a browser.** A client whose session has expired gets a refusal
+naming the `munim connect` command that fixes it. A tool call that pops a consent
+screen in a session nobody is watching is not a tool call.
+
+The same two are CLI verbs, and they are the first operational verbs Munim has
+had:
+
+```
+munim tools "Balaji Roofings" cloudflare
+munim call  "Balaji Roofings" cloudflare execute --args '{"code": "..."}'
+```
+
+Omit any argument and you get the picker. `munim call` prints the result to
+stdout and everything else to stderr, so piping it into `jq` needs no flag.
+
+---|---|
 | `list_clients` | every client and what each is connected to |
 | `client_status` | what is known about one client |
 | `add_client` | register one |
@@ -16,9 +67,11 @@ whatever else is in the repository.
 | `work_on_client` | do something inside one client's accounts, using their own provider tools (needs agents on) |
 | `plan_mail_setup` | what setting up email would change, touching no DNS |
 | `apply_mail_setup` | carry out a plan, with approval required to replace a record |
+| `list_provider_tools` | what one client's provider account can be asked to do |
+| `call_provider_tool` | call one of those tools with that client's credentials |
 | `launch_status` | read a run back |
 
-**Three of these need agents turned on, and they are off by default.**
+**Two of these need agents turned on, and they are off by default.**
 `ask_across_clients` and `work_on_client` are agent loops end to end: with agents
 off they answer with the command to turn them on rather than doing anything.
 `check` is different, because its thirteen checks are deterministic and are the

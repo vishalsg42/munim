@@ -28,6 +28,7 @@ from munim.connect.token import TokenConnector
 from munim.container import Container, KeychainBackend, UnknownClient
 from munim.env import load as load_env
 from munim.registry import ClientRecord, Registry
+from munim.remote.session import NeedsLogin, NoRemoteServer
 from munim.report import write as write_report
 from munim.runlog import RunLog, all_runs, new_run_id
 
@@ -39,7 +40,7 @@ from munim.runlog import RunLog, all_runs, new_run_id
 # Resend account, and a tool that creates anything belongs on this list rather
 # than in an argument about whether it counts.
 MUTATING = {"connect_provider", "plan_mail_setup", "apply_mail_setup",
-            "work_on_client"}
+            "work_on_client", "call_provider_tool"}
 
 # Tools that span more than one client's container. None of them may mutate, and
 # the set is named here rather than inferred, so adding one is a decision
@@ -263,6 +264,84 @@ def build_server(backend=None, registry=None, runs_dir=None,
         log = RunLog(new_run_id(), runs)
         result = await work_on(record.id, record.name, request, log)
         return {**result, "run_id": log.run_id}
+
+    # ---- the provider's own tools ----------------------------------------
+
+    @server.tool()
+    async def list_provider_tools(client: str, provider: str) -> dict:
+        """What this client's account with this provider can actually be asked to do.
+
+        Every provider here runs its own MCP server with its own tools, and
+        this returns them: the name, what it does, its argument schema, and
+        whether the provider marks it read-only. Pair it with
+        `call_provider_tool`, which invokes one.
+
+        This is how you do work Munim has no verb for. There is no per-operation
+        tool to look for, because modelling one provider's tools as another
+        tool's parameters is a losing game: Cloudflare's `execute` takes
+        JavaScript. Read this list, then call what it names.
+
+        `read_only` is what the provider says about its own tool, and null means
+        it said nothing. It is reported, not enforced; naming a client is what
+        unlocks writing (D5).
+        """
+        from munim.remote.passthrough import known_providers, tools_for
+
+        record = registry.get(client)
+        try:
+            tools = await tools_for(record.id, provider, backend=backend)
+        except NeedsLogin:
+            return {"client": record.name, "provider": provider,
+                    "error": f"{provider} is not connected for this client, or the "
+                             f"session expired.",
+                    "fix": f'munim connect "{record.name}" {provider}'}
+        except NoRemoteServer as unknown:
+            return {"client": record.name, "provider": provider,
+                    "error": str(unknown), "providers": known_providers()}
+        return {"client": record.name, "provider": provider,
+                "count": len(tools), "tools": tools}
+
+    @server.tool()
+    async def call_provider_tool(client: str, provider: str, tool: str,
+                                 arguments: dict | None = None) -> dict:
+        """Call one of a provider's own tools with one client's credentials.
+
+        The write half of the passthrough. `tool` and `arguments` come from
+        `list_provider_tools`; the arguments are forwarded to the provider
+        untouched, so anything that server accepts is reachable.
+
+        Munim's part is the credential: the call names a client and resolves
+        that client's session alone, so one call touches exactly one account,
+        and it is recorded in the run log with the tool and the arguments it
+        was given. Read `launch_status` afterwards to see what was done.
+
+        No language model is involved, which is the point. This works with
+        `munim config ai off`.
+        """
+        from munim.remote.passthrough import (
+            UnknownTool, call_tool, known_providers)
+
+        record = registry.get(client)
+        log = RunLog(new_run_id(), runs)
+        try:
+            result = await call_tool(record.id, provider, tool, arguments,
+                                     backend=backend, log=log)
+        except NeedsLogin:
+            return {"client": record.name, "provider": provider, "tool": tool,
+                    "error": f"{provider} is not connected for this client, or the "
+                             f"session expired.",
+                    "fix": f'munim connect "{record.name}" {provider}'}
+        except NoRemoteServer as unknown:
+            return {"client": record.name, "provider": provider, "tool": tool,
+                    "error": str(unknown), "providers": known_providers()}
+        except UnknownTool as missing:
+            return {"client": record.name, "provider": provider, "tool": tool,
+                    "error": str(missing),
+                    "fix": "list_provider_tools names what this provider has"}
+        # The client goes back out under the operator's name. Everything below
+        # this line worked in ids, because that is what credentials are filed
+        # under, and handing an id back would be Munim's bookkeeping leaking.
+        return {**result, "client": record.name, "run_id": log.run_id}
 
     # ---- repair ----------------------------------------------------------
 
