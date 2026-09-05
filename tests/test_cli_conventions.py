@@ -163,7 +163,10 @@ def test_saying_no_removes_nothing(estate, a_terminal, monkeypatch, capsys):
     before = _settled(ring)
     monkeypatch.setattr("builtins.input", lambda: "no")
 
-    assert cli.main(["disconnect", "--all"]) == 2
+    # 130, the conventional status for an interrupted command. Declining is not
+    # a usage error, and it no longer prints "Nothing was removed": the operator
+    # just said no.
+    assert cli.main(["disconnect", "--all"]) == cli.CANCELLED
     assert ring.s == before
 
 
@@ -194,6 +197,8 @@ def test_with_no_terminal_it_refuses_and_says_how(estate, monkeypatch, capsys):
     before = _settled(ring)
     monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: False)
 
+    # 2, not CANCELLED. Nobody declined: the command refused because there was
+    # nowhere to ask, which is a condition the caller has to fix.
     assert cli.main(["disconnect", "--all"]) == 2
     assert ring.s == before
     said = capsys.readouterr().err
@@ -209,7 +214,7 @@ def test_a_client_holding_only_a_legacy_credential_is_still_asked(estate, a_term
     asked = []
     monkeypatch.setattr("builtins.input", lambda: asked.append(1) or "no")
 
-    assert cli.main(["disconnect", "--all"]) == 2
+    assert cli.main(["disconnect", "--all"]) == cli.CANCELLED
     assert asked, "deleted a credential without asking"
     assert ring.s, "removed it despite the refusal"
 

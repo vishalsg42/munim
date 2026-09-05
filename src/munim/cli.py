@@ -45,6 +45,12 @@ def _client_id(provider: str) -> tuple[str, str]:
 
 PROVISIONAL = "…connecting"
 
+# Backing out of a prompt is not a failure and does not need narrating. The
+# operator pressed Ctrl-C; telling them nothing happened is the tool talking to
+# hear itself. 130 is the conventional exit status for an interrupted command,
+# so a script can still tell the difference from success.
+CANCELLED = 130
+
 # What `munim` on its own prints. The parser used to take the module docstring,
 # which is about `connect` specifically, so the bare name answered "what is
 # this?" by describing one subcommand. That was harmless while the bare name was
@@ -205,8 +211,7 @@ def disconnect(client: str | None, provider: str | None, everything: bool,
                   "it.", file=sys.stderr)
             return 2
         if not confirm(planned, ask):
-            print("Nothing was removed.", file=sys.stderr)
-            return 2
+            return CANCELLED
 
     removed = [what for what, forget in planned if forget()]
 
@@ -428,7 +433,7 @@ def ask_which_client(registry, ask=None, *, account_can_name=False) -> str | Non
     # is the announcement.
     picked = choose("Which client is this for?", options, ask=ask,
                     resolve=resolve, allow_new=True,
-                    new_hint="a name for a new client")
+                    new_hint="a new client, I will type the name")
     if picked is None:
         return None
     if isinstance(picked, str):
@@ -436,6 +441,33 @@ def ask_which_client(registry, ask=None, *, account_can_name=False) -> str | Non
     if picked < len(records):
         return records[picked].id
     return ACCOUNT_NAMES_IT
+
+
+def _pick_client(registry, prompt: str = "Which client?", ask=None) -> str | None:
+    """One of the clients already registered, or None if there are none."""
+    records = sorted(registry.clients(), key=lambda r: r.name.lower())
+    if not records:
+        print("No clients registered yet.", file=sys.stderr)
+        return None
+    picked = choose(prompt, [(r.name, r.domain or "") for r in records], ask=ask)
+    if picked is None:
+        return None
+    return records[picked].name if isinstance(picked, int) else picked
+
+
+def choose_one(prompt: str, labels: list[str], ask=None) -> str | None:
+    """Pick one of a fixed set, for a command that was given no argument.
+
+    Every choice in this CLI used to be an argument you had to already know:
+    `config ai host <name>`, `connect <provider>`, `clients forget <name>`. The
+    list existed in the help text, or in the operator's memory, or nowhere. This
+    is the same picker `connect` uses for clients, so one thing to learn rather
+    than one per command.
+    """
+    picked = choose(prompt, [(label, "") for label in labels], ask=ask)
+    if picked is None:
+        return None
+    return labels[picked] if isinstance(picked, int) else picked
 
 
 def _name_typed(ask=None) -> str | None:
@@ -467,7 +499,6 @@ def adopt_provisional(registry, provider: str, ask=None):
     # said the same sentence three times in one command.
     chosen = ask_which_client(registry, ask or input)
     if chosen is None:
-        print("Nothing connected.", file=sys.stderr)
         return None
 
     try:
@@ -649,10 +680,10 @@ def config_ai(action: str | None, names: list[str]) -> int:
         return 0
 
     if action == "host":
-        if len(names) != 1:
-            print(f"name a host: {settings.AUTO}, {hosts}", file=sys.stderr)
+        wanted = names[0] if names else choose_one(
+            "Which model host?", [settings.AUTO, *settings.ORDER])
+        if wanted is None:
             return 2
-        wanted = names[0]
         if wanted != settings.AUTO and wanted not in settings.HOSTS:
             print(f"{wanted!r} is not a host Munim knows. Choose from: "
                   f"{settings.AUTO}, {hosts}", file=sys.stderr)
@@ -684,10 +715,10 @@ def config_ai(action: str | None, names: list[str]) -> int:
         return 0
 
     if action == "key":
-        if len(names) != 1:
-            print(f"name a host: {hosts}", file=sys.stderr)
+        host = names[0] if names else choose_one(
+            "Which host is this key for?", [h for h in settings.ORDER if settings.HOSTS[h].keys])
+        if host is None:
             return 2
-        host = names[0]
         spec = settings.HOSTS.get(host)
         if spec is None:
             print(f"{host!r} is not a host Munim knows. Choose from: {hosts}",
@@ -714,13 +745,15 @@ def config_ai(action: str | None, names: list[str]) -> int:
         return 0
 
     if action == "unset":
-        if len(names) != 1:
-            print(f"name a host: {hosts}", file=sys.stderr)
+        host = names[0] if names else choose_one(
+            "Remove the key for which host?",
+            [h for h in settings.ORDER if settings.HOSTS[h].keys])
+        if host is None:
             return 2
-        if settings.forget_key(names[0]):
-            print(f"Removed the {names[0]} key.", file=sys.stderr)
+        if settings.forget_key(host):
+            print(f"Removed the {host} key.", file=sys.stderr)
         else:
-            print(f"Nothing stored for {names[0]}.", file=sys.stderr)
+            print(f"Nothing stored for {host}.", file=sys.stderr)
         return 0
 
     print(f"unknown: config ai {action}. Try: on, off, host, model, key, unset",
@@ -1226,11 +1259,20 @@ def main(argv: list[str] | None = None) -> int:
     # first one. Shift it: a lone argument that names a provider is a provider.
     if args.command == "connect" and args.provider is None:
         from munim.remote.servers import all_servers
-        if args.client in {*all_servers(), *KEY_PROVIDERS}:
+        known = sorted({*all_servers(), *KEY_PROVIDERS})
+        if args.client in known:
             args.client, args.provider = None, args.client
+        elif args.client is None:
+            # Nothing named at all. The list is right here; making somebody
+            # recall eleven provider names to type one is the friction this
+            # picker exists to remove.
+            picked = choose_one("Connect which provider?", known)
+            if picked is None:
+                return CANCELLED
+            args.provider = picked
         else:
             parser.error(f"unknown provider {args.client!r}. Choose from: "
-                         + ", ".join(sorted({*all_servers(), *KEY_PROVIDERS})))
+                         + ", ".join(known))
 
     if args.command == "disconnect":
         if not args.everything and not args.client:
@@ -1281,19 +1323,31 @@ def main(argv: list[str] | None = None) -> int:
                 parser.error("clients rename takes the old name and the new one")
             return rename(*args.names)
         if args.action == "forget":
-            if len(args.names) != 1:
-                parser.error("clients forget takes one name")
-            return forget(args.names[0])
+            name = args.names[0] if args.names else _pick_client(_registry())
+            if name is None:
+                return 2
+            return forget(name)
         if args.action == "merge":
             if len(args.names) != 2:
                 parser.error("clients merge takes a source and a target")
             return merge(*args.names)
         if args.action == "domain":
-            if len(args.names) != 2:
+            if len(args.names) == 2:
+                return set_domain(*args.names)
+            if len(args.names) == 1:
                 parser.error('clients domain takes a client and a site: '
                              'munim clients domain "Balaji Roofings" '
                              'balajiroofingindustries.com')
-            return set_domain(*args.names)
+            name = _pick_client(_registry())
+            if name is None:
+                return 2
+            print(f"Site for {name!r}: ", end="", file=sys.stderr, flush=True)
+            try:
+                site = input().strip()
+            except (EOFError, KeyboardInterrupt):
+                print(file=sys.stderr)
+                return 2
+            return set_domain(name, site)
 
         from munim.connected import connections, describe
         backend = KeychainBackend()
@@ -1348,8 +1402,7 @@ def main(argv: list[str] | None = None) -> int:
                              "and there is no terminal to ask on")
             target = ask_which_client(_registry())
             if target is None:
-                print("Nothing connected.", file=sys.stderr)
-                return 2
+                return CANCELLED
         return connect_by_url(target, args.provider, args.url)
 
     # Connecting a second provider for a client you already have is the common
@@ -1367,8 +1420,7 @@ def main(argv: list[str] | None = None) -> int:
             picked = ask_which_client(
                 _registry(), account_can_name=can_name_itself(args.provider))
             if picked is None:
-                print("Nothing connected.", file=sys.stderr)
-                return 2
+                return CANCELLED
             # None keeps the old behaviour: authorise first, name after.
             args.client = None if picked == ACCOUNT_NAMES_IT else picked
 

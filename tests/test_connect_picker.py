@@ -99,7 +99,7 @@ def test_backing_out_connects_nothing(world, monkeypatch):
     monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(cli, "ask_which_client", lambda reg, **kw: None)
 
-    assert cli.main(["connect", "supabase"]) == 2
+    assert cli.main(["connect", "supabase"]) == cli.CANCELLED
     assert not seen, "backed out and it connected anyway"
 
 

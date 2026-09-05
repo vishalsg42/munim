@@ -245,7 +245,17 @@ def usable(host: str, backend=None) -> bool:
         return False
     spec = HOSTS[host]
     if not spec.keys:
-        return True
+        # Bedrock takes AWS credentials rather than a key this tool stores. It
+        # used to count as usable whenever boto3 imported, so `auto` preferred a
+        # Bedrock with expired credentials over a Gemini with a working key, and
+        # only found out at the first call. boto3 can resolve credentials
+        # without spending a request, which is not proof they are valid but is
+        # enough to stop choosing a host that has none at all.
+        try:
+            import boto3
+            return boto3.Session().get_credentials() is not None
+        except Exception:
+            return False
     return bool(resolve_key(host, backend)[0])
 
 
