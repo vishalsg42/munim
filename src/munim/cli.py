@@ -838,9 +838,21 @@ def connect_via_mcp(client: str | None, provider: str) -> int:
     working_key = record.id if record else PROVISIONAL
 
     if naming:
-        print(f"Opening your browser. Sign in to the {provider} account you "
-              f"want to add, and the client will be named after it.",
-              file=sys.stderr)
+        from munim.remote.identity import can_name_itself
+
+        if can_name_itself(provider):
+            print(f"Opening your browser. Sign in to the {provider} account you "
+                  f"want to add, and the client will be named after it.",
+                  file=sys.stderr)
+        else:
+            # Promising a name this provider cannot supply, and then saying so
+            # once the login is already done, wastes the one moment the operator
+            # could have decided differently.
+            print(f"Opening your browser. Sign in to the {provider} account you "
+                  f"want to add.", file=sys.stderr)
+            print(f"  {provider} does not report which account was authorised, "
+                  f"so you will be asked which client this is for.",
+                  file=sys.stderr)
     else:
         print(f"Opening your browser to log in to {provider} as {client}.",
               file=sys.stderr)
@@ -1295,7 +1307,10 @@ def main(argv: list[str] | None = None) -> int:
     # without a terminal, because a prompt nobody can answer is a hang.
     if args.client is None and sys.stdin.isatty():
         if _registry().clients():
-            picked = ask_which_client(_registry(), account_can_name=True)
+            from munim.remote.identity import can_name_itself
+
+            picked = ask_which_client(
+                _registry(), account_can_name=can_name_itself(args.provider))
             if picked is None:
                 print("Nothing connected.", file=sys.stderr)
                 return 2

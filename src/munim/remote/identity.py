@@ -23,6 +23,18 @@ _WHO: dict[str, tuple[str, str]] = {
 }
 
 
+def can_name_itself(provider: str) -> bool:
+    """Whether this provider will tell us which account was authorised.
+
+    Known before the browser opens, because `_WHO` is a fixed table rather than
+    something discovered at runtime. `connect` used to promise "the client will
+    be named after it" for every provider and then contradict itself a second
+    later for the ones that cannot, which is Vercel and everything else here:
+    only Cloudflare exposes a read small enough to name an account.
+    """
+    return provider in _WHO
+
+
 def _first_named(text: str) -> str | None:
     """Pull a name out of whatever the provider answered with."""
     try:

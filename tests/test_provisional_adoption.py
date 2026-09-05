@@ -160,3 +160,64 @@ def test_adoption_uses_the_name_typed_into_an_empty_registry(estate):
     assert record.name == "Ivy & Fern"
     assert record.id.startswith("c_"), "credentials are filed by identity"
     assert reg.get("Ivy & Fern").id == record.id
+
+
+# ---- saying only what is true, before the browser opens ------------------
+
+def test_only_cloudflare_claims_to_name_its_own_account():
+    """`_WHO` in remote/identity.py is a fixed table, so this is known before
+    the browser opens rather than discovered after the login."""
+    from munim.remote.identity import can_name_itself
+    from munim.remote.servers import all_servers
+
+    assert can_name_itself("cloudflare")
+    named = [p for p in all_servers() if can_name_itself(p)]
+    assert named == ["cloudflare"], \
+        f"these promise a name they cannot supply: {sorted(set(named) - {'cloudflare'})}"
+
+
+def test_a_provider_that_cannot_name_itself_says_so_before_the_login(
+        estate, monkeypatch, capsys):
+    """It used to promise "the client will be named after it" for every
+    provider, then contradict itself once the login was already done, wasting
+    the one moment the operator could have decided differently."""
+    import munim.remote.session as session_module
+
+    async def signed_in(client, provider, **kw):
+        return ["a", "b"], None          # authorised, and no account named
+
+    monkeypatch.setattr(session_module, "connect_and_identify", signed_in)
+    monkeypatch.setattr(cli, "ask_which_client", lambda *a, **k: "Ivy & Fern")
+
+    cli.connect_via_mcp(None, "vercel")
+    said = capsys.readouterr().err
+    opening = said.split("does not report")[0]
+    assert "will be named after it" not in opening, \
+        "it promised a name vercel cannot supply"
+    assert "does not report which account" in said
+
+
+def test_cloudflare_still_promises_the_name_it_can_deliver(estate, monkeypatch, capsys):
+    """The other direction. Removing the promise everywhere would lose the
+    behaviour that keeps a label and an account from drifting apart."""
+    import munim.remote.session as session_module
+
+    async def signed_in(client, provider, **kw):
+        return ["a"], "Kloudfirst"
+
+    monkeypatch.setattr(session_module, "connect_and_identify", signed_in)
+    cli.connect_via_mcp(None, "cloudflare")
+    assert "will be named after it" in capsys.readouterr().err
+
+
+def test_the_menu_does_not_offer_a_name_the_provider_cannot_give(estate, capsys):
+    """`a  a new client, named after the account I sign in to` was offered for
+    every provider, including the ten that cannot."""
+    reg, _ = estate
+    reg.add(ClientRecord(name="Acme"))
+
+    cli.ask_which_client(reg, ask=lambda: "1", account_can_name=False)
+    assert "named after the account" not in capsys.readouterr().err
+
+    cli.ask_which_client(reg, ask=lambda: "1", account_can_name=True)
+    assert "named after the account" in capsys.readouterr().err
