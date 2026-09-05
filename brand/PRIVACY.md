@@ -31,5 +31,8 @@ author of this software.
 
 **Deleting everything**
 
-`rm -rf ~/.munim` removes all local state. Credentials are removed from the
-keychain with your operating system's keychain tool.
+`rm -rf ~/.munim` removes all local state. It cannot remove a credential,
+because none are kept there: that separation is deliberate, so the directory you
+might zip up for a bug report or sync to a backup holds no secrets. Credentials
+live in your operating system's keychain and are removed with
+`munim disconnect`, or with your keychain tool.

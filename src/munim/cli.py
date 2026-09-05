@@ -601,7 +601,11 @@ def config_ai(action: str | None, names: list[str]) -> int:
         return _show_ai()
 
     if action in ("on", "off"):
-        settings.set_enabled(action == "on")
+        try:
+            settings.set_enabled(action == "on")
+        except settings.Unreadable as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
         state = settings.ai()
         if action == "on":
             chosen = state.chosen()

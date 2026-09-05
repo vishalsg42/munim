@@ -152,6 +152,9 @@ Python script run by that same interpreter can then read those credentials
 without a prompt. That is the trade the keychain offers and there is no version
 of it that is both silent and narrow.
 
+The measurement behind all of this, and what to do if prompts ever return, is
+`docs/DECISIONS.md` D29.
+
 **Linux and Windows do not have this.** Secret Service and Windows Credential
 Manager have no per-item, per-binary rule, so none of the above applies and
 `doctor` stays quiet about it there.

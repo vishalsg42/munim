@@ -103,7 +103,10 @@ It lists them and asks first; add <code>--yes</code> in a script, or
 <code>munim config app unset &lt;provider&gt;</code> removes a stored OAuth application
 credential. These belong to the installation rather than to a client, so
 <code>disconnect</code> does not touch them.</li>
-<li>Deleting <code>~/.munim</code> removes the run logs, reports and the client list.</li>
+<li>Deleting <code>~/.munim</code> removes the run logs, reports and the client list.
+Credentials are deliberately not kept there: they are in your operating system's
+keychain, so deleting that directory cannot cost you a login, and backing it up
+cannot leak one.</li>
 <li>Revoking Munim's access at the provider, for example at
 <a href="https://myaccount.google.com/permissions">Google account permissions</a>,
 invalidates the credential regardless of what is on your machine.</li>
