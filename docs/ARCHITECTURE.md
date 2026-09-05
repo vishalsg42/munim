@@ -6,7 +6,7 @@ first time, is in [`DECISIONS.md`](DECISIONS.md).
 
 ```mermaid
 flowchart TD
-    A["Coding agent<br/>(Claude Code, Codex, Cursor)"] -->|stdio, JSON-RPC| B["Munim MCP server"]
+    A["Coding agent<br/>(Claude Code, Codex, Cursor,<br/>Antigravity, Windsurf, ...)"] -->|stdio, JSON-RPC| B["Munim MCP server"]
 
     B --> F["Checks<br/>13, deterministic, no credentials"]
     B --> G["Strands agent"]

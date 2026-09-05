@@ -17,6 +17,7 @@ from munim.connect.oauth import (PROVIDERS, SHIPPED_CLIENT_IDS,
 from munim.connect.token import TokenConnector
 from munim.container import KEY_PROVIDERS, KeychainBackend
 from munim.env import load as load_env
+from munim.pick import choose
 from munim.registry import ClientRecord, Registry, UnknownClient
 
 REGISTRY = None  # resolved at call time so tests can point it elsewhere
@@ -407,44 +408,88 @@ def ask_which_client(registry, ask=input, *, account_can_name=False) -> str | No
     out.
     """
     records = sorted(registry.clients(), key=lambda r: r.name.lower())
-    print("Which client is this for?", file=sys.stderr)
-    for number, record in enumerate(records, 1):
-        print(f"  {number}  {record.name}"
-              + (f"   {record.domain}" if record.domain else ""), file=sys.stderr)
-    if account_can_name:
-        print("  a  a new client, named after the account I sign in to",
-              file=sys.stderr)
-    print("  n  a client not listed", file=sys.stderr)
-    print("> ", end="", file=sys.stderr, flush=True)
 
+    # Nothing to choose from is not a choice. Asking "which client is this for?"
+    # above a single line reading "a client not listed" is a menu with no items
+    # on it, and the operator has to work out that the answer is `n` before they
+    # can type the name they already knew.
+    if not records:
+        print("No clients yet, so this one is new.", file=sys.stderr)
+        return _name_typed(ask)
+
+    options = [(record.name, record.domain or "") for record in records]
+    if account_can_name:
+        options.append(("a new client, named after the account I sign in to", ""))
+
+    def resolve(answer: str) -> int | None:
+        """An id or a name typed straight in, for somebody who already knows
+        the client and does not want to read the list.
+
+        The `n` and `a` letter shortcuts are gone. They existed because the rows
+        they stood for could not be selected any other way; both are ordinary
+        rows now, with numbers, that the arrow keys reach like everything else.
+        Two ways to pick the same row is one more than a list needs.
+        """
+        for index, record in enumerate(records):
+            if answer in (record.id, record.name):
+                return index
+        return None
+
+    # `allow_new` is what removed the "a client not listed" row. Choosing that
+    # row only ever led to a second prompt asking for the name, so the operator
+    # had to announce they were about to type a name before typing it. Typing it
+    # is the announcement.
+    picked = choose("Which client is this for?", options, ask=ask,
+                    resolve=resolve, allow_new=True,
+                    new_hint="a name for a new client")
+    if picked is None:
+        return None
+    if isinstance(picked, str):
+        return picked                       # a name for a client not yet known
+    if picked < len(records):
+        return records[picked].id
+    return ACCOUNT_NAMES_IT
+
+
+def _name_typed(ask=None) -> str | None:
+    print("Name for this client: ", end="", file=sys.stderr, flush=True)
     try:
-        answer = ask().strip()
+        name = (ask or input)().strip()
     except (EOFError, KeyboardInterrupt):
         print(file=sys.stderr)
         return None
+    return name or None
 
-    if account_can_name and answer.lower() == "a":
-        return ACCOUNT_NAMES_IT
 
-    if answer.lower() == "n":
-        print("Name for this client: ", end="", file=sys.stderr, flush=True)
-        try:
-            name = ask().strip()
-        except (EOFError, KeyboardInterrupt):
-            print(file=sys.stderr)
-            return None
-        return name or None
+def adopt_provisional(registry, provider: str, ask=None):
+    """Who does this session belong to, when the provider will not say.
 
-    if answer.isdigit() and 1 <= int(answer) <= len(records):
-        return records[int(answer) - 1].id
+    Returns the client record to file it under, or None if there is nobody to
+    ask or the operator backed out. Creating a client here is deliberate: the
+    login has already happened, and refusing because the name is new would mean
+    doing it again for no reason.
+    """
+    if not sys.stdin.isatty():
+        print(f"{provider} did not say which account was authorised, and there "
+              f"is no terminal to ask on. Nothing was kept. Run it again with a "
+              f"name: munim connect \"<client>\" {provider}", file=sys.stderr)
+        return None
 
-    # A name or an id typed straight in, for anyone who knows what they want.
-    for record in records:
-        if answer in (record.id, record.name):
-            return record.id
-    if answer:
-        print(f"{answer!r} is not one of those.", file=sys.stderr)
-    return None
+    # The reason was given before the browser opened, which is the only moment
+    # it could have changed anything. Repeating it here and again at the end
+    # said the same sentence three times in one command.
+    chosen = ask_which_client(registry, ask or input)
+    if chosen is None:
+        print("Nothing connected.", file=sys.stderr)
+        return None
+
+    try:
+        return registry.get(chosen)
+    except UnknownClient:
+        record = ClientRecord(name=chosen)
+        registry.add(record)
+        print(f"Added {record.name!r}.", file=sys.stderr)
+        return record
 
 
 def add_client(name: str, domain: str | None = None) -> int:
@@ -795,9 +840,21 @@ def connect_via_mcp(client: str | None, provider: str) -> int:
     working_key = record.id if record else PROVISIONAL
 
     if naming:
-        print(f"Opening your browser. Sign in to the {provider} account you "
-              f"want to add, and the client will be named after it.",
-              file=sys.stderr)
+        from munim.remote.identity import can_name_itself
+
+        if can_name_itself(provider):
+            print(f"Opening your browser. Sign in to the {provider} account you "
+                  f"want to add, and the client will be named after it.",
+                  file=sys.stderr)
+        else:
+            # Promising a name this provider cannot supply, and then saying so
+            # once the login is already done, wastes the one moment the operator
+            # could have decided differently.
+            print(f"Opening your browser. Sign in to the {provider} account you "
+                  f"want to add.", file=sys.stderr)
+            print(f"  {provider} does not report which account was authorised, "
+                  f"so you will be asked which client this is for.",
+                  file=sys.stderr)
     else:
         print(f"Opening your browser to log in to {provider} as {client}.",
               file=sys.stderr)
@@ -840,11 +897,30 @@ def connect_via_mcp(client: str | None, provider: str) -> int:
 
     if naming:
         if not account:
-            print(f"{provider} did not say which account was authorised, so "
-                  f"there is nothing to name this after. Run it again with a "
-                  f"name: munim connect \"<client>\" {provider}",
+            # The provider authorised us and will not say who it authorised.
+            # Vercel grants `openid offline_access` and nothing that names an
+            # account, which is the narrowest scope of any provider here.
+            #
+            # This used to print "run it again with a name" and return 2, which
+            # threw away a completed browser login and left its tokens filed
+            # under the provisional key, where nothing could name them and
+            # nothing would ever clean them up. A live credential orphaned by a
+            # command that reported failure.
+            #
+            # Ask instead. The operator knows which client this is, the session
+            # is already open, and `ask_which_client` is the same picker
+            # `connect` uses when a URL cannot name itself.
+            record = adopt_provisional(registry, provider)
+            if record is None:
+                # Backed out, or nothing to ask on. Either way the session goes:
+                # keeping tokens nobody chose an owner for is how the orphans
+                # this project already had to sweep up came to exist.
+                KeychainTokenStorage(PROVISIONAL, provider).forget()
+                return 2
+            KeychainTokenStorage(PROVISIONAL, provider).move_to(record.id)
+            print(f"Connected {provider} for {record.name}: {len(tools)} tools.",
                   file=sys.stderr)
-            return 2
+            return 0
         # The record first, so there is an id to move the session onto. This
         # used to move it onto the account string, which is another label.
         try:
@@ -1057,7 +1133,9 @@ def main(argv: list[str] | None = None) -> int:
                    help="the application's client id, for `app set`. The "
                         "secret is prompted, never passed as an argument")
 
-    sub.add_parser("doctor", help="what is set up, what is not, and the next step")
+    dr = sub.add_parser("doctor", help="what is wrong with this installation")
+    dr.add_argument("--verbose", "-v", action="store_true",
+                    help="also list what is connected")
 
     # The flat spellings 0.1.0 shipped, rewritten to the grouped form before
     # parsing. Kept as a rewrite rather than as hidden subparsers because
@@ -1135,7 +1213,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "doctor":
         from munim.doctor import run as doctor_run
-        return doctor_run(_registry())
+        return doctor_run(_registry(), verbose=args.verbose)
 
     if args.command == "clients":
         # Accepted-and-ignored is worse than refused. `--json` only shapes the
@@ -1228,7 +1306,10 @@ def main(argv: list[str] | None = None) -> int:
     # without a terminal, because a prompt nobody can answer is a hang.
     if args.client is None and sys.stdin.isatty():
         if _registry().clients():
-            picked = ask_which_client(_registry(), account_can_name=True)
+            from munim.remote.identity import can_name_itself
+
+            picked = ask_which_client(
+                _registry(), account_can_name=can_name_itself(args.provider))
             if picked is None:
                 print("Nothing connected.", file=sys.stderr)
                 return 2
