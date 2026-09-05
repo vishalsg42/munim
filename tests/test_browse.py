@@ -194,13 +194,35 @@ def test_no_clients_says_how_to_add_one(tmp_path, capsys):
 
 def test_a_dead_session_explains_rather_than_listing_tools(
         estate, monkeypatch, capsys):
-    """Opening a session to list tools would need a login nobody asked for."""
+    """Opening a session to list tools would need a login nobody asked for.
+
+    The message is *returned* rather than printed. Printed, the very next
+    redraw covered it, so choosing "View tools" on a dead session looked like
+    the menu had done nothing at all.
+    """
     dead = status("Balaji Roofings", "cloudflare", health.EXPIRED, tools=0,
                   detail="the session expired")
 
-    assert browse._tools_walk(ClientRecord(name="Balaji Roofings"), dead) == 0
+    said = browse._tools_walk(ClientRecord(name="Balaji Roofings"), dead)
+
+    assert isinstance(said, str)
+    assert "the session expired" in said
+    assert "munim connect" in said
+    assert capsys.readouterr().err == "", \
+        "nothing may be printed outside the frame that owns the screen"
+
+
+def test_the_reason_is_shown_inside_the_next_frame(estate, monkeypatch, capsys):
+    """Choosing an action must leave visible evidence it did something."""
+    dead = status("Balaji Roofings", "cloudflare", health.EXPIRED, tools=0,
+                  detail="the session expired")
+    record = ClientRecord(name="Balaji Roofings")
+
+    # "View tools", then Esc out of the provider screen.
+    browse._provider_walk(record, dead, keys=[pick.ENTER, pick.ESC])
+
     err = capsys.readouterr().err
-    assert "the session expired" in err
+    assert "Cannot list tools" in err
     assert "munim connect" in err
 
 

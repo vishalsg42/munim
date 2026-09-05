@@ -18,8 +18,10 @@ contaminate output something is parsing.
 """
 
 import os
+import select
 import shutil
 import sys
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 try:
@@ -33,6 +35,11 @@ UP, DOWN = "\x1b[A", "\x1b[B"
 BACKSPACE = ("\x7f", "\x08")
 ENTER, RETURN = "\r", "\n"
 CTRL_C, ESC = "\x03", "\x1b"
+
+# How long the rest of an escape sequence has to arrive. An arrow key sends
+# all three bytes at once, so this only ever waits when the key really was
+# a bare Esc.
+ESCAPE_TAIL = 0.05
 
 
 def interactive() -> bool:
@@ -73,10 +80,20 @@ def _render(options: list[tuple[str, str]], cursor: int, typed: str,
 
 
 def _read_key() -> str:
-    """One keypress, including the three bytes an arrow key arrives as."""
+    """One keypress, including the three bytes an arrow key arrives as.
+
+    Esc is both a key and the first byte of every arrow, and telling them apart
+    means waiting to see whether more follows. Reading two bytes unconditionally
+    blocks until the operator presses something else, so pressing Esc did
+    nothing at all until the next keystroke and the picker looked frozen. A
+    short wait separates them: an arrow's remaining bytes are already in the
+    buffer, a person's finger is not.
+    """
     first = sys.stdin.read(1)
     if first != ESC:
         return first
+    if not select.select([sys.stdin], [], [], ESCAPE_TAIL)[0]:
+        return ESC
     rest = sys.stdin.read(2)            # arrows are ESC [ A/B
     return first + rest if rest else ESC
 
@@ -227,6 +244,37 @@ class Blank:
     """Vertical space between groups."""
 
 
+# The alternate screen buffer. Entering it means a walk can clear and redraw
+# without destroying what was in the terminal before, and leaving it puts the
+# scrollback back exactly as it was. The first version of this drew each screen
+# below the last, so navigating four levels left four stacked screens on top of
+# each other and the one you were looking at was the one furthest down.
+ALT_ON, ALT_OFF = "\x1b[?1049h", "\x1b[?1049l"
+
+# Whether a walk currently owns the whole screen. When it does, each frame
+# homes the cursor and erases below rather than counting lines back, which is
+# both simpler and immune to a frame whose height changed.
+_owns_screen = False
+
+
+@contextmanager
+def full_screen():
+    """Own the terminal for the duration of a walk, and hand it back after."""
+    global _owns_screen
+    if not interactive():
+        yield
+        return
+    sys.stderr.write(ALT_ON)
+    sys.stderr.flush()
+    _owns_screen = True
+    try:
+        yield
+    finally:
+        _owns_screen = False
+        sys.stderr.write(ALT_OFF)
+        sys.stderr.flush()
+
+
 GREEN, RED, AMBER = "\x1b[32m", "\x1b[31m", "\x1b[33m"
 DIM, BOLD, CYAN, RESET = "\x1b[2m", "\x1b[1m", "\x1b[36m", "\x1b[0m"
 
@@ -258,13 +306,17 @@ def _viewport(rows, cursor: int, height: int) -> tuple[int, int]:
     return start, start + height
 
 
-def _draw(title, subtitle, rows, cursor, footer, numbered, drawn, height):
-    if drawn:
+def _draw(title, subtitle, rows, cursor, footer, numbered, drawn, height,
+          header=()):
+    if _owns_screen:
+        sys.stderr.write("\x1b[H")     # home; erase below happens after
+    elif drawn:
         sys.stderr.write(f"\x1b[{drawn}A")
 
-    lines = [paint(title, BOLD)]
+    lines = [paint(title, BOLD)] if title else []
     if subtitle:
         lines.append(paint(subtitle, DIM))
+    lines.extend(header)
     lines.append("")
 
     start, end = _viewport(rows, cursor, height)
@@ -298,11 +350,13 @@ def _draw(title, subtitle, rows, cursor, footer, numbered, drawn, height):
 
     for line in lines:
         sys.stderr.write(f"\x1b[2K{line}\n")
+    if _owns_screen:
+        sys.stderr.write("\x1b[J")     # nothing from a taller previous screen
     sys.stderr.flush()
     return len(lines)
 
 
-def menu(title: str, rows: list, *, subtitle: str = "",
+def menu(title: str, rows: list, *, subtitle: str = "", header=(),
          can_go_back: bool = True, keys=None):
     """Navigate a grouped list. Returns the chosen Item's value, BACK, or None.
 
@@ -331,7 +385,7 @@ def menu(title: str, rows: list, *, subtitle: str = "",
     footer = f"{move} · Enter select · Esc {'back' if can_go_back else 'quit'}"
 
     height = max(3, shutil.get_terminal_size().lines - CHROME
-                 - (2 if subtitle else 1))
+                 - (2 if subtitle else 1) - len(header))
     at, drawn = 0, 0
     scripted = iter(keys) if keys is not None else None
 
@@ -343,7 +397,7 @@ def menu(title: str, rows: list, *, subtitle: str = "",
             if scripted is None:
                 termios.tcsetattr(sys.stdin, termios.TCSADRAIN, saved)
             drawn = _draw(title, subtitle, rows, order[at], footer,
-                          numbered, drawn, height)
+                          numbered, drawn, height, header)
             if scripted is None:
                 tty.setraw(sys.stdin.fileno())
 
@@ -370,5 +424,6 @@ def menu(title: str, rows: list, *, subtitle: str = "",
     finally:
         if scripted is None:
             termios.tcsetattr(sys.stdin, termios.TCSADRAIN, saved)
-        sys.stderr.write("\n")
+        if not _owns_screen:
+            sys.stderr.write("\n")
         sys.stderr.flush()

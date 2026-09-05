@@ -18,7 +18,7 @@ import textwrap
 
 from munim import health
 from munim.pick import (AMBER, BACK, BOLD, Blank, DIM, GREEN, Head, Item,
-                        RED, menu, paint)
+                        RED, full_screen, menu, paint)
 
 # What a tool's description is wrapped to. Cloudflare's `execute` carries about
 # 1200 characters of TypeScript interfaces, and they are the only thing telling
@@ -60,10 +60,14 @@ def _clients_screen(registry, statuses) -> list:
     return rows[:-1] if rows else rows
 
 
-def _provider_screen(record, status) -> None:
-    """The header block above the action menu. Printed, not selectable."""
+def _provider_header(record, status) -> list[str]:
+    """The status block above the action menu.
+
+    Returned rather than printed. Printing it put it *above* the menu's own
+    frame, so redrawing the menu left the block stranded and the next screen
+    stacked underneath instead of replacing it.
+    """
     glyph, colour = GLYPH[status.state]
-    print(f"\n{paint(status.provider, BOLD)} · {record.name}\n", file=sys.stderr)
     rows = [("Status", paint(f"{glyph} {status.state}", colour)),
             ("Client", record.name),
             ("Domain", record.domain or "not set")]
@@ -73,9 +77,7 @@ def _provider_screen(record, status) -> None:
         rows.append(("Why", status.detail))
     if status.fix:
         rows.append(("Fix", status.fix))
-    for label, value in rows:
-        print(f"  {label + ':':10}{value}", file=sys.stderr)
-    print(file=sys.stderr)
+    return [""] + [f"  {label + ':':10}{value}" for label, value in rows]
 
 
 def _arguments(schema: dict) -> list[str]:
@@ -113,33 +115,41 @@ def _arguments(schema: dict) -> list[str]:
     return out
 
 
-def tool_detail(record, provider: str, tool: dict) -> None:
-    """One tool, whole. The screen the truncated listing could never be."""
-    title = tool.get("title") or tool["tool"]
-    print(f"\n{paint(title, BOLD)}\n{provider} · {record.name}\n",
-          file=sys.stderr)
-    print(f"  {'Tool:':10}{tool['tool']}", file=sys.stderr)
+def _detail_lines(record, provider: str, tool: dict) -> list[str]:
+    """One tool, whole, as lines. The screen the truncated listing could not be.
+
+    Lines rather than prints, so the same content serves `munim tools A B C`
+    and the navigable frame without one of them being a copy that drifts.
+    """
+    out = [f"  {'Tool:':10}{tool['tool']}"]
     access = {True: "read-only", False: "writes", None: ""}[tool["read_only"]]
     if access:
-        print(f"  {'Access:':10}{access}", file=sys.stderr)
+        out.append(f"  {'Access:':10}{access}")
 
     if tool["does"]:
-        print(file=sys.stderr)
+        out.append("")
         for block in tool["does"].splitlines():
             # Wrapped, never cut. Blank lines and indentation are load-bearing
             # in these descriptions: they are interface listings, not prose.
             if not block.strip():
-                print(file=sys.stderr)      # no indent, so no trailing spaces
+                out.append("")
                 continue
-            for line in textwrap.wrap(block, WRAP):
-                print(f"  {line}", file=sys.stderr)
+            out += [f"  {line}" for line in textwrap.wrap(block, WRAP)]
 
-    print("\n  Arguments:", file=sys.stderr)
-    for line in _arguments(tool.get("arguments")):
-        print(f"  {line}", file=sys.stderr)
+    out += ["", "  Arguments:"]
+    out += [f"  {line}" for line in _arguments(tool.get("arguments"))]
+    out += ["", f"  munim call \"{record.name}\" {provider} {tool['tool']} "
+                f"--args '{{...}}'"]
+    return out
 
-    print(f"\n  munim call \"{record.name}\" {provider} {tool['tool']} "
-          f"--args '{{...}}'\n", file=sys.stderr)
+
+def tool_detail(record, provider: str, tool: dict) -> None:
+    """The same thing printed, for `munim tools <client> <provider> <tool>`."""
+    title = tool.get("title") or tool["tool"]
+    print(f"\n{paint(title, BOLD)}\n{provider} · {record.name}", file=sys.stderr)
+    for line in _detail_lines(record, provider, tool):
+        print(line, file=sys.stderr)
+    print(file=sys.stderr)
 
 
 def walk(registry, *, keys=None) -> int:
@@ -154,6 +164,13 @@ def walk(registry, *, keys=None) -> int:
 
     print("Checking sessions...", file=sys.stderr)
     statuses = health.check_all(registry)
+
+    with full_screen():
+        return _walk(registry, records, statuses, keys)
+
+
+def _walk(registry, records, statuses, keys) -> int:
+    from munim.cli import CANCELLED
 
     # One iterator for the whole walk. `menu` calls iter() on what it is
     # given, and iter() on a list restarts it, so passing the list down would
@@ -185,22 +202,33 @@ def walk(registry, *, keys=None) -> int:
 def _provider_walk(record, status, *, keys=None):
     """One provider: the header, an action menu, and the tools beneath it."""
     keys = iter(keys) if keys is not None else None
+    note = ""
     while True:
-        _provider_screen(record, status)
         actions = [Item("View tools", value="tools"),
                    Item("Reconnect", hint=f'munim connect "{record.name}" '
                                           f'{status.provider}', value="connect"),
                    Item("Disconnect", value="disconnect"),
                    Item("Set domain", value="domain")]
-        chosen = menu(f"{status.provider} · {record.name}", actions, keys=keys)
+        header = _provider_header(record, status)
+        if note:
+            # Shown inside the frame rather than printed underneath it, so it
+            # survives the redraw. Printed, it scrolled away and choosing an
+            # action looked like it had done nothing at all.
+            header += ["", f"  {note}"]
+        chosen = menu(f"{status.provider} · {record.name}", actions,
+                      header=header, keys=keys)
+        note = ""
         if chosen is None:
             return None
         if chosen is BACK:
             return 0
 
         if chosen == "tools":
-            if _tools_walk(record, status, keys=keys) is None:
+            outcome = _tools_walk(record, status, keys=keys)
+            if outcome is None:
                 return None
+            if isinstance(outcome, str):
+                note = outcome
         else:
             # The commands exist and are the documented way in. Running a
             # browser login or a deletion from inside a menu would hide a
@@ -209,7 +237,7 @@ def _provider_walk(record, status, *, keys=None):
                     "disconnect": f'munim disconnect "{record.name}" '
                                   f'{status.provider}',
                     "domain": f'munim clients domain "{record.name}" <site>'}
-            print(f"\n  Run: {said[chosen]}\n", file=sys.stderr)
+            note = f"Run: {said[chosen]}"
 
 
 def _tools_walk(record, status, *, keys=None):
@@ -221,16 +249,16 @@ def _tools_walk(record, status, *, keys=None):
     from munim.remote.session import NeedsLogin, NoRemoteServer
 
     if not status.live:
-        print(f"\n  {status.detail}."
-              + (f"\n  Run: {status.fix}\n" if status.fix else "\n"),
-              file=sys.stderr)
-        return 0
+        # Returned so the caller can show it inside the next frame. Printing it
+        # here and returning put a line on screen that the very next redraw
+        # covered, which read as the menu doing nothing when you chose it.
+        return (f"Cannot list tools: {status.detail}."
+                + (f"  Run: {status.fix}" if status.fix else ""))
 
     try:
         tools = asyncio.run(tools_for(record.id, status.provider))
     except (NeedsLogin, NoRemoteServer) as why:
-        print(f"\n  {why}\n", file=sys.stderr)
-        return 0
+        return f"Cannot list tools: {why}"
 
     while True:
         rows = [Item(t["tool"],
@@ -245,10 +273,11 @@ def _tools_walk(record, status, *, keys=None):
         if chosen is BACK:
             return 0
 
-        tool_detail(record, status.provider, chosen)
-        # The detail has to stay on screen. Returning straight to the list
-        # would redraw over it, which is the alternate-screen problem in
-        # miniature: printing something and immediately covering it is the
-        # same as not printing it.
-        if menu("", [Item("Back to tools", value="back")], keys=keys) is None:
+        # The detail is the frame, not something printed above one. Rendered
+        # as a header it survives the redraw instead of being covered by it.
+        if menu(chosen.get("title") or chosen["tool"],
+                [Item("Back to tools", value="back")],
+                subtitle=f"{status.provider} · {record.name}",
+                header=_detail_lines(record, status.provider, chosen),
+                keys=keys) is None:
             return None

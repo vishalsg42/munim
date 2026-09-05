@@ -209,3 +209,66 @@ def test_the_numbered_fallback_is_untouched(capsys):
     err = capsys.readouterr().err
     assert "  1  alpha" in err
     assert "\x1b[" not in err, "the numbered path must never emit escape codes"
+
+
+# ---- a bare Esc must not wait for an arrow that is not coming ---------
+
+
+def test_a_bare_escape_does_not_block_waiting_for_an_arrow_tail(monkeypatch):
+    """Esc is both a key and the first byte of every arrow.
+
+    `_read_key` read two more bytes unconditionally, so pressing Esc blocked
+    until the operator pressed something else. Nothing happened, then two keys
+    later something did: indistinguishable from the picker being frozen. Only a
+    real terminal shows it, because a scripted key list never blocks.
+    """
+    reads = []
+
+    class Stdin:
+        def fileno(self): return 0
+        def read(self, n):
+            reads.append(n)
+            return pick.ESC if n == 1 else "!!"
+
+    monkeypatch.setattr(pick.sys, "stdin", Stdin())
+    # Nothing further is waiting, which is what a bare Esc looks like.
+    monkeypatch.setattr(pick.select, "select", lambda *a, **k: ([], [], []))
+
+    assert pick._read_key() == pick.ESC
+    assert reads == [1], "it read past the Esc when nothing was buffered"
+
+
+def test_an_arrow_is_still_read_whole(monkeypatch):
+    """The three bytes arrive together, so the wait never costs anything."""
+    class Stdin:
+        def fileno(self): return 0
+        def read(self, n): return pick.ESC if n == 1 else "[A"
+
+    monkeypatch.setattr(pick.sys, "stdin", Stdin())
+    monkeypatch.setattr(pick.select, "select",
+                        lambda *a, **k: ([Stdin()], [], []))
+
+    assert pick._read_key() == pick.UP
+
+
+def test_owning_the_screen_homes_instead_of_counting_lines_back(monkeypatch,
+                                                                capsys):
+    """Counting lines back only works while nothing else writes between
+    frames. Four stacked screens is what happens when it does not."""
+    monkeypatch.setattr(pick, "_owns_screen", True)
+    try:
+        pick.menu("Title", many(3), keys=[pick.ESC])
+    finally:
+        monkeypatch.setattr(pick, "_owns_screen", False)
+
+    err = capsys.readouterr().err
+    assert "\x1b[H" in err, "the frame did not home the cursor"
+    assert "\x1b[J" in err, "nothing erased a taller previous frame"
+
+
+def test_full_screen_is_skipped_when_there_is_no_terminal(capsys):
+    """Entering the alternate buffer in a pipe would put escape codes into
+    whatever is reading, and never leaving it would strand a real terminal."""
+    with pick.full_screen():
+        pass
+    assert capsys.readouterr().err == ""
