@@ -102,3 +102,37 @@ def _never_read_the_real_dotenv(tmp_path, monkeypatch):
     for name in list(os.environ):
         if name.endswith(("_OAUTH_CLIENT_ID", "_OAUTH_CLIENT_SECRET")):
             monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _no_test_may_touch_the_real_keychain(monkeypatch):
+    """`munim.container.keyring` was the one door left open.
+
+    `munim.remote.storage.keyring` gets swapped by the tests that care, and that
+    covered sessions. Nothing swapped the module the API-key backend uses, so
+    any test reaching `disconnect(everything=True)` ran `_sweep_orphans`, which
+    dumps the operator's real login keychain, treats every real client id as an
+    orphan because the registry under test is a temporary one, and deletes
+    through the unpatched backend.
+
+    It destroyed nothing only because no `munim:<provider>` API-key items happen
+    to exist on the machine this was found on. One `munim connect "<client>"
+    <provider> --token` and the suite would have started eating live
+    credentials.
+
+    Same shape as `_never_write_to_the_real_home` above, and for the same
+    reason: the test suite must not be able to reach anything the operator
+    would miss.
+    """
+    import munim.container
+
+    class Nowhere:
+        def __init__(self): self.store = {}
+        def get_password(self, service, account):
+            return self.store.get((service, account))
+        def set_password(self, service, account, secret):
+            self.store[(service, account)] = secret
+        def delete_password(self, service, account):
+            self.store.pop((service, account), None)
+
+    monkeypatch.setattr(munim.container, "keyring", Nowhere())
