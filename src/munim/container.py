@@ -16,8 +16,7 @@ Two properties this module exists to hold:
 from typing import Protocol
 
 import httpx
-import keyring
-import keyring.errors
+from munim import vault
 
 # How each provider carries its credential. Adapters never see this.
 _AUTH: dict[str, tuple[str, str, str]] = {
@@ -53,38 +52,34 @@ class CredentialBackend(Protocol):
 
 
 class KeychainBackend:
-    """OS keychain. Credentials never leave the machine (D14)."""
+    """Credentials on this machine, in ~/.munim/credentials.json at mode 0600.
+
+    Named for the keychain it used to wrap, and kept that way because the name
+    appears in sixteen call sites and two published documents; what it means now
+    is "the credential store". See munim/vault.py for why the keychain was left
+    behind and what that costs.
+
+    A missing file means nothing is stored, which is the ordinary state of a
+    fresh install. A file that exists and cannot be read is not that, and raises
+    rather than reporting every client as disconnected while their credentials
+    sit on disk.
+    """
 
     def __init__(self, service_prefix: str = "munim") -> None:
         self._prefix = service_prefix
 
     def get(self, client: str, provider: str) -> str | None:
-        """None when nothing is stored, and also when there is nowhere to store.
-
-        A machine with no keychain backend, which is most Linux servers and
-        every CI runner, used to raise out of here and take `doctor` down with
-        it. Reads degrade to "nothing connected"; `doctor` says why, once,
-        rather than every caller discovering it as a stack trace.
-        """
-        try:
-            return keyring.get_password(f"{self._prefix}:{provider}", client)
-        except keyring.errors.KeyringError:
-            return None
+        return vault.get_password(f"{self._prefix}:{provider}", client)
 
     def forget(self, client: str, provider: str) -> bool:
         """Remove a stored key. True if there was one."""
-        try:
-            if keyring.get_password(f"{self._prefix}:{provider}", client) is None:
-                return False
-            keyring.delete_password(f"{self._prefix}:{provider}", client)
-            return True
-        except keyring.errors.KeyringError:
+        if vault.get_password(f"{self._prefix}:{provider}", client) is None:
             return False
+        vault.delete_password(f"{self._prefix}:{provider}", client)
+        return True
 
     def set(self, client: str, provider: str, secret: str) -> None:
-        """Writes still raise. Silently not storing a credential the operator
-        just pasted would be worse than failing in front of them."""
-        keyring.set_password(f"{self._prefix}:{provider}", client, secret)
+        vault.set_password(f"{self._prefix}:{provider}", client, secret)
 
 
 class Container:

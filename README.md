@@ -63,7 +63,7 @@ also reason about what they find (`check`, `work_on_client`,
 a key lying around is not the same as consenting to use it.
 
 ```bash
-munim config ai key gemini   # prompts, stored in your keychain
+munim config ai key gemini   # prompts, stored in ~/.munim/credentials.json
 munim config ai on           # takes effect on the next call, no reconnect
 munim config ai              # what is on, on what, and where each came from
 ```

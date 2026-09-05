@@ -10,6 +10,7 @@ import platform
 import shutil
 import json
 import re
+import stat
 import sys
 import time
 from dataclasses import dataclass
@@ -325,25 +326,32 @@ def _one_interpreter() -> list[Finding]:
 
 
 def _keychain() -> Finding:
-    """Whether there is anywhere to keep a credential.
+    """Where credentials are, and whether that place can be used.
 
-    Reads degrade to "nothing connected" without one, which is right for a
-    library and wrong for a diagnosis: a client that is connected and reads as
-    disconnected is the most confusing state this tool can be in, and it should
-    say so rather than let somebody reconnect and watch it not stick.
+    Named `_keychain` still, because three tests and two documents refer to it
+    by that name and the thing it reports is the same question. What it reports
+    is the file store now: see munim/vault.py for why.
     """
-    import keyring
-    import keyring.errors
+    from munim import vault
 
-    try:
-        keyring.get_password("munim:probe", "probe")
-    except keyring.errors.KeyringError as exc:
-        return Finding(
-            BAD, "Keychain", f"no backend available: {exc}",
-            fix="on a headless Linux box, install `keyrings.alt` or run a "
-                "secret service. Until then nothing can be connected, and "
-                "anything already connected reads as disconnected.")
-    return Finding(OK, "Keychain", f"{keyring.get_keyring().name}")
+    where = vault.path()
+    home = Path.home()
+    shown = f"~/{where.relative_to(home)}" if where.is_relative_to(home) else str(where)
+
+    usable, why = vault.readable()
+    if not usable:
+        return Finding(BAD, "Credentials", why,
+                       fix=f"fix or move {shown}. munim will not overwrite "
+                           f"credentials it cannot read")
+    if not where.exists():
+        return Finding(OK, "Credentials", f"{shown} (none stored yet)")
+
+    mode = stat.S_IMODE(where.stat().st_mode)
+    if mode & 0o077:
+        return Finding(WARN, "Credentials",
+                       f"{shown} is mode {mode:o}, readable by others",
+                       fix=f"chmod 600 {shown}")
+    return Finding(OK, "Credentials", f"{shown}, mode {mode:o}")
 
 
 def _clients(registry: Registry) -> list[Finding]:
@@ -351,6 +359,19 @@ def _clients(registry: Registry) -> list[Finding]:
     if not records:
         return [Finding(WARN, "Clients", "none registered yet",
                         fix='ask your agent: check <a domain you look after>')]
+
+    from munim import vault
+
+    # The names live in the registry and are worth showing even when the
+    # credentials cannot be read. `connections` raises rather than reporting
+    # everybody as disconnected, which is right for a library and wrong for a
+    # diagnosis: `_keychain` above already says what is wrong with the store, so
+    # repeating it once per client would bury it.
+    usable, _ = vault.readable()
+    if not usable:
+        return [Finding(OK, "Clients", f"{len(records)} registered"),
+                *[Finding(WARN, f"  {r.name}", "cannot tell, the store is "
+                          "unreadable") for r in records]]
 
     backend = KeychainBackend()
     out = [Finding(OK, "Clients", f"{len(records)} registered")]

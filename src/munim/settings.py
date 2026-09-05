@@ -30,6 +30,7 @@ Never logs a key.
 
 import json
 import os
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -126,18 +127,38 @@ def read() -> tuple[dict, str]:
 
 
 def write(settings: dict) -> Path:
-    """Store settings. Written the way registry.py writes: whole file, atomic.
+    """Store settings. Whole file, atomic, durable.
 
-    A half-written settings.json is a file that fails to parse, and this module
-    treats that as "agents off". Losing the setting because the disk filled
-    mid-write would be a silent downgrade.
+    The docstring here used to claim it was "written the way registry.py
+    writes", and it was not: `path.with_suffix(".tmp")` then `write_text` then
+    `os.replace`. Three things wrong with that, and the file decides whether
+    agents may reach a model host.
+
+    A fixed temporary name means two processes writing at once use the same one,
+    and the second clobbers the first's half-written file before renaming it into
+    place. `mkstemp` gives each writer its own.
+
+    No `fsync` means `os.replace` can be durable while the bytes it points at are
+    not, so a crash leaves an intact rename onto empty or partial content. That
+    is the case this module reads as "agents off", which is the safe direction
+    but arrived at by luck.
+
+    And a failed write left the temporary file behind. `registry.py:87-105` had
+    all three right; this now uses the same shape.
     """
     path = _path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps(settings, indent=2, sort_keys=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(payload + "\n")
-    os.replace(tmp, path)
+    payload = json.dumps(settings, indent=2, sort_keys=True) + "\n"
+    fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
     return path
 
 
@@ -320,15 +341,35 @@ def model_for(host: str, backend=None) -> str:
             or spec.default_model)
 
 
+class Unreadable(RuntimeError):
+    """The settings file exists and cannot be parsed, so it will not be replaced.
+
+    Reads treat an unreadable file as "nothing stored", which resolves to agents
+    off and is the safe direction. Writes cannot do the same: starting from an
+    empty dict and saving would discard the host and the model ids that are
+    still in the file, turning a typo somebody could fix by hand into data they
+    have to remember. Refusing costs one command and keeps the file.
+    """
+
+
+def _editable() -> dict:
+    """The stored settings, refusing when there is a file that will not parse."""
+    stored, problem = read()
+    if problem:
+        raise Unreadable(f"{problem}. Fix or delete {_path()} and try again; "
+                         f"nothing was changed.")
+    return stored
+
+
 def set_enabled(on: bool) -> Path:
-    stored, _ = read()
+    stored = _editable()
     section = stored.setdefault("ai", {})
     section["enabled"] = bool(on)
     return write(stored)
 
 
 def set_host(host: str) -> Path:
-    stored, _ = read()
+    stored = _editable()
     section = stored.setdefault("ai", {})
     section["host"] = host
     return write(stored)
@@ -341,7 +382,7 @@ def set_model(host: str, model_id: str) -> Path:
     switch the host to Bedrock, and it is handed to BedrockModel(model_id=...).
     The environment variables this replaces were already separate.
     """
-    stored, _ = read()
+    stored = _editable()
     section = stored.setdefault("ai", {})
     models = section.setdefault("models", {})
     models[host] = model_id

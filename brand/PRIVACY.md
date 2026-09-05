@@ -7,7 +7,7 @@ telemetry.
 
 | What | Where | Leaves your machine? |
 |---|---|---|
-| Provider credentials | Your OS keychain | Only to the provider they authenticate |
+| Provider credentials | `~/.munim/credentials.json`, mode 0600 | Only to the provider they authenticate |
 | Client names and domains | `~/.munim/registry.json` | No |
 | Run logs | `~/.munim/runs/*.jsonl` | No |
 | Launch reports | `~/.munim/reports/*.html` | No |
@@ -31,5 +31,7 @@ author of this software.
 
 **Deleting everything**
 
-`rm -rf ~/.munim` removes all local state. Credentials are removed from the
-keychain with your operating system's keychain tool.
+`rm -rf ~/.munim` removes all local state, credentials included, and every
+provider would need connecting again. That directory now holds secrets, so do
+not zip it up for a bug report or sync it anywhere you would not put a password. Credentials
+live in `~/.munim/credentials.json` and are removed with `munim disconnect`.

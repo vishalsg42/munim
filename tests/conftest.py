@@ -38,6 +38,9 @@ def _agents_are_off_and_no_host_is_real(tmp_path, monkeypatch):
     import munim.agent.model
 
     monkeypatch.setenv("MUNIM_SETTINGS", str(tmp_path / "settings.json"))
+    # Credentials live in a file now, so this is the door that matters. Read on
+    # every call rather than captured at import, so import order cannot defeat it.
+    monkeypatch.setenv("MUNIM_CREDENTIALS", str(tmp_path / "credentials.json"))
     for name in ("MUNIM_AI", "MUNIM_AI_HOST", "MUNIM_PREFER",
                  "MUNIM_BEDROCK_MODEL", "MUNIM_GEMINI_MODEL",
                  "MUNIM_ANTHROPIC_MODEL", "GEMINI_API_KEY", "GOOGLE_API_KEY",
@@ -105,45 +108,20 @@ def _never_read_the_real_dotenv(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _no_test_may_touch_the_real_keychain(monkeypatch):
-    """No test may read or write the operator's real login keychain.
+def _no_test_may_touch_the_real_credentials(tmp_path, monkeypatch):
+    """Credentials live in a file now, and MUNIM_CREDENTIALS points at it.
 
-    Both doors, because there are two. `munim.container.keyring` is the API-key
-    backend and was never swapped by anything. `munim.remote.storage.keyring` is
-    the session store, and although the tests that care about sessions swap it
-    themselves, more than twenty test files do not, so anything calling
-    `connected.connections()` or building a `KeychainTokenStorage` read the real
-    keychain. On macOS each of those reads is a password dialog when the item
-    belongs to a different interpreter, and one run of the suite asked for the
-    login password dozens of times.
+    This used to swap `munim.container.keyring` and
+    `munim.remote.storage.keyring` for a fake, because the store was the OS
+    keychain and a module attribute was the only seam. The file store reads its
+    path on every call, so pointing the environment at tmp_path closes the same
+    door with nothing to keep in sync.
 
-    The API-key door is the dangerous one rather than merely annoying: any test
-    reaching `disconnect(everything=True)` ran the orphan sweep, which
-    dumps the operator's real login keychain, treats every real client id as an
-    orphan because the registry under test is a temporary one, and deletes
-    through the unpatched backend.
-
-    It destroyed nothing only because no `munim:<provider>` API-key items happen
-    to exist on the machine this was found on. One `munim connect "<client>"
-    <provider> --token` and the suite would have started eating live
-    credentials.
-
-    Same shape as `_never_write_to_the_real_home` above, and for the same
-    reason: the test suite must not be able to reach anything the operator
-    would miss.
+    Set alongside MUNIM_SETTINGS in the fixture above; this one exists to say
+    why, and to fail loudly if the resolved path ever escapes tmp_path.
     """
-    import munim.container
-    import munim.remote.storage
+    from munim import vault
 
-    class Nowhere:
-        def __init__(self): self.store = {}
-        def get_password(self, service, account):
-            return self.store.get((service, account))
-        def set_password(self, service, account, secret):
-            self.store[(service, account)] = secret
-        def delete_password(self, service, account):
-            self.store.pop((service, account), None)
-
-    nowhere = Nowhere()
-    monkeypatch.setattr(munim.container, "keyring", nowhere)
-    monkeypatch.setattr(munim.remote.storage, "keyring", nowhere)
+    resolved = vault.path()
+    assert tmp_path in resolved.parents, \
+        f"the credential store escaped the sandbox: {resolved}"
