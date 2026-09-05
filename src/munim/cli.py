@@ -77,38 +77,19 @@ def installed_version() -> str:
 
 
 def find_orphans(known: set[str]) -> list[str]:
-    """Client ids the keychain holds that no client record claims.
+    """Client ids the store holds that no client record claims.
 
-    Split out of the sweep so the same enumeration can be shown to somebody
-    before it is acted on. It used to enumerate and delete in one pass, which
-    meant `--all` removed credentials it had never named.
-
-    `keyring` cannot list what it holds, so this shells out to the macOS
-    keychain. Elsewhere it says so rather than pretending the sweep happened.
+    This used to shell out to `security dump-keychain` and grep, because
+    `keyring` cannot list what it holds, and it therefore only worked on macOS.
+    A file can be read. The apology that used to sit here is gone with the
+    limitation that caused it.
     """
-    import platform
-    import subprocess
-
-    if platform.system() != "Darwin":
-        print("  (orphan sweep only works on macOS: keyring cannot list what "
-              "it holds, so there is nothing to enumerate elsewhere)",
-              file=sys.stderr)
-        return []
+    from munim import vault
 
     try:
-        dump = subprocess.run(["security", "dump-keychain"], capture_output=True,
-                              text=True, timeout=60).stdout
-    except Exception:
+        return sorted(vault.accounts() - known)
+    except vault.StoreUnavailable:
         return []
-
-    found: set[str] = set()
-    account = None
-    for line in dump.splitlines():
-        if '"acct"' in line and '="' in line:
-            account = line.split('="', 1)[1].rstrip('"')
-        elif "munim" in line and account and account.startswith("c_"):
-            found.add(account)
-    return sorted(found - known)
 
 
 def planned_removals(records, providers, backend, everything: bool = False):
@@ -586,6 +567,43 @@ def config(action: str, provider: str | None, client_id: str | None) -> int:
     remember(provider, client_id, secret)
     print(f"Stored the {provider} application in your keychain. It works from "
           f"any directory.", file=sys.stderr)
+    return 0
+
+
+def set_domain(client: str, domain: str) -> int:
+    """Record which site a client is, or correct the one recorded.
+
+    `--domain` only ever applied to `clients add`, so a client whose domain was
+    wrong was wrong for good. That is not cosmetic: `audit_all_clients` checks
+    the registered domain, so a client recorded as a Vercel preview URL had a
+    hostname that is always up being watched instead of the site that can break.
+    An outage went unnoticed that way, on a real client, in this project.
+
+    A client with no domain is not an error. It is somebody you look after and
+    have not told munim where to find yet, which is the state every client
+    starts in.
+    """
+    registry = _registry()
+    try:
+        record = registry.get(client)
+    except UnknownClient as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    was = record.domain
+    record.domain = domain.strip() or None
+    registry.update(record)
+
+    if record.domain is None:
+        print(f"{record.name!r} has no domain now. Nothing will be checked for "
+              f"them until one is set.", file=sys.stderr)
+        return 0
+
+    print(f"{record.name!r} is {record.domain}"
+          + (f", was {was}" if was and was != record.domain else "") + ".",
+          file=sys.stderr)
+    print(f"  `munim check` and audit_all_clients watch this hostname now.",
+          file=sys.stderr)
     return 0
 
 
@@ -1102,11 +1120,12 @@ def main(argv: list[str] | None = None) -> int:
     # `connect` stays a verb, because it is an event rather than a thing.
     ls = sub.add_parser("clients", help="the businesses you look after")
     ls.add_argument("action", nargs="?",
-                    choices=["add", "rename", "forget", "merge"],
+                    choices=["add", "rename", "forget", "merge", "domain"],
                     help="omit to list them")
     ls.add_argument("names", nargs="*", metavar="NAME",
                     help="the client, plus a second name for rename and merge")
-    ls.add_argument("--domain", help="their site, for `add`")
+    ls.add_argument("--domain", help="their site, for `add`. To change it "
+                                     "later: munim clients domain <name> <site>")
     ls.add_argument("--verbose", action="store_true")
     ls.add_argument("--json", action="store_true", dest="as_json",
                     help="machine-readable, for scripts")
@@ -1182,6 +1201,27 @@ def main(argv: list[str] | None = None) -> int:
     except Exception:
         pass  # never block a command on a migration
 
+    # Credentials used to live in the OS keychain. Anything still there is
+    # copied across, once, and left in place: a copy is untidy and a deletion
+    # after a write that silently failed is unrecoverable.
+    try:
+        from munim import vault
+        from munim.appcreds import APPLICATION
+        from munim.remote.servers import all_servers
+
+        records = _registry().clients()
+        adopted = vault.adopt_keychain(
+            [r.id for r in records] + [r.name for r in records],
+            sorted({*all_servers(), *KEY_PROVIDERS}),
+            extra_accounts=[APPLICATION])
+        if adopted:
+            print(f"Moved {len(adopted)} credential(s) out of the OS keychain "
+                  f"into {vault.path()}.", file=sys.stderr)
+            print(f"  The keychain copies are still there. Remove them with "
+                  f"Keychain Access if you want them gone.", file=sys.stderr)
+    except Exception:
+        pass  # never block a command on a migration
+
     # `munim connect cloudflare` reads as one positional, and argparse fills the
     # first one. Shift it: a lone argument that names a provider is a provider.
     if args.command == "connect" and args.provider is None:
@@ -1248,6 +1288,12 @@ def main(argv: list[str] | None = None) -> int:
             if len(args.names) != 2:
                 parser.error("clients merge takes a source and a target")
             return merge(*args.names)
+        if args.action == "domain":
+            if len(args.names) != 2:
+                parser.error('clients domain takes a client and a site: '
+                             'munim clients domain "Balaji Roofings" '
+                             'balajiroofingindustries.com')
+            return set_domain(*args.names)
 
         from munim.connected import connections, describe
         backend = KeychainBackend()

@@ -28,8 +28,8 @@ is not a hosted service. There is no Munim server, no Munim account, and no
 operator of Munim who can see your data.</p>
 
 <div class="box">
-<strong>The short version.</strong> Your credentials stay in your operating
-system's keychain. Data from the services you connect goes between your computer
+<strong>The short version.</strong> Your credentials stay on your machine, in
+<code>~/.munim/credentials.json</code>, a file only your user account can read. Data from the services you connect goes between your computer
 and those services directly. Munim runs as an MCP server inside a coding agent,
 so what its tools return reaches whichever model that agent runs on. Munim's own
 reasoning features are switched off by default and send nothing to a model host
@@ -39,8 +39,13 @@ until you turn them on. Nothing is ever sent to the authors of Munim.
 <h2>What Munim handles</h2>
 <ul>
 <li><strong>Credentials.</strong> When you connect a service, the resulting
-OAuth token or API key is stored in your operating system's keychain, filed
-under an identifier for the client it belongs to. Two kinds belong to the
+OAuth token or API key is stored in <code>~/.munim/credentials.json</code> with
+file permissions <code>0600</code>, meaning only your user account can read it,
+filed under an identifier for the client it belongs to. It is not encrypted:
+anything running under your user account can read it without asking, the same as
+<code>~/.ssh/id_rsa</code> or <code>~/.aws/credentials</code>. A backup or disk
+snapshot of your home directory therefore contains it in readable form, so treat
+those the way you treat the machine itself. Two kinds belong to the
 installation rather than to any client, and are filed under a reserved name
 instead: the OAuth application credential for Gmail and Stitch, and the API key
 for a model host if you configure one. Munim's code never returns a
@@ -103,10 +108,9 @@ It lists them and asks first; add <code>--yes</code> in a script, or
 <code>munim config app unset &lt;provider&gt;</code> removes a stored OAuth application
 credential. These belong to the installation rather than to a client, so
 <code>disconnect</code> does not touch them.</li>
-<li>Deleting <code>~/.munim</code> removes the run logs, reports and the client list.
-Credentials are deliberately not kept there: they are in your operating system's
-keychain, so deleting that directory cannot cost you a login, and backing it up
-cannot leak one.</li>
+<li>Deleting <code>~/.munim</code> removes everything: the credentials, the run
+logs, the reports and the client list. Every provider would need connecting
+again.</li>
 <li>Revoking Munim's access at the provider, for example at
 <a href="https://myaccount.google.com/permissions">Google account permissions</a>,
 invalidates the credential regardless of what is on your machine.</li>

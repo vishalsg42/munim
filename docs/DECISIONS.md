@@ -956,3 +956,46 @@ strictly better on macOS, and the error probably decided the original call.
 
 A plaintext file is not on that list.
 
+## D30: Credentials move to a file, and D29 is reversed
+
+**Decided 2026-09-05 by the operator, after D29 argued the other way.**
+
+D29 concluded the keychain should stay, on the grounds that the prompting which
+prompted the question had been three bugs rather than a storage problem, and the
+measurement supported that. It still does: a single install does not prompt.
+
+The operator chose the file store anyway, and that is the right call to be
+theirs. The reason D29 was not the end of it is that "no prompt today" is not
+"no prompt", and what makes it fragile is structural. macOS binds a keychain
+item's access rule to a code-signing identity. A signed application keeps that
+identity across updates; a pip-installed Python package cannot have one, because
+the application macOS sees is the interpreter. So every Homebrew Python upgrade,
+every move between 3.12 and 3.13, and every second install re-opens it. This
+project hit all three in one day.
+
+**What it costs, stated rather than buried.** Any process running as the
+operator can read `~/.munim/credentials.json` without a prompt, where the
+keychain would have asked. It is not encrypted, so a Time Machine backup or an
+APFS snapshot holds it in the clear, and `os.replace` leaves prior versions in
+unreclaimed blocks, which means `munim disconnect` is an unlink rather than an
+erase. The same exposure as `~/.ssh/id_rsa`, `~/.aws/credentials`, and Claude
+Code's own `~/.claude/.credentials.json`.
+
+**What it buys.** One behaviour on every platform, no dialogs, no dependence on
+an interpreter's identity, and enumeration: the orphan sweep used to shell out
+to `security dump-keychain` and only work on macOS, because `keyring` cannot
+list what it holds. A file can be read.
+
+**What the earlier reviews were right about, and is built.** An inter-process
+lock over the whole read-modify-write, because the MCP server refreshes tokens
+while the CLI writes. Mode 0600 set on the temporary file before the rename, so
+there is no window where it exists world-readable. `fsync` on the file and on
+the directory. A refusal to overwrite a store that cannot be read, rather than
+starting fresh and losing it. And adoption from the keychain that copies and
+verifies but never deletes, because a copy left behind is untidy and a deletion
+after a write that silently failed is not recoverable.
+
+D29 stands as the record of why this was argued against, and this is what
+overruled it. Both are worth keeping: the next person deserves the argument, not
+just the outcome.
+

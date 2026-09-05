@@ -51,7 +51,7 @@ munim config ai                              # agents on or off, host, model, ke
 munim config ai on | off                     # off by default; Munim is local
 munim config ai host gemini                  # auto | bedrock | gemini | anthropic
 munim config ai model gemini gemini-2.5-pro  # per host, so switching cannot mismatch
-munim config ai key gemini                   # prompts, goes to your keychain
+munim config ai key gemini                   # prompts, goes to ~/.munim/credentials.json
 munim config ai unset gemini
 ```
 
@@ -107,76 +107,28 @@ Two things worth knowing about where the switch is read from:
   inherit your shell. `doctor` says so rather than letting the two disagree
   quietly.
 
-## Installing it, and why macOS may ask for your keychain password
-
-Install it once, and use that one install for both the CLI and the MCP server.
-That sentence is the whole of the advice, and the rest of this section is why it
-matters more than it sounds.
+## Installing it, and where your credentials go
 
 ```bash
 uv tool install munim          # or: pipx install munim
-claude mcp add munim "$(dirname "$(command -v munim)")/munim-mcp"
+claude mcp add --scope user munim -- "$(dirname "$(command -v munim)")/munim-mcp"
 ```
 
-**A fresh install asks for nothing.** macOS files an access rule against each
-keychain item naming the binary that may read it, and the binary that *stores* a
-credential is on that rule automatically. So the interpreter that ran `munim
-connect` reads the result back with no prompt, on that connection and on every
-one after it. Verified rather than assumed: writing an item and reading it back
-in the same interpreter returns the value with no dialog.
+Credentials go in `~/.munim/credentials.json`, mode `0600`, which means readable
+only by your user account. It is not encrypted. Anything running as you can read
+it without asking, the same as `~/.ssh/id_rsa` or `~/.aws/credentials`, and a
+backup of your home directory contains it in readable form.
 
-**Two installs is what causes the prompts.** The keychain sees two different
-binaries, not two copies of munim. Each asks approval for every item the other
-created, neither ever inherits the other's, and no amount of clicking converges,
-because both keep writing new items the other has not been approved for. This is
-easy to arrive at by accident: install munim into a project venv, install it
-again with pipx for convenience, and now the MCP server your coding agent spawns
-and the `munim` on your PATH are different Pythons.
+That is a deliberate trade and D30 records it. The short version: macOS binds a
+keychain item's access rule to a code-signing identity, and a pip-installed
+Python package cannot have a stable one, because the application macOS sees is
+the interpreter. The protection was real but fragile in a way it is not for a
+signed application, and it broke every time the interpreter changed.
 
-`munim doctor` reports this directly:
+**`rm -rf ~/.munim` now removes your credentials too.** Every provider would
+need connecting again. Do not sync that directory anywhere you would not put a
+password.
 
-```
-! One interpreter    the MCP server and this command are different Pythons,
-                     so the keychain will keep asking for your password
-```
-
-**What else re-prompts, once you are on one install.** Only the interpreter
-changing underneath you. A pipx or uv venv symlinks to a real Python rather than
-copying it, so uninstalling and reinstalling munim keeps the same identity and
-costs nothing. Upgrading the Python it points at is a different binary, and so is
-moving between 3.12 and 3.13, and both mean approving again.
-
-**If you do get asked, "Always Allow" is the right button.** It adds that
-interpreter to the item's rule permanently. Be aware of what it grants: any
-Python script run by that same interpreter can then read those credentials
-without a prompt. That is the trade the keychain offers and there is no version
-of it that is both silent and narrow.
-
-The measurement behind all of this, and what to do if prompts ever return, is
-`docs/DECISIONS.md` D29.
-
-**Linux and Windows do not have this.** Secret Service and Windows Credential
-Manager have no per-item, per-binary rule, so none of the above applies and
-`doctor` stays quiet about it there.
-
-
-## Conventions
-
-```bash
-munim                    # what this is, and where to start
-munim --version          # or -V
-munim clients --json     # the listing, machine-readable, on stdout
-```
-
-**Exit codes.** `0` succeeded, including a dry run and a refusal you asked for.
-`2` for anything else: a usage error, an unknown client, a confirmation you
-declined, or a destructive command refusing because there was no terminal to
-confirm on. Data goes to stdout, everything else to stderr, so
-`munim clients --json | jq` works and nothing else has to be filtered out.
-
-**Destructive commands list what they will do before doing it.**
-`munim disconnect --all` prints every credential it is about to remove, then
-asks. `--dry-run` prints that same list and stops, which is the only way to see
-it from a script, since without a terminal the command refuses rather than
-guessing. The list it prints and the list it acts on are one list, so they
-cannot disagree.
+`munim doctor` reports where the store is and refuses to guess if it cannot read
+it: a client that is connected and reads as disconnected is the most confusing
+state this tool can be in.

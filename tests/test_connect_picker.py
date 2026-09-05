@@ -31,7 +31,7 @@ class Ring:
 def world(tmp_path, monkeypatch):
     registry = Registry(tmp_path / "r.json")
     monkeypatch.setattr(cli, "_registry", lambda: registry)
-    monkeypatch.setattr("munim.remote.storage.keyring", Ring())
+    monkeypatch.setattr("munim.remote.storage.vault", Ring())
     return registry
 
 

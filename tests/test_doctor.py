@@ -118,34 +118,56 @@ def test_an_unconnected_client_is_a_warning_with_the_command(tmp_path):
     assert "munim connect" in unconnected.fix
 
 
-def test_the_keychain_is_reported_when_there_is_none(monkeypatch):
-    """A machine with no keychain backend, which is most Linux servers and
-    every CI runner, used to take doctor down with a stack trace.
+def test_an_unusable_credential_store_is_reported(monkeypatch, tmp_path):
+    """This used to simulate a machine with no keychain backend, which was most
+    Linux servers and every CI runner, and which took doctor down with a stack
+    trace before it degraded to "nothing connected".
 
-    Reads degrade to "nothing connected", which is right for a library and
-    wrong for a diagnosis: a client that is connected and reads as disconnected
-    is the most confusing state this tool can be in."""
-    import keyring
-    import keyring.errors
+    A file has a state the keychain did not: it exists and cannot be read. That
+    must not read as "nothing connected", because a client that is connected and
+    reports as disconnected is the most confusing state this tool can be in.
+    """
+    broken = tmp_path / "credentials.json"
+    broken.write_text("{not json")
+    monkeypatch.setenv("MUNIM_CREDENTIALS", str(broken))
 
-    def boom(*a, **k):
-        raise keyring.errors.NoKeyringError("No recommended backend was available")
-
-    monkeypatch.setattr(keyring, "get_password", boom)
     finding = doctor._keychain()
     assert finding.status == doctor.BAD
-    assert "no backend" in finding.detail
-    assert finding.fix, "a diagnosis with no next step is a complaint"
+    assert finding.fix, "a problem with no next step is a complaint"
+    assert "will not overwrite" in finding.fix, \
+        "it must say it is refusing rather than silently starting fresh"
 
 
-def test_a_missing_keychain_does_not_take_the_client_list_down(monkeypatch, tmp_path):
-    import keyring
-    import keyring.errors
+def test_a_store_that_has_nothing_yet_is_fine(monkeypatch, tmp_path):
+    """The other direction. A fresh install has no file and that is normal."""
+    monkeypatch.setenv("MUNIM_CREDENTIALS", str(tmp_path / "none.json"))
+    assert doctor._keychain().status == doctor.OK
 
-    def boom(*a, **k):
-        raise keyring.errors.NoKeyringError("nope")
 
-    monkeypatch.setattr(keyring, "get_password", boom)
+def test_a_world_readable_store_is_flagged(monkeypatch, tmp_path):
+    """0600 is the whole of the protection."""
+    import json
+    import os
+
+    loose = tmp_path / "credentials.json"
+    loose.write_text(json.dumps({"version": 1, "records": {}}))
+    os.chmod(loose, 0o644)
+    monkeypatch.setenv("MUNIM_CREDENTIALS", str(loose))
+
+    finding = doctor._keychain()
+    assert finding.status == doctor.WARN
+    assert "chmod 600" in finding.fix
+
+
+
+def test_an_unreadable_store_does_not_take_the_client_list_down(monkeypatch, tmp_path):
+    """It used to be a missing keychain backend, which was every CI runner. The
+    client list has to survive an unusable store: the names are in the registry
+    and are worth showing even when the credentials cannot be read."""
+    broken = tmp_path / "credentials.json"
+    broken.write_text("{not json")
+    monkeypatch.setenv("MUNIM_CREDENTIALS", str(broken))
+
     registry = Registry(tmp_path / "r.json")
     registry.add(ClientRecord(name="acme"))
     findings = doctor._clients(registry)          # must not raise
