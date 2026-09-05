@@ -423,16 +423,14 @@ def ask_which_client(registry, ask=input, *, account_can_name=False) -> str | No
     options.append(("a client not listed", ""))
 
     def resolve(answer: str) -> int | None:
-        """The answers this prompt has always taken, beyond a row number.
+        """An id or a name typed straight in, for somebody who already knows
+        the client and does not want to read the list.
 
-        `n` and `a` are published shortcuts, and an id or a name typed straight
-        in is how somebody who already knows the client skips reading the list.
+        The `n` and `a` letter shortcuts are gone. They existed because the rows
+        they stood for could not be selected any other way; both are ordinary
+        rows now, with numbers, that the arrow keys reach like everything else.
+        Two ways to pick the same row is one more than a list needs.
         """
-        lowered = answer.lower()
-        if lowered == "n":
-            return len(options) - 1
-        if account_can_name and lowered == "a":
-            return len(records)
         for index, record in enumerate(records):
             if answer in (record.id, record.name):
                 return index

@@ -41,12 +41,15 @@ def test_an_id_typed_straight_in_works(registry):
     assert cli.ask_which_client(registry, ask=_answers(wanted)) == wanted
 
 
-def test_n_asks_for_a_new_name(registry):
-    assert cli.ask_which_client(registry, ask=_answers("n", "Ivy & Fern")) == "Ivy & Fern"
+def test_the_not_listed_row_asks_for_a_new_name(registry):
+    """It used to be the `n` shortcut. It is an ordinary row now, reached by its
+    number or by the arrow keys, because a row that can be selected does not
+    also need a letter."""
+    assert cli.ask_which_client(registry, ask=_answers("3", "Ivy & Fern")) == "Ivy & Fern"
 
 
 def test_a_new_client_with_no_name_is_not_created(registry):
-    assert cli.ask_which_client(registry, ask=_answers("n", "   ")) is None
+    assert cli.ask_which_client(registry, ask=_answers("3", "   ")) is None
 
 
 def test_a_number_out_of_range_chooses_nothing(registry):

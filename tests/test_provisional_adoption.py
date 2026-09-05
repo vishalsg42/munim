@@ -56,7 +56,9 @@ def test_a_client_can_be_created_alongside_existing_ones(estate, monkeypatch, ca
     """
     reg, _ = estate
     reg.add(ClientRecord(name="Acme"))
-    answers = iter(["n", "Ivy & Fern"])
+    # Row 2: "a client not listed". The `n` shortcut is gone, because the row
+    # it stood for is selectable like any other now.
+    answers = iter(["2", "Ivy & Fern"])
 
     record = cli.adopt_provisional(reg, "vercel", ask=lambda: next(answers))
     assert record is not None and record.name == "Ivy & Fern"
