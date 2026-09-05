@@ -41,7 +41,18 @@ def connections(client_id, backend=None, keyring_module=None):
     keys = [p for p in KEY_PROVIDERS if backend.get(client_id, p) is not None]
     sessions = [
         p for p in sorted(SERVERS)
-        if KeychainTokenStorage(client_id, p, keyring_module)._read("tokens")
+        # Tokens first, then the endpoint. Zoho authenticates by URL and stores
+        # an endpoint and no tokens at all, so a tokens-only test reported a
+        # connected Zoho client as holding nothing: `munim clients` said
+        # "nothing connected" for a live session. agent/within.py already asked
+        # both questions; this was the one place still asking the narrow one.
+        #
+        # Deliberately not `holds()`, which reads all four kinds. This runs once
+        # per client per provider on every listing, so it is one keychain read
+        # in the common case and two for Zoho. Using `holds()` here took the
+        # suite from 47 seconds to 177.
+        if (KeychainTokenStorage(client_id, p, keyring_module)._read("tokens")
+            or KeychainTokenStorage(client_id, p, keyring_module).endpoint())
     ]
     return keys, sessions
 
