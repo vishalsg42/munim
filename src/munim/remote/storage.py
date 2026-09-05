@@ -7,9 +7,9 @@ time; a registration and a token set per client is what removes it.
 
 import json
 
-import keyring
-import keyring.errors
 from mcp.client.auth import TokenStorage
+
+from munim import vault
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 
 SERVICE = "munim-mcp"
@@ -34,10 +34,10 @@ class KeychainTokenStorage(TokenStorage):
         self._client = client
         self._provider = provider
         # Resolved here, not as a default argument. A default is bound when the
-        # module is imported, so `keyring` could never be substituted after
-        # that: a caller passing nothing always reached the real OS keychain,
-        # including from a test that had replaced it.
-        self._backend = backend if backend is not None else keyring
+        # module is imported, so the store could never be substituted after
+        # that: a caller passing nothing always reached the real one, including
+        # from a test that had replaced it.
+        self._backend = backend if backend is not None else vault
 
     def _service(self, kind: str) -> str:
         return f"{SERVICE}:{self._provider}:{kind}"
@@ -45,7 +45,7 @@ class KeychainTokenStorage(TokenStorage):
     def _read(self, kind: str) -> dict | None:
         try:
             raw = self._backend.get_password(self._service(kind), self._client)
-        except keyring.errors.KeyringError:
+        except vault.StoreUnavailable:
             # Nowhere to store means nothing stored. See KeychainBackend.get.
             return None
         return json.loads(raw) if raw else None
@@ -107,7 +107,7 @@ class KeychainTokenStorage(TokenStorage):
     def endpoint(self) -> str | None:
         try:
             return self._backend.get_password(self._service("endpoint"), self._client)
-        except keyring.errors.KeyringError:
+        except vault.StoreUnavailable:
             return None
 
     def remember_account(self, account: str) -> None:
@@ -123,7 +123,7 @@ class KeychainTokenStorage(TokenStorage):
     def account(self) -> str | None:
         try:
             return self._backend.get_password(self._service("account"), self._client)
-        except keyring.errors.KeyringError:
+        except vault.StoreUnavailable:
             return None
 
     def holds(self) -> list[str]:
@@ -141,7 +141,7 @@ class KeychainTokenStorage(TokenStorage):
             try:
                 if self._backend.get_password(self._service(kind), self._client):
                     found.append(kind)
-            except keyring.errors.KeyringError:
+            except vault.StoreUnavailable:
                 return []
         return found
 

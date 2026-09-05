@@ -141,3 +141,28 @@ def test_typing_filters_the_list():
     assert pick._visible(OPTIONS, "ivy") == [1]
     assert pick._visible(OPTIONS, "test") == [0, 2], "hints are searched too"
     assert pick._visible(OPTIONS, "zzz") == [], "nothing matching is a new name"
+
+
+def test_the_live_picker_is_reachable_from_the_real_call_site():
+    """`choose` takes the arrow-key path only when nothing was injected, and
+    `ask_which_client` defaulted `ask` to the builtin `input`. Every real
+    invocation therefore fell through to the numbered prompt, and the picker ran
+    only in its own tests: written, tested, and unreachable.
+
+    Asserted on the signature because the failure is invisible any other way.
+    Both paths work, both are tested, and the wrong one was always chosen.
+    """
+    import inspect
+
+    from munim import cli
+
+    default = inspect.signature(cli.ask_which_client).parameters["ask"].default
+    assert default is None, \
+        "a non-None default means choose() never takes the interactive path"
+
+
+def test_injecting_ask_is_what_forces_the_numbered_path():
+    """The other direction, and the only thing passing `ask` should mean."""
+    called = []
+    pick.choose("Which?", OPTIONS, ask=lambda: called.append(1) or "1")
+    assert called, "an injected ask was not used"

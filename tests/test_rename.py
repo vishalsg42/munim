@@ -61,7 +61,7 @@ def test_a_session_follows_the_rename(tmp_path, monkeypatch):
         def delete_password(self, a, b): self.s.pop((a, b), None)
 
     ring = Ring()
-    monkeypatch.setattr("munim.remote.storage.keyring", ring)
+    monkeypatch.setattr("munim.remote.storage.vault", ring)
 
     registry = Registry(tmp_path / "r.json")
     registry.add(ClientRecord(name="old"))
