@@ -6,6 +6,7 @@ command or URL that fixes it, rather than a stack trace.
 """
 
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -170,6 +171,93 @@ def _mcp_registered() -> Finding:
                    fix=f"claude mcp add munim -- {Path(sys.executable).parent / 'munim-mcp'}")
 
 
+def _mcp_command() -> str:
+    """The path the coding agent is configured to spawn, or "".
+
+    Read from `claude mcp list` rather than from the config file, because the
+    file layout is the agent's business and the listing is the interface.
+    """
+    executable = shutil.which("claude")
+    if not executable:
+        return ""
+    try:
+        out = subprocess.run([executable, "mcp", "list"], capture_output=True,
+                             text=True, timeout=20).stdout
+    except Exception:
+        return ""
+    for line in out.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("munim"):
+            continue
+        _, _, rest = stripped.partition(":")
+        # `munim: /path/to/munim-mcp  - ✔ Connected`
+        return rest.split(" - ")[0].strip()
+    return ""
+
+
+def _interpreter_of(script: str) -> str:
+    """Which Python runs a console script, resolved through symlinks.
+
+    A venv's `bin/python` is usually a symlink to the real interpreter, and it
+    is the resolved one macOS files its access rule against: a pipx venv
+    pointing at Homebrew's python is Homebrew's python as far as the keychain
+    is concerned, which is why reinstalling a tool does not cost the approvals
+    and upgrading Python does.
+    """
+    try:
+        first = Path(script).read_text(errors="ignore").splitlines()[0]
+    except (OSError, IndexError):
+        return ""
+    if not first.startswith("#!"):
+        return ""
+    named = first[2:].strip().split(" ")[0]
+    try:
+        return os.path.realpath(named)
+    except OSError:
+        return ""
+
+
+def _one_interpreter() -> list[Finding]:
+    """Whether the MCP server and this command run on the same Python.
+
+    macOS files a keychain access rule per item per binary. The interpreter
+    that stores a credential can read it back with no prompt, so a single
+    install never asks for anything. Two installs is a different matter: each
+    one is a separate binary to the keychain, so each asks for approval for
+    every item the other created, and neither ever inherits the other's. That
+    is not a bounded number of clicks, it is a permanent condition, and it is
+    invisible from either side.
+
+    Only reported on macOS. Linux Secret Service and Windows Credential Manager
+    have no per-item, per-binary rule, so a mismatch there costs nothing and
+    saying so would be noise.
+    """
+    if platform.system() != "Darwin":
+        return []
+
+    command = _mcp_command()
+    if not command:
+        return []
+
+    theirs = _interpreter_of(command)
+    ours = os.path.realpath(sys.executable)
+    if not theirs:
+        return []
+
+    if theirs == ours:
+        return [Finding(OK, "One interpreter",
+                        f"the MCP server and this command share "
+                        f"{Path(ours).name}")]
+
+    return [Finding(WARN, "One interpreter",
+                    "the MCP server and this command are different Pythons, "
+                    "so the keychain will keep asking for your password",
+                    fix=f"point them at one. Either register this one: "
+                        f"claude mcp remove munim && claude mcp add munim "
+                        f"{Path(sys.executable).parent / 'munim-mcp'}  "
+                        f"(or run the CLI from {Path(theirs).parent})")]
+
+
 def _keychain() -> Finding:
     """Whether there is anywhere to keep a credential.
 
@@ -296,7 +384,8 @@ def _room() -> Finding:
 def run(registry: Registry | None = None) -> int:
     registry = registry or Registry(Path.home() / ".munim" / "registry.json")
     findings = [_config(), _settings_file(), *_agents(), _mcp_registered(),
-                _room(), _keychain(), *_oauth_apps(), *_clients(registry)]
+                *_one_interpreter(), _room(), _keychain(), *_oauth_apps(),
+                *_clients(registry)]
 
     width = max(len(f.what) for f in findings) + 2
     for f in findings:
