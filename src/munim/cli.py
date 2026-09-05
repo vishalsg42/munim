@@ -44,8 +44,144 @@ def _client_id(provider: str) -> tuple[str, str]:
 
 PROVISIONAL = "…connecting"
 
+# What `munim` on its own prints. The parser used to take the module docstring,
+# which is about `connect` specifically, so the bare name answered "what is
+# this?" by describing one subcommand. That was harmless while the bare name was
+# an error and became wrong the moment it turned into the front door.
+DESCRIPTION = """One operator, many clients, one MCP server.
 
-def disconnect(client: str | None, provider: str | None, everything: bool) -> int:
+Munim holds a separate set of credentials per client, so a coding agent can read
+across every client you look after and write only inside one you have named.
+
+Start with `munim doctor`: it says what is set up, what is not, and the exact
+command to fix each gap."""
+
+
+def installed_version() -> str:
+    """What `munim --version` prints.
+
+    Read from the installed distribution rather than hardcoded, so it cannot
+    drift from pyproject.toml the way a second copy of a version string always
+    eventually does. A source checkout that was never installed has no
+    distribution to ask, and says so rather than inventing a number: "unknown"
+    is a true answer and 0.0.0 is not.
+    """
+    from importlib.metadata import PackageNotFoundError
+    from importlib.metadata import version as distribution_version
+
+    try:
+        return distribution_version("munim")
+    except PackageNotFoundError:
+        return "unknown (running from a source tree, not an install)"
+
+
+def find_orphans(known: set[str]) -> list[str]:
+    """Client ids the keychain holds that no client record claims.
+
+    Split out of the sweep so the same enumeration can be shown to somebody
+    before it is acted on. It used to enumerate and delete in one pass, which
+    meant `--all` removed credentials it had never named.
+
+    `keyring` cannot list what it holds, so this shells out to the macOS
+    keychain. Elsewhere it says so rather than pretending the sweep happened.
+    """
+    import platform
+    import subprocess
+
+    if platform.system() != "Darwin":
+        print("  (orphan sweep only works on macOS: keyring cannot list what "
+              "it holds, so there is nothing to enumerate elsewhere)",
+              file=sys.stderr)
+        return []
+
+    try:
+        dump = subprocess.run(["security", "dump-keychain"], capture_output=True,
+                              text=True, timeout=60).stdout
+    except Exception:
+        return []
+
+    found: set[str] = set()
+    account = None
+    for line in dump.splitlines():
+        if '"acct"' in line and '="' in line:
+            account = line.split('="', 1)[1].rstrip('"')
+        elif "munim" in line and account and account.startswith("c_"):
+            found.add(account)
+    return sorted(found - known)
+
+
+def planned_removals(records, providers, backend, everything: bool = False):
+    """Every keychain item `disconnect` will remove: what it is, and how to go.
+
+    One list, printed and then acted on. The confirmation used to be computed
+    separately from the deletion, by asking `connected.connections()`, which
+    answers a narrower question: it reports a provider only when there are
+    *tokens*. Five things fell through that gap, and the worst is Zoho, which
+    authenticates by URL and stores an endpoint and no tokens at all. A session
+    that looks empty by that test is the one credential here that no browser
+    login can rebuild, and it was being deleted without ever being named.
+
+    Two computations of "what will go" can disagree. One cannot.
+    """
+    from munim.remote.storage import KeychainTokenStorage
+
+    planned: list[tuple[str, object]] = []
+
+    def sweep(who: str, shown: str, note: str = "") -> None:
+        for name in providers:
+            if backend.get(who, name) is not None:
+                planned.append((
+                    f"{shown}: {name} key{note}",
+                    lambda w=who, n=name: bool(backend.forget(w, n))))
+            kinds = KeychainTokenStorage(who, name).holds()
+            if kinds:
+                planned.append((
+                    f"{shown}: {name} session ({', '.join(kinds)}){note}",
+                    lambda w=who, n=name: bool(KeychainTokenStorage(w, n).forget())))
+
+    for record in records:
+        sweep(record.id, record.name)
+        # Credentials filed under the label, from before the identity split.
+        # Deleted by this command since it was written, and never mentioned.
+        sweep(record.name, record.name, " (filed under the old label)")
+
+    if everything:
+        for orphan in find_orphans({r.id for r in records}):
+            sweep(orphan, f"orphan {orphan}")
+
+    return planned
+
+
+def confirm(planned, ask=None) -> bool:
+    """Show the plan and make somebody agree to it.
+
+    Every other destructive path here is scoped by something the operator
+    typed. `--all` is scoped by nothing, and it could empty the keychain from a
+    single flag with no way back except a browser login per client per provider.
+
+    `ask` is resolved at call time rather than bound as a default, so that a
+    test driving `cli.main([...])` can replace it. Holding `input` as a default
+    argument binds the builtin when the module loads and no later patch reaches
+    it, which made this unreachable from the only way the tests run the CLI.
+    """
+    ask = ask or input
+
+    print("This removes every credential listed here:", file=sys.stderr)
+    for what, _ in planned:
+        print(f"  {what}", file=sys.stderr)
+    print(f"{len(planned)} credential(s). Getting them back is a browser login "
+          f"for each one.", file=sys.stderr)
+    print("Type yes to continue: ", end="", file=sys.stderr, flush=True)
+    try:
+        return ask().strip().lower() == "yes"
+    except (EOFError, KeyboardInterrupt):
+        print(file=sys.stderr)
+        return False
+
+
+def disconnect(client: str | None, provider: str | None, everything: bool,
+               assume_yes: bool = False, dry_run: bool = False,
+               ask=None) -> int:
     """Remove stored credentials. Nothing else is touched.
 
     Clients, domains and run logs stay: this removes what can act on somebody's
@@ -70,20 +206,27 @@ def disconnect(client: str | None, provider: str | None, everything: bool) -> in
         {*all_servers(), *KEY_PROVIDERS})
 
     backend = KeychainBackend()
-    removed = []
-    for record in records:
-        for name in providers:
-            if backend.forget(record.id, name):
-                removed.append(f"{record.name}: {name} key")
-            gone = KeychainTokenStorage(record.id, name).forget()
-            if gone:
-                removed.append(f"{record.name}: {name} session")
-            # Credentials filed under the label, from before the identity split.
-            backend.forget(record.name, name)
-            KeychainTokenStorage(record.name, name).forget()
+    planned = planned_removals(records, providers, backend, everything=everything)
 
-    if everything:
-        removed += _sweep_orphans({r.id for r in records}, providers)
+    if dry_run:
+        for what, _ in planned:
+            print(f"  would remove {what}", file=sys.stderr)
+        print(f"{len(planned)} credential(s). Nothing was removed.",
+              file=sys.stderr)
+        return 0
+
+    if everything and planned and not assume_yes:
+        if not sys.stdin.isatty():
+            print("disconnect --all removes every credential for every client. "
+                  "There is no terminal to confirm on, so nothing was removed. "
+                  "Run it with --dry-run to see the list, or --yes if you meant "
+                  "it.", file=sys.stderr)
+            return 2
+        if not confirm(planned, ask):
+            print("Nothing was removed.", file=sys.stderr)
+            return 2
+
+    removed = [what for what, forget in planned if forget()]
 
     if not removed:
         print("Nothing was stored.", file=sys.stderr)
@@ -95,56 +238,6 @@ def disconnect(client: str | None, provider: str | None, everything: bool) -> in
           f"still here; reconnect with `munim connect <provider>`.",
           file=sys.stderr)
     return 0
-
-
-def _sweep_orphans(known: set[str], providers: list[str]) -> list[str]:
-    """Credentials filed under ids no client has any more.
-
-    These should not exist, and 36 of them did: a bug minted a fresh client id
-    on every read and the migration copied a real key under each one, so every
-    command left another copy of a live credential behind. The bug is fixed and
-    the copies are not, and a credential nothing can name is one nobody will
-    ever think to remove.
-
-    `keyring` has no way to list what it holds, so this shells out to the macOS
-    keychain. Elsewhere it says so rather than pretending the sweep happened.
-    """
-    import platform
-    import subprocess
-
-    from munim.container import KEY_PROVIDERS, KeychainBackend
-    from munim.remote.storage import KeychainTokenStorage
-
-    if platform.system() != "Darwin":
-        print("  (orphan sweep only works on macOS: keyring cannot list what "
-              "it holds, so there is nothing to enumerate elsewhere)",
-              file=sys.stderr)
-        return []
-
-    try:
-        dump = subprocess.run(["security", "dump-keychain"], capture_output=True,
-                              text=True, timeout=60).stdout
-    except Exception:
-        return []
-
-    found: set[str] = set()
-    account = None
-    for line in dump.splitlines():
-        if '"acct"' in line and '="' in line:
-            account = line.split('="', 1)[1].rstrip('"')
-        elif "munim" in line and account and account.startswith("c_"):
-            found.add(account)
-
-    orphans = found - known
-    backend = KeychainBackend()
-    removed = []
-    for orphan in sorted(orphans):
-        for provider in providers:
-            if backend.forget(orphan, provider):
-                removed.append(f"orphan {orphan}: {provider} key")
-            if KeychainTokenStorage(orphan, provider).forget():
-                removed.append(f"orphan {orphan}: {provider} session")
-    return removed
 
 
 def add_server(name: str, url: str) -> int:
@@ -879,8 +972,16 @@ def connect(client: str, provider: str) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="munim", description=__doc__)
-    sub = parser.add_subparsers(dest="command", required=True)
+    parser = argparse.ArgumentParser(
+        prog="munim", description=DESCRIPTION,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    # -V as well as --version, because both are what people try first.
+    parser.add_argument("--version", "-V", action="version",
+                        version=f"munim {installed_version()}")
+    # Not required. Running the bare name to find out what a tool does is the
+    # first thing anyone does with it, and answering that with an error and
+    # exit 2 treats a reasonable question as a mistake. Help, and exit 0.
+    sub = parser.add_subparsers(dest="command")
 
     c = sub.add_parser("connect", help="log in to a provider as one client")
     c.add_argument("client", nargs="?",
@@ -921,6 +1022,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="the client, plus a second name for rename and merge")
     ls.add_argument("--domain", help="their site, for `add`")
     ls.add_argument("--verbose", action="store_true")
+    ls.add_argument("--json", action="store_true", dest="as_json",
+                    help="machine-readable, for scripts")
 
     # 0.1.0 shipped these spellings. Breaking a published surface to tidy it is
     # a bad trade when an alias costs a line, so they still work and only the
@@ -929,7 +1032,11 @@ def main(argv: list[str] | None = None) -> int:
     d.add_argument("client", nargs="?")
     d.add_argument("provider", nargs="?")
     d.add_argument("--all", action="store_true", dest="everything",
-                   help="every client and every provider")
+                   help="every client and every provider. Asks first")
+    d.add_argument("--yes", "-y", action="store_true", dest="assume_yes",
+                   help="skip the confirmation, for scripts")
+    d.add_argument("--dry-run", "-n", action="store_true", dest="dry_run",
+                   help="print exactly what would be removed, and stop")
 
     sv = sub.add_parser("servers", help="what a client can be connected to")
     sv.add_argument("action", nargs="?", choices=["add"],
@@ -973,6 +1080,10 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
 
+    if args.command is None:
+        parser.print_help()
+        return 0
+
     # Credentials used to be filed under the client's name. Move anything still
     # there before anything tries to read it, or a client connected yesterday
     # looks disconnected today. Idempotent and cheap: it checks the id first.
@@ -996,7 +1107,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "disconnect":
         if not args.everything and not args.client:
             parser.error("name a client, or pass --all")
-        return disconnect(args.client, args.provider, args.everything)
+        return disconnect(args.client, args.provider, args.everything,
+                          args.assume_yes, args.dry_run)
 
     if args.command == "servers":
         if args.action == "add":
@@ -1026,6 +1138,11 @@ def main(argv: list[str] | None = None) -> int:
         return doctor_run(_registry())
 
     if args.command == "clients":
+        # Accepted-and-ignored is worse than refused. `--json` only shapes the
+        # listing, and `--verbose` is read by nothing at all.
+        if args.as_json and args.action is not None:
+            parser.error(f"--json applies to the listing, not to "
+                         f"`clients {args.action}`")
         if args.action == "add":
             if len(args.names) != 1:
                 parser.error('clients add takes one name: '
@@ -1044,9 +1161,26 @@ def main(argv: list[str] | None = None) -> int:
                 parser.error("clients merge takes a source and a target")
             return merge(*args.names)
 
-        from munim.connected import describe
+        from munim.connected import connections, describe
         backend = KeychainBackend()
-        for record in _registry().clients():
+        records = _registry().clients()
+
+        if args.as_json:
+            # Data on stdout, one object, so `munim clients --json | jq` works.
+            # The table is for reading and is not a format anything should have
+            # to parse.
+            import json as json_module
+
+            out = []
+            for record in records:
+                keys, sessions = connections(record.id, backend)
+                out.append({"id": record.id, "name": record.name,
+                            "domain": record.domain or None,
+                            "api_keys": keys, "mcp_sessions": sessions})
+            print(json_module.dumps(out, indent=2))
+            return 0
+
+        for record in records:
             print(f"{record.name:32} {record.domain or '-':32} "
                   f"{describe(record.id, backend)}")
         return 0

@@ -32,7 +32,9 @@ munim connect "Ivy & Fern" cloudflare        # attach to one you named
 munim connect "Ivy & Fern" zoho --url https://…   # Zoho: the URL is the credential
 munim connect "Ivy & Fern" stitch --token    # Stitch: an API key in a header
 munim disconnect "Ivy & Fern" cloudflare
-munim disconnect --all                       # drop every credential
+munim disconnect --all                       # every client, every provider. Lists them and asks first
+munim disconnect --all --dry-run             # what it would remove, removing nothing
+munim disconnect --all --yes                 # skip the question, for scripts
 ```
 
 **Everything else**
@@ -152,3 +154,25 @@ of it that is both silent and narrow.
 **Linux and Windows do not have this.** Secret Service and Windows Credential
 Manager have no per-item, per-binary rule, so none of the above applies and
 `doctor` stays quiet about it there.
+
+
+## Conventions
+
+```bash
+munim                    # what this is, and where to start
+munim --version          # or -V
+munim clients --json     # the listing, machine-readable, on stdout
+```
+
+**Exit codes.** `0` succeeded, including a dry run and a refusal you asked for.
+`2` for anything else: a usage error, an unknown client, a confirmation you
+declined, or a destructive command refusing because there was no terminal to
+confirm on. Data goes to stdout, everything else to stderr, so
+`munim clients --json | jq` works and nothing else has to be filtered out.
+
+**Destructive commands list what they will do before doing it.**
+`munim disconnect --all` prints every credential it is about to remove, then
+asks. `--dry-run` prints that same list and stops, which is the only way to see
+it from a script, since without a terminal the command refuses rather than
+guessing. The list it prints and the list it acts on are one list, so they
+cannot disagree.
