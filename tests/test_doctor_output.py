@@ -120,3 +120,58 @@ def test_the_gmail_advice_is_doable_from_an_installed_package():
     assert not gmail[0].fix.startswith("uv run"), \
         "the first thing offered must work without a source checkout"
     assert "console.cloud.google.com" in gmail[0].fix
+
+
+# ---- speed ---------------------------------------------------------------
+
+def test_the_coding_agent_listing_is_fetched_once(monkeypatch):
+    """It was fetched twice, by two checks that each shelled out separately.
+    `claude mcp list` takes about fifteen seconds to start, so the whole command
+    took thirty-three seconds to run one subprocess twice, while every other
+    check in the report totals thirty milliseconds."""
+    calls = []
+
+    class Result:
+        stdout = "munim: /x/munim-mcp  - ✔ Connected\n"
+
+    monkeypatch.setattr(doctor, "_LISTING", None)
+    monkeypatch.setattr(doctor.shutil, "which", lambda name: "/usr/bin/claude")
+    monkeypatch.setattr(doctor.subprocess, "run",
+                        lambda *a, **k: calls.append(a) or Result())
+
+    doctor._mcp_registered()
+    doctor._mcp_command()
+    doctor._mcp_registered()
+
+    assert len(calls) == 1, f"ran `claude mcp list` {len(calls)} times"
+
+
+def test_the_report_says_how_long_it_took(healthy, tmp_path, capsys):
+    """Sixteen seconds of silence looks hung rather than busy, and naming the
+    slow check stops somebody optimising the wrong thing, which is how it came
+    to run twice."""
+    _run(tmp_path)
+    out = capsys.readouterr().out
+    assert "s)" in out.splitlines()[-1], out.splitlines()[-1]
+
+
+def test_no_progress_line_when_the_output_is_piped(healthy, tmp_path, monkeypatch, capsys):
+    """A line redrawn with a carriage return is noise in a pipe or a log, where
+    the return is not honoured and the half-erased text survives."""
+    monkeypatch.setattr(doctor.shutil, "which", lambda name: "/usr/bin/claude")
+    _run(tmp_path)
+    captured = capsys.readouterr()
+    assert "asking your coding agent" not in captured.err
+    assert "asking your coding agent" not in captured.out
+
+
+def test_the_registration_fix_makes_munim_available_everywhere(monkeypatch):
+    """Registering per project means the next directory reports munim missing,
+    which is exactly what somebody hits the first time they use it outside the
+    repo they installed it from."""
+    monkeypatch.setattr(doctor, "_LISTING", ["no munim here\n"])
+    monkeypatch.setattr(doctor.shutil, "which", lambda name: "/usr/bin/claude")
+
+    finding = doctor._mcp_registered()
+    assert finding.status == doctor.BAD
+    assert "--scope user" in finding.fix

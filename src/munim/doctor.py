@@ -10,6 +10,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -150,27 +151,56 @@ def _agents() -> list[Finding]:
     return out
 
 
+_LISTING: list[str] | None = None
+
+
+def _mcp_listing() -> str:
+    """`claude mcp list`, run at most once.
+
+    Two checks need it and each was shelling out separately, which cost about
+    fifteen seconds apiece: the whole of `munim doctor` was thirty-three seconds
+    to run one subprocess twice. Everything else in the report totals thirty
+    milliseconds.
+    """
+    global _LISTING
+    if _LISTING is not None:
+        return _LISTING[0]
+
+    executable = shutil.which("claude")
+    if not executable:
+        _LISTING = [""]
+        return ""
+    try:
+        out = subprocess.run([executable, "mcp", "list"], capture_output=True,
+                             text=True, timeout=30).stdout
+    except Exception:
+        out = ""
+    _LISTING = [out]
+    return out
+
+
 def _mcp_registered() -> Finding:
     # shutil.which resolves the real thing, which on Windows is claude.cmd and
     # would not have been found by passing the bare name to subprocess.
-    executable = shutil.which("claude")
-    if not executable:
+    if not shutil.which("claude"):
         return Finding(WARN, "Coding agent", "claude CLI not found",
                        fix="add munim-mcp to your agent's MCP config by hand")
-    try:
-        out = subprocess.run([executable, "mcp", "list"], capture_output=True,
-                             text=True, timeout=20).stdout
-    except Exception:
-        return Finding(WARN, "Coding agent", "could not list MCP servers")
+    out = _mcp_listing()
     for line in out.splitlines():
         if line.strip().startswith("munim"):
             if "✔" in line or "Connected" in line:
                 return Finding(OK, "Coding agent", "munim connected")
             return Finding(BAD, "Coding agent", line.strip()[:60],
-                           fix="claude mcp remove munim && claude mcp add munim -- "
+                           fix="claude mcp remove munim && claude mcp add "
+                               "--scope user munim -- "
                                f"{Path(sys.executable).parent / 'munim-mcp'}")
+    # --scope user, not the default. Registering per project means the next
+    # directory you work in reports munim as missing, which is exactly what
+    # somebody hits the first time they use it outside this repo.
     return Finding(BAD, "Coding agent", "munim not registered",
-                   fix=f"claude mcp add munim -- {Path(sys.executable).parent / 'munim-mcp'}")
+                   fix=f"claude mcp add --scope user munim -- "
+                       f"{Path(sys.executable).parent / 'munim-mcp'}"
+                       f"   (--scope user makes it available in every project)")
 
 
 def _mcp_command() -> str:
@@ -179,15 +209,7 @@ def _mcp_command() -> str:
     Read from `claude mcp list` rather than from the config file, because the
     file layout is the agent's business and the listing is the interface.
     """
-    executable = shutil.which("claude")
-    if not executable:
-        return ""
-    try:
-        out = subprocess.run([executable, "mcp", "list"], capture_output=True,
-                             text=True, timeout=20).stdout
-    except Exception:
-        return ""
-    for line in out.splitlines():
+    for line in _mcp_listing().splitlines():
         stripped = line.strip()
         if not stripped.startswith("munim"):
             continue
@@ -404,15 +426,44 @@ def run(registry: Registry | None = None, verbose: bool = False) -> int:
     from munim import settings
     from munim.cli import installed_version
 
-    health = [_config(), _settings_file(), *_agents(), _mcp_registered(),
-              *_one_interpreter(), _room(), _keychain()]
-    inventory = [*_oauth_apps(), *_clients(registry)] if verbose else []
+    # Timed, because one of these dominates and it is not ours. `claude mcp
+    # list` takes about fifteen seconds to start, which is most of the runtime
+    # of this command, and a report that sits silent for that long looks hung
+    # rather than busy. Saying which check is slow also stops somebody
+    # optimising the wrong thing, which is how it came to run twice.
+    timings: list[tuple[str, float]] = []
 
-    state = settings.ai()
+    def timed(label, fn):
+        started = time.perf_counter()
+        try:
+            return fn()
+        finally:
+            timings.append((label, time.perf_counter() - started))
+
     print(f"munim {installed_version()}, python "
           f"{sys.version_info.major}.{sys.version_info.minor}, agents "
-          f"{'on' if state.enabled else 'off'}"
-          f"{'' if state.enabled else ' (local)'}")
+          f"{'on' if settings.ai().enabled else 'off'}"
+          f"{'' if settings.ai().enabled else ' (local)'}", flush=True)
+
+    # Only on a terminal. A progress line redrawn with \r is noise in a pipe or
+    # a log, where the carriage return is not honoured and the half-erased text
+    # survives into whatever reads it.
+    slow = shutil.which("claude") is not None and sys.stderr.isatty()
+    if slow:
+        print("  asking your coding agent which MCP servers are registered…",
+              end="\r", file=sys.stderr, flush=True)
+
+    health = [timed("config", _config), timed("settings", _settings_file),
+              *timed("agents", _agents), timed("coding agent", _mcp_registered),
+              *timed("interpreter", _one_interpreter), timed("control room", _room),
+              timed("keychain", _keychain)]
+    inventory = ([*timed("providers", _oauth_apps),
+                  *timed("clients", lambda: _clients(registry))]
+                 if verbose else [])
+
+    if slow:
+        print(" " * 60, end="\r", file=sys.stderr, flush=True)
+
     print()
 
     shown = [f for f in health if f.status != OK or verbose] + inventory
@@ -427,14 +478,20 @@ def run(registry: Registry | None = None, verbose: bool = False) -> int:
     bad = sum(1 for f in health if f.status == BAD)
     warn = sum(1 for f in health if f.status == WARN)
 
+    total = sum(seconds for _, seconds in timings)
+    slowest, took = max(timings, key=lambda pair: pair[1])
+    took_note = (f" ({total:.0f}s, most of it the {slowest} check)"
+                 if total >= 3 and took > total / 2 else f" ({total:.1f}s)")
+
     if bad:
         print(f"{bad} problem{'s' if bad > 1 else ''} to fix"
               + (f", and {warn} thing{'s' if warn > 1 else ''} worth a look"
-                 if warn else "") + ".")
+                 if warn else "") + f".{took_note}")
         return 1
     if warn:
-        print(f"Working. {warn} thing{'s' if warn > 1 else ''} worth a look.")
+        print(f"Working. {warn} thing{'s' if warn > 1 else ''} worth a "
+              f"look.{took_note}")
         return 0
     print("No problems found." + ("" if verbose else
-          "  Run with --verbose to see what is connected."))
+          "  Run with --verbose to see what is connected.") + took_note)
     return 0
