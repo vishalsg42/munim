@@ -8,8 +8,10 @@ command or URL that fixes it, rather than a stack trace.
 import os
 import platform
 import shutil
-import subprocess
+import json
+import re
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -50,10 +52,12 @@ def _config() -> Finding:
         shown = f"~/{used.relative_to(home)}" if used.is_relative_to(home) else str(used)
         return Finding(OK, "Config", shown)
 
-    looked = ", ".join(str(p) for p, exists in sources()[:2] if not exists)
-    return Finding(WARN, "Config", "no .env found",
-                   fix=f"create {CONFIG_HOME}, or a .env in the directory you "
-                       f"run from. Looked in {looked} and further up")
+    # Not a problem. A fresh install has no .env and does not need one: agents
+    # are off, and nothing else reads it until you configure a provider that
+    # does. Reporting the normal state of a working install as a warning is how
+    # people learn to ignore the whole report.
+    return Finding(OK, "Config", f"none yet, and nothing needs one "
+                                 f"(would read {CONFIG_HOME})")
 
 
 def _settings_file() -> Finding:
@@ -148,50 +152,112 @@ def _agents() -> list[Finding]:
     return out
 
 
-def _mcp_registered() -> Finding:
-    # shutil.which resolves the real thing, which on Windows is claude.cmd and
-    # would not have been found by passing the bare name to subprocess.
-    executable = shutil.which("claude")
-    if not executable:
-        return Finding(WARN, "Coding agent", "claude CLI not found",
-                       fix="add munim-mcp to your agent's MCP config by hand")
+# Every MCP client's own config, because munim is an MCP server and MCP is not
+# one vendor's protocol. `docs/ARCHITECTURE.md` has always drawn the client as
+# "Claude Code, Codex, Cursor", while this check shelled out to `claude` alone
+# and called it a problem to fix when munim was not registered there. For an
+# operator driving munim from Codex that verdict is meaningless, and it cost
+# eighteen of the command's eighteen and a half seconds to be wrong.
+#
+# Reading the files is also what makes `doctor` instant. `claude mcp list` takes
+# about fifteen seconds to start; every check here now totals milliseconds.
+MCP_CLIENTS = (
+    ("Claude Code", "~/.claude.json"),
+    ("Claude Desktop",
+     "~/Library/Application Support/Claude/claude_desktop_config.json"),
+    ("Codex", "~/.codex/config.toml"),
+    ("Cursor", "~/.cursor/mcp.json"),
+    ("Antigravity", "~/.gemini/antigravity/mcp_config.json"),
+    ("Gemini CLI", "~/.gemini/config/mcp_config.json"),
+    ("Windsurf", "~/.codeium/windsurf/mcp_config.json"),
+)
+
+
+def _servers_in(path: Path) -> dict:
+    """The MCP servers one client has configured, as {name: command}.
+
+    Two shapes. JSON clients keep an `mcpServers` object, and Claude Code also
+    nests one per project under `projects`, which is how a server can be
+    registered in one directory and missing in the next. Codex uses TOML with a
+    `[mcp_servers.name]` table per server.
+
+    The TOML is scanned rather than parsed: `tomllib` is 3.11 and this package
+    supports 3.10, and all that is wanted here is the names and commands.
+    """
     try:
-        out = subprocess.run([executable, "mcp", "list"], capture_output=True,
-                             text=True, timeout=20).stdout
-    except Exception:
-        return Finding(WARN, "Coding agent", "could not list MCP servers")
-    for line in out.splitlines():
-        if line.strip().startswith("munim"):
-            if "✔" in line or "Connected" in line:
-                return Finding(OK, "Coding agent", "munim connected")
-            return Finding(BAD, "Coding agent", line.strip()[:60],
-                           fix="claude mcp remove munim && claude mcp add munim -- "
-                               f"{Path(sys.executable).parent / 'munim-mcp'}")
-    return Finding(BAD, "Coding agent", "munim not registered",
-                   fix=f"claude mcp add munim -- {Path(sys.executable).parent / 'munim-mcp'}")
+        text = path.read_text(errors="ignore")
+    except OSError:
+        return {}
+
+    if path.suffix == ".toml":
+        found = {}
+        for name in re.findall(r"\[mcp_servers\.([A-Za-z0-9_.-]+)\]", text):
+            block = text.split(f"[mcp_servers.{name}]", 1)[1].split("\n[", 1)[0]
+            command = re.search(r'command\s*=\s*"([^"]*)"', block)
+            found[name] = command.group(1) if command else ""
+        return found
+
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+
+    found = {}
+    for holder in [data, *(data.get("projects") or {}).values()]:
+        if not isinstance(holder, dict):
+            continue
+        for name, entry in (holder.get("mcpServers") or {}).items():
+            command = entry.get("command", "") if isinstance(entry, dict) else ""
+            found.setdefault(name, command)
+    return found
+
+
+def _registrations() -> list[tuple[str, dict]]:
+    """(client name, its servers) for every MCP client present on this machine."""
+    out = []
+    for name, raw in MCP_CLIENTS:
+        path = Path(raw).expanduser()
+        if path.is_file():
+            out.append((name, _servers_in(path)))
+    return out
+
+
+def _mcp_registered() -> Finding:
+    """Whether any coding agent on this machine knows about munim.
+
+    A note rather than a verdict when it does not. munim cannot see every MCP
+    client that exists, so "not registered in the ones I know about" is not the
+    same as broken, and reporting it as a problem was wrong for anybody using an
+    agent this list does not name.
+    """
+    found = _registrations()
+    if not found:
+        return Finding(OK, "Coding agent", "no MCP client config found here")
+
+    holding = [client for client, servers in found if "munim" in servers]
+    if holding:
+        return Finding(OK, "Coding agent", f"registered in {', '.join(holding)}")
+
+    seen = ", ".join(client for client, _ in found)
+    return Finding(WARN, "Coding agent", f"not registered in {seen}",
+                   fix=f"point your agent at "
+                       f"{Path(sys.executable).parent / 'munim-mcp'}. For Claude "
+                       f"Code: claude mcp add --scope user munim -- that path "
+                       f"(--scope user makes it available in every project)")
 
 
 def _mcp_command() -> str:
-    """The path the coding agent is configured to spawn, or "".
+    """The command a coding agent is configured to spawn for munim, or "".
 
-    Read from `claude mcp list` rather than from the config file, because the
-    file layout is the agent's business and the listing is the interface.
+    Read from the config rather than from `claude mcp list`, which only knew
+    about one client and took fifteen seconds to say so.
     """
-    executable = shutil.which("claude")
-    if not executable:
-        return ""
-    try:
-        out = subprocess.run([executable, "mcp", "list"], capture_output=True,
-                             text=True, timeout=20).stdout
-    except Exception:
-        return ""
-    for line in out.splitlines():
-        stripped = line.strip()
-        if not stripped.startswith("munim"):
-            continue
-        _, _, rest = stripped.partition(":")
-        # `munim: /path/to/munim-mcp  - ✔ Connected`
-        return rest.split(" - ")[0].strip()
+    for _, servers in _registrations():
+        command = servers.get("munim", "")
+        if command:
+            return command
     return ""
 
 
@@ -346,12 +412,15 @@ def _oauth_apps() -> list[Finding]:
             out.append(Finding(
                 WARN, f"Login: {provider}",
                 "needs an application registered by hand",
-                fix=f"uv run python scripts/setup_google_oauth.py --provider "
-                    f"{provider}  (it uses a project you already have and "
-                    f"never creates one). By hand: {server.register_at}, "
-                    f"Desktop app, redirect {REDIRECT_URI}, then "
-                    f"`munim config set {provider} --client-id ...`, which "
-                    f"prompts for the secret and stores both in your keychain"))
+                # Led with `uv run python scripts/setup_google_oauth.py`, which
+                # only exists in a source checkout: pyproject ships src/munim
+                # and nothing else. The advice was undoable by exactly the
+                # person reading it, somebody who installed the package.
+                fix=f"{server.register_at}, Desktop app, redirect "
+                    f"{REDIRECT_URI}, then `munim config app set {provider} "
+                    f"--client-id ...`, which prompts for the secret and stores "
+                    f"both in your keychain. From a source checkout, "
+                    f"scripts/setup_google_oauth.py does the first half"))
         else:
             out.append(Finding(
                 WARN, f"Login: {provider}", "no application, and no MCP server",
@@ -381,26 +450,90 @@ def _room() -> Finding:
                    fix="reinstall munim; the control room ships with it")
 
 
-def run(registry: Registry | None = None) -> int:
+def run(registry: Registry | None = None, verbose: bool = False) -> int:
+    """What is wrong with this installation, and nothing else.
+
+    This used to print thirteen lines on a healthy machine: every provider's
+    login route, every client, the keychain backend, the control room. All true,
+    none of it a problem, each with a fix beside it, closing on "1 thing(s) need
+    fixing before this works" when the thing worked fine.
+
+    `audit_all_clients` has been documented from the start as silent when
+    everything passes and a list when it does not. `doctor` now behaves the same
+    way. What is connected is inventory rather than health, `munim clients`
+    already answers it, and it is behind --verbose here.
+    """
     registry = registry or Registry(Path.home() / ".munim" / "registry.json")
-    findings = [_config(), _settings_file(), *_agents(), _mcp_registered(),
-                *_one_interpreter(), _room(), _keychain(), *_oauth_apps(),
-                *_clients(registry)]
 
-    width = max(len(f.what) for f in findings) + 2
-    for f in findings:
-        print(f"{MARK[f.status]} {f.what.ljust(width)}{f.detail}")
-        if f.fix:
-            print(f"{' ' * (width + 2)}→ {f.fix}")
+    from munim import settings
+    from munim.cli import installed_version
 
-    bad = sum(1 for f in findings if f.status == BAD)
-    warn = sum(1 for f in findings if f.status == WARN)
+    # Timed, because one of these dominates and it is not ours. `claude mcp
+    # list` takes about fifteen seconds to start, which is most of the runtime
+    # of this command, and a report that sits silent for that long looks hung
+    # rather than busy. Saying which check is slow also stops somebody
+    # optimising the wrong thing, which is how it came to run twice.
+    timings: list[tuple[str, float]] = []
+
+    def timed(label, fn):
+        started = time.perf_counter()
+        try:
+            return fn()
+        finally:
+            timings.append((label, time.perf_counter() - started))
+
+    print(f"munim {installed_version()}, python "
+          f"{sys.version_info.major}.{sys.version_info.minor}, agents "
+          f"{'on' if settings.ai().enabled else 'off'}"
+          f"{'' if settings.ai().enabled else ' (local)'}", flush=True)
+
+    # Only on a terminal. A progress line redrawn with \r is noise in a pipe or
+    # a log, where the carriage return is not honoured and the half-erased text
+    # survives into whatever reads it.
+    health = [timed("config", _config), timed("settings", _settings_file),
+              *timed("agents", _agents)]
+
+    health.append(timed("coding agent", _mcp_registered))
+    health += timed("interpreter", _one_interpreter)
+    health += [timed("control room", _room), timed("keychain", _keychain)]
+    inventory = ([*timed("providers", _oauth_apps),
+                  *timed("clients", lambda: _clients(registry))]
+                 if verbose else [])
+
     print()
+
+    shown = [f for f in health if f.status != OK or verbose] + inventory
+    if shown:
+        width = max(len(f.what) for f in shown) + 2
+        for f in shown:
+            print(f"{MARK[f.status]} {f.what.ljust(width)}{f.detail}")
+            if f.fix:
+                print(f"{' ' * (width + 2)}→ {f.fix}")
+        print()
+
+    # Counted over what was printed, not over the health checks alone. With
+    # --verbose the inventory findings are shown and were not counted, so the
+    # report displayed two `!` lines and then closed with "No problems found".
+    # A summary that describes a different set of findings than the one on
+    # screen is worse than no summary.
+    counted = health + inventory
+    bad = sum(1 for f in counted if f.status == BAD)
+    warn = sum(1 for f in counted if f.status == WARN)
+
+    total = sum(seconds for _, seconds in timings)
+    slowest, took = max(timings, key=lambda pair: pair[1])
+    took_note = (f" ({total:.0f}s, most of it the {slowest} check)"
+                 if total >= 3 and took > total / 2 else f" ({total:.1f}s)")
+
     if bad:
-        print(f"{bad} thing(s) need fixing before this works.")
+        print(f"{bad} problem{'s' if bad > 1 else ''} to fix"
+              + (f", and {warn} thing{'s' if warn > 1 else ''} worth a look"
+                 if warn else "") + f".{took_note}")
         return 1
     if warn:
-        print(f"Working. {warn} thing(s) would make it better.")
+        print(f"Working. {warn} thing{'s' if warn > 1 else ''} worth a "
+              f"look.{took_note}")
         return 0
-    print("Everything is set up.")
+    print("No problems found." + ("" if verbose else
+          "  Run with --verbose to see what is connected.") + took_note)
     return 0

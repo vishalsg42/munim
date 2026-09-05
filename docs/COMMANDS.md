@@ -1,6 +1,6 @@
 # Commands
 
-The whole CLI. `munim doctor` says what is missing at any point, and the
+The whole CLI. `munim doctor` says what is wrong at any point, and the
 exact command to fix each gap.
 
 Two nouns, and every command reads as one of them. `connect` stays a verb
@@ -40,7 +40,8 @@ munim disconnect --all --yes                 # skip the question, for scripts
 **Everything else**
 
 ```bash
-munim doctor                                 # what is missing, and the fix for each
+munim doctor                                 # what is wrong, and nothing else
+munim doctor --verbose                       # also what is connected
 munim config                                 # everything: applications and agents
 munim config app set gmail --client-id ...   # the secret is prompted, never an argument
 munim config app list                        # what is set, and where it came from
