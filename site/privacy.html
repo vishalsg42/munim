@@ -96,7 +96,9 @@ used for advertising and not used to train any model by Munim. Munim's authors h
 <p>Everything lives on your computer for as long as you leave it there.</p>
 <ul>
 <li><code>munim disconnect "&lt;client&gt;" &lt;service&gt;</code> removes one stored credential.</li>
-<li><code>munim disconnect --all</code> removes every client's stored credentials.</li>
+<li><code>munim disconnect --all</code> removes every client's stored credentials.
+It lists them and asks first; add <code>--yes</code> in a script, or
+<code>--dry-run</code> to see the list without removing anything.</li>
 <li><code>munim config ai unset &lt;host&gt;</code> removes a stored model API key, and
 <code>munim config app unset &lt;provider&gt;</code> removes a stored OAuth application
 credential. These belong to the installation rather than to a client, so

@@ -851,3 +851,45 @@ if turning it on crashes, so the extras are declared, every branch catches
 `ImportError`, `doctor` checks the backend imports, and `auto` skips a host it
 cannot build instead of picking Bedrock and failing at the first call.
 
+## D28: One keychain item per session was tried, and reverted
+
+**Decided 2026-09-05.**
+
+macOS files a keychain access rule per item per binary, and a session was stored
+as four items: tokens, registration, endpoint and account. Fifteen clients
+across three providers is a hundred and eighty items, so consolidating each
+session into one looked like a four-fold reduction in approval prompts.
+
+It was built, and it was wrong on three counts, each verified by running it.
+
+`move_to()` wrote the destination blob wholesale, so moving a provisional
+session onto a client erased that client's remembered account. That value is the
+only input to the wrong-account guard, so the "this account is already
+connected, refresh it" path silently disarmed the mechanism protecting D5. The
+migration also deleted old items whose contents it had failed to parse, which
+destroys a credential rather than leaving it for a person to look at. And it
+made the common path more expensive rather than less: answering "who is
+connected?" for a fifteen client estate took 825 keychain reads against 165
+before, because every empty session paid four extra misses on every command.
+
+The premise had also never been measured, which is not this project's standard.
+Approvals are durable and per item, so the real cost may be a dozen clicks
+spread over months. What actually makes prompts recur is the binary changing,
+and the operator who reported this was running two installs on two different
+Pythons. That is now a `doctor` check (D27's neighbour in `_one_interpreter`),
+and it addressed the reported symptom without touching storage at all.
+
+**A single keychain item holding one encryption key, with credentials in an
+encrypted file, was considered and rejected.** It is neutral against a stolen
+laptop and an unencrypted backup, since the key lives in the same login keychain
+that already protects everything. Against a hostile script running under an
+interpreter the operator has already approved it is worse: today an unfamiliar
+client is a new item with no rule, so a client connected next month is still a
+fresh decision, and one approved key removes every future decision point
+including for clients that do not exist yet. For a tool whose subject is
+credential isolation, that trades a usability annoyance for a durable grant.
+
+What survived from the exercise is the read-only `KeychainTokenStorage.holds()`,
+which is what lets `disconnect` name every item it will remove before removing
+it.
+

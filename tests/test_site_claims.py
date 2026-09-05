@@ -87,8 +87,12 @@ def test_the_deletion_instructions_name_real_commands():
     import sys
     policy = (SITE / "privacy.html").read_text()
     named = set(re.findall(r"munim (disconnect|connect|clients|doctor|config)", policy))
-    help_text = subprocess.run(["munim", "--help"], capture_output=True,
-                               text=True).stdout
+    # `sys.executable -m munim.cli`, not the bare name. Shelling out to
+    # `munim` runs whatever is on PATH, which is the globally installed build,
+    # so this test could pass while the branch under test had renamed or
+    # removed the command the policy names. It was checking someone else's code.
+    help_text = subprocess.run([sys.executable, "-m", "munim.cli", "--help"],
+                               capture_output=True, text=True).stdout
     for command in named:
         assert command in help_text, f"policy names `munim {command}`, which does not exist"
 
