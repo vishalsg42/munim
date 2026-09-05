@@ -511,8 +511,14 @@ def run(registry: Registry | None = None, verbose: bool = False) -> int:
                 print(f"{' ' * (width + 2)}→ {f.fix}")
         print()
 
-    bad = sum(1 for f in health if f.status == BAD)
-    warn = sum(1 for f in health if f.status == WARN)
+    # Counted over what was printed, not over the health checks alone. With
+    # --verbose the inventory findings are shown and were not counted, so the
+    # report displayed two `!` lines and then closed with "No problems found".
+    # A summary that describes a different set of findings than the one on
+    # screen is worse than no summary.
+    counted = health + inventory
+    bad = sum(1 for f in counted if f.status == BAD)
+    warn = sum(1 for f in counted if f.status == WARN)
 
     total = sum(seconds for _, seconds in timings)
     slowest, took = max(timings, key=lambda pair: pair[1])

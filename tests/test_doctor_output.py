@@ -133,3 +133,33 @@ def test_the_report_says_how_long_it_took(healthy, tmp_path, capsys):
     _run(tmp_path)
     out = capsys.readouterr().out
     assert "s)" in out.splitlines()[-1], out.splitlines()[-1]
+
+
+def test_the_summary_counts_what_it_printed(healthy, tmp_path, monkeypatch, capsys):
+    """`--verbose` showed two `!` lines and closed with "No problems found",
+    because the count ran over the health checks and the inventory was displayed
+    without being counted. A summary describing a different set of findings than
+    the one on screen is worse than no summary."""
+    monkeypatch.setattr(doctor, "_oauth_apps", lambda: [
+        doctor.Finding(doctor.WARN, "Login: gmail", "needs an application", fix="...")])
+    monkeypatch.setattr(doctor, "_clients", lambda r: [
+        doctor.Finding(doctor.WARN, "Clients", "none registered yet", fix="...")])
+
+    _run(tmp_path, verbose=True)
+    out = capsys.readouterr().out
+    assert out.count("\n! ") == 2, out
+    assert "No problems found" not in out
+    assert "2 things worth a look" in out
+
+
+def test_the_default_report_does_not_count_what_it_did_not_look_at(healthy, tmp_path, monkeypatch, capsys):
+    """Without --verbose the inventory is never evaluated, so a clean bill of
+    health is about health and says where the rest is."""
+    monkeypatch.setattr(doctor, "_oauth_apps", lambda: [
+        doctor.Finding(doctor.WARN, "Login: gmail", "needs an application", fix="...")])
+
+    _run(tmp_path)
+    out = capsys.readouterr().out
+    assert "No problems found" in out
+    assert "--verbose" in out
+    assert "Login: gmail" not in out
