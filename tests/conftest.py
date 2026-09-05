@@ -106,11 +106,19 @@ def _never_read_the_real_dotenv(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _no_test_may_touch_the_real_keychain(monkeypatch):
-    """`munim.container.keyring` was the one door left open.
+    """No test may read or write the operator's real login keychain.
 
-    `munim.remote.storage.keyring` gets swapped by the tests that care, and that
-    covered sessions. Nothing swapped the module the API-key backend uses, so
-    any test reaching `disconnect(everything=True)` ran `_sweep_orphans`, which
+    Both doors, because there are two. `munim.container.keyring` is the API-key
+    backend and was never swapped by anything. `munim.remote.storage.keyring` is
+    the session store, and although the tests that care about sessions swap it
+    themselves, more than twenty test files do not, so anything calling
+    `connected.connections()` or building a `KeychainTokenStorage` read the real
+    keychain. On macOS each of those reads is a password dialog when the item
+    belongs to a different interpreter, and one run of the suite asked for the
+    login password dozens of times.
+
+    The API-key door is the dangerous one rather than merely annoying: any test
+    reaching `disconnect(everything=True)` ran the orphan sweep, which
     dumps the operator's real login keychain, treats every real client id as an
     orphan because the registry under test is a temporary one, and deletes
     through the unpatched backend.
@@ -125,6 +133,7 @@ def _no_test_may_touch_the_real_keychain(monkeypatch):
     would miss.
     """
     import munim.container
+    import munim.remote.storage
 
     class Nowhere:
         def __init__(self): self.store = {}
@@ -135,4 +144,6 @@ def _no_test_may_touch_the_real_keychain(monkeypatch):
         def delete_password(self, service, account):
             self.store.pop((service, account), None)
 
-    monkeypatch.setattr(munim.container, "keyring", Nowhere())
+    nowhere = Nowhere()
+    monkeypatch.setattr(munim.container, "keyring", nowhere)
+    monkeypatch.setattr(munim.remote.storage, "keyring", nowhere)
