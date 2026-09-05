@@ -632,7 +632,8 @@ def _tool_names(client: str, provider: str) -> list[str] | None:
         return None
 
 
-def list_tools(client: str, provider: str, as_json: bool = False) -> int:
+def list_tools(client: str, provider: str, tool: str | None = None,
+               as_json: bool = False) -> int:
     """What this client's provider account can be asked to do.
 
     The counterpart to `munim call`. Every provider here runs its own MCP
@@ -642,7 +643,7 @@ def list_tools(client: str, provider: str, as_json: bool = False) -> int:
     import asyncio
     import json
 
-    from munim.remote.passthrough import known_providers, tools_for
+    from munim.remote.passthrough import UnknownTool, describe_tool, tools_for
     from munim.remote.session import NeedsLogin, NoRemoteServer
 
     record = _resolved(client)
@@ -650,6 +651,14 @@ def list_tools(client: str, provider: str, as_json: bool = False) -> int:
         return 2
 
     try:
+        if tool is not None:
+            one = asyncio.run(describe_tool(record.id, provider, tool))
+            if as_json:
+                print(json.dumps(one, indent=2))
+                return 0
+            from munim.browse import tool_detail
+            tool_detail(record, provider, one)
+            return 0
         tools = asyncio.run(tools_for(record.id, provider))
     except NeedsLogin:
         print(f"{provider} is not connected for {record.name!r}, or the session "
@@ -658,6 +667,10 @@ def list_tools(client: str, provider: str, as_json: bool = False) -> int:
         return 2
     except NoRemoteServer as unknown:
         print(str(unknown), file=sys.stderr)
+        return 2
+    except UnknownTool as missing:
+        print(str(missing), file=sys.stderr)
+        print(f'  munim tools "{record.name}" {provider}', file=sys.stderr)
         return 2
 
     if as_json:
@@ -673,12 +686,11 @@ def list_tools(client: str, provider: str, as_json: bool = False) -> int:
         # Three states, not two. A provider that annotates nothing is not the
         # same as one that says a tool writes, and printing "write" for both
         # would be Munim asserting something the provider never said.
-        mark = {True: "read", False: "write", None: "?"}[tool["read_only"]]
+        mark = {True: "read-only", False: "writes", None: ""}[tool["read_only"]]
         first = (tool["does"].splitlines() or [""])[0][:70]
-        print(f"  {mark:<5} {tool['tool']:<28} {first}", file=sys.stderr)
-    print(f"\n{len(tools)} tools. To call one:", file=sys.stderr)
-    print(f'  munim call "{record.name}" {provider} <tool> --args \'{{...}}\'',
-          file=sys.stderr)
+        print(f"  {mark:<9} {tool['tool']:<28} {first}", file=sys.stderr)
+    print(f"\n{len(tools)} tools. To see one in full:", file=sys.stderr)
+    print(f'  munim tools "{record.name}" {provider} <tool>', file=sys.stderr)
     return 0
 
 
@@ -1341,6 +1353,9 @@ def main(argv: list[str] | None = None) -> int:
     tl = sub.add_parser("tools", help="what a provider can be asked to do")
     tl.add_argument("client", nargs="?")
     tl.add_argument("provider", nargs="?")
+    tl.add_argument("tool", nargs="?",
+                    help="name one to see it in full: the whole description "
+                         "and its arguments")
     tl.add_argument("--json", action="store_true", dest="as_json",
                     help="machine-readable, for scripts")
 
@@ -1349,7 +1364,10 @@ def main(argv: list[str] | None = None) -> int:
     cl.add_argument("provider", nargs="?")
     cl.add_argument("tool", nargs="?")
     cl.add_argument("--args", dest="args_json",
-                    help="the tool's arguments as a JSON object")
+                    help="the tool's arguments as a JSON object, or - to read "
+                         "them from stdin")
+    cl.add_argument("--args-file", dest="args_file",
+                    help="read the arguments from a JSON file")
     cl.add_argument("--json", action="store_true", dest="as_json",
                     help="wrap the result with the client, tool and run id")
 
@@ -1477,7 +1495,7 @@ def main(argv: list[str] | None = None) -> int:
         if provider is None:
             return CANCELLED
         if args.command == "tools":
-            return list_tools(client, provider, args.as_json)
+            return list_tools(client, provider, args.tool, args.as_json)
 
         tool = args.tool
         if tool is None:
@@ -1490,7 +1508,24 @@ def main(argv: list[str] | None = None) -> int:
             tool = choose_one(f"Which {provider} tool?", names)
             if tool is None:
                 return CANCELLED
-        return call_tool(client, provider, tool, args.args_json, args.as_json)
+        given = args.args_json
+        if args.args_file:
+            if given:
+                parser.error("pass --args or --args-file, not both")
+            from pathlib import Path
+
+            try:
+                given = Path(args.args_file).read_text(encoding="utf-8")
+            except OSError as unreadable:
+                print(f"cannot read {args.args_file}: {unreadable}",
+                      file=sys.stderr)
+                return 2
+        elif given == "-":
+            # Reading arguments from a pipe is what lets a tool found by
+            # browsing be run from a script:
+            #   munim tools A B t --json | jq '...' | munim call A B t --args -
+            given = sys.stdin.read()
+        return call_tool(client, provider, tool, given, args.as_json)
 
     if args.command == "clients":
         # Accepted-and-ignored is worse than refused. `--json` only shapes the

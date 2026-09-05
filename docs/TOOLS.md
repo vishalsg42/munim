@@ -52,8 +52,10 @@ munim tools "Balaji Roofings" cloudflare
 munim call  "Balaji Roofings" cloudflare execute --args '{"code": "..."}'
 ```
 
-Omit any argument and you get the picker. `munim call` prints the result to
-stdout and everything else to stderr, so piping it into `jq` needs no flag.
+Omit any argument and you get the picker, and `munim clients` navigates the
+whole lot: clients, providers, tools, and one tool in full. `munim call` prints
+the result to stdout and everything else to stderr, so piping it into `jq`
+needs no flag, and `--args-file` or `--args -` feed it from a file or a pipe.
 
 ---|---|
 | `list_clients` | every client and what each is connected to |

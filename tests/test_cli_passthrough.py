@@ -6,6 +6,7 @@ point of failure, and the conftest turns agents off for every test here, so any
 model reaching into this path fails the suite rather than the operator.
 """
 
+import io
 import json
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
@@ -18,12 +19,12 @@ from munim.remote import passthrough
 from munim.remote.session import NeedsLogin
 
 
-def tool(name, *, read_only=None, does=""):
+def tool(name, *, read_only=None, does="", schema=None):
     annotations = (None if read_only is None
                    else SimpleNamespace(readOnlyHint=read_only,
                                         destructiveHint=False))
     return SimpleNamespace(name=name, description=does, annotations=annotations,
-                           inputSchema={"type": "object"})
+                           inputSchema=schema or {"type": "object"})
 
 
 class FakeSession:
@@ -74,10 +75,12 @@ def test_tools_lists_what_the_provider_exposes(estate, capsys):
     err = capsys.readouterr().err
     assert "search" in err and "execute" in err
     assert "Search the docs" in err
-    # Three states shown, not two. `execute` is unannotated, and printing
-    # "write" for it would assert something Cloudflare never said.
-    assert "read " in err and "?" in err
-    assert "munim call" in err, "the listing should say how to use what it lists"
+    # Three states, and only the informative two take ink. `execute` is
+    # unannotated: printing "writes" for it would assert something Cloudflare
+    # never said, and a "?" column made every listing noisier to say nothing.
+    assert "read-only" in err
+    assert "writes" not in err
+    assert "munim tools" in err, "the listing should say how to see one in full"
 
 
 def test_tools_as_json_is_machine_readable(estate, capsys):
@@ -192,3 +195,98 @@ def test_both_verbs_are_in_the_help(capsys):
 
     out = capsys.readouterr().out
     assert "tools" in out and "call" in out
+
+
+# ---- the tool detail, reachable by typing as well as by navigating ----
+
+
+LONG = ("Execute JavaScript against the Cloudflare API. First use 'search' to "
+        "find the right endpoints, then write code with cloudflare.request(). "
+        "This runs past the seventy characters the listing used to cut at.")
+
+
+@pytest.fixture
+def detailed(estate, monkeypatch):
+    """The same fake, with a tool that has a real description and schema."""
+    session = FakeSession([
+        tool("search", read_only=True, does="Search the docs"),
+        tool("execute", does=LONG, schema={
+            "type": "object",
+            "properties": {"code": {"type": "string", "description": "The JS"}},
+            "required": ["code"]}),
+    ])
+
+    @asynccontextmanager
+    async def fake(client, provider, **kwargs):
+        yield session
+
+    monkeypatch.setattr(passthrough, "session_for", fake)
+    return session
+
+
+def test_naming_a_tool_prints_it_whole(detailed, capsys):
+    assert cli.main(["tools", "Acme", "cloudflare", "execute"]) == 0
+
+    err = capsys.readouterr().err.replace("\n  ", " ")
+    assert LONG.split(". ")[-1][:40] in err, "the description was truncated"
+    assert "code" in err and "required" in err
+    assert 'munim call "Acme" cloudflare execute' in err
+
+
+def test_naming_a_tool_with_json_returns_that_one_tool(detailed, capsys):
+    assert cli.main(["tools", "Acme", "cloudflare", "execute", "--json"]) == 0
+
+    one = json.loads(capsys.readouterr().out)
+    assert one["tool"] == "execute"
+    assert one["arguments"]["required"] == ["code"]
+
+
+def test_an_unknown_tool_name_exits_two_and_names_the_real_ones(
+        detailed, capsys):
+    assert cli.main(["tools", "Acme", "cloudflare", "exec"]) == 2
+
+    err = capsys.readouterr().err
+    assert "execute" in err and "search" in err
+
+
+# ---- arguments from a file or a pipe ---------------------------------
+
+
+TRICKY = {"code": "// list zones\nzones.list() /* all of them */"}
+
+
+def test_args_file_reaches_the_provider_untouched(estate, tmp_path, capsys):
+    """A payload full of comment markers is exactly what a JSON skeleton with
+    comments in it would have corrupted, which is why there is no editor."""
+    path = tmp_path / "args.json"
+    path.write_text(json.dumps(TRICKY))
+
+    assert cli.main(["call", "Acme", "cloudflare", "execute",
+                     "--args-file", str(path)]) == 0
+    assert estate.session.called == [("execute", TRICKY)]
+
+
+def test_args_dash_reads_stdin(estate, monkeypatch, capsys):
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(TRICKY)))
+
+    assert cli.main(["call", "Acme", "cloudflare", "execute", "--args", "-"]) == 0
+    assert estate.session.called == [("execute", TRICKY)]
+
+
+def test_args_and_args_file_together_is_refused(estate, tmp_path, capsys):
+    path = tmp_path / "args.json"
+    path.write_text("{}")
+
+    with pytest.raises(SystemExit):
+        cli.main(["call", "Acme", "cloudflare", "execute",
+                  "--args", "{}", "--args-file", str(path)])
+    assert estate.session.called == []
+
+
+def test_a_missing_args_file_is_refused_before_anything_is_called(
+        estate, capsys):
+    assert cli.main(["call", "Acme", "cloudflare", "execute",
+                     "--args-file", "/no/such/file.json"]) == 2
+
+    assert "cannot read" in capsys.readouterr().err
+    assert estate.session.called == []

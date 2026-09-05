@@ -90,6 +90,23 @@ async def tools_for(client: str, provider: str, *, backend=None) -> list[dict]:
     return [_described(t) for t in listing.tools]
 
 
+async def describe_tool(client: str, provider: str, tool: str, *,
+                        backend=None) -> dict:
+    """One tool, in full, or UnknownTool naming the ones that exist.
+
+    Separate from `tools_for` because a caller asking about a named tool wants
+    a different failure: "that is not a tool" with the alternatives, rather
+    than an empty result they have to search themselves.
+    """
+    described = await tools_for(client, provider, backend=backend)
+    for one in described:
+        if one["tool"] == tool:
+            return one
+    raise UnknownTool(
+        f"{provider} has no tool called {tool!r}. It has: "
+        f"{', '.join(sorted(one['tool'] for one in described))}")
+
+
 def _flatten(result) -> dict:
     """An MCP CallToolResult as something a caller can read.
 
@@ -187,4 +204,4 @@ def _clip(value):
 
 
 __all__ = ["NeedsLogin", "NoRemoteServer", "UnknownTool", "call_tool",
-           "known_providers", "tools_for"]
+           "describe_tool", "known_providers", "tools_for"]

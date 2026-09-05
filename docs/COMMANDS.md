@@ -9,13 +9,25 @@ because it is an event rather than a thing.
 **Clients, the businesses you look after**
 
 ```bash
-munim clients                                # who you have, and what is connected
+munim clients                                # navigable on a terminal, a table in a pipe
 munim clients add "Ivy & Fern"               # write one down before connecting anything
 munim clients add "Ivy & Fern" --domain ivyandfern.co.uk
 munim clients rename "<old>" "<new>"         # the label; the id never changes
 munim clients merge "<source>" "<target>"    # if one account became two clients
 munim clients forget "<client>"              # only when it holds nothing
 ```
+
+On a terminal `munim clients` navigates rather than printing: clients, the
+providers under each with whether the session actually still opens, that
+provider's tools, and one tool in full. Arrow keys or a number, Enter to go in,
+Esc to come back up. Piped or redirected it stays the same table it always was,
+and `--json` never touches the network.
+
+Session status has three states, because they need different answers:
+`✓ connected`, `⚠ needs authentication` when the session expired and a
+`munim connect` will fix it, and `✗ could not be reached` when the network
+failed and reconnecting would not help. `NO_COLOR=1` turns the colour off, and
+so does redirecting the output.
 
 **Servers, what a client can be connected to**
 
@@ -41,9 +53,17 @@ munim disconnect --all --yes                 # skip the question, for scripts
 
 ```bash
 munim tools "Ivy & Fern" cloudflare          # what that account can be asked to do
+munim tools "Ivy & Fern" cloudflare execute  # one tool in full: description and arguments
 munim call  "Ivy & Fern" cloudflare execute --args '{"code": "..."}'
-munim call  "Ivy & Fern" vercel list_projects
+munim call  "Ivy & Fern" cloudflare execute --args-file args.json
+munim tools "Ivy & Fern" cloudflare execute --json | jq . | \
+  munim call "Ivy & Fern" cloudflare execute --args -
 ```
+
+Naming a tool prints it whole. That matters more than it sounds: Cloudflare's
+`execute` carries about 1200 characters of TypeScript interfaces, and they are
+the only thing telling you what to put in `--args`. The listing shows one line
+per tool; the detail shows all of it.
 
 Omit any argument and you get the picker. `munim tools` lists what the provider
 itself publishes, so it is never out of date with what the provider shipped
