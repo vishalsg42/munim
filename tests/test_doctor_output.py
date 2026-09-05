@@ -11,9 +11,6 @@ passes and a list when it does not. This is that rule, applied to the command
 people run first.
 """
 
-import io
-import time
-
 import pytest
 
 from munim import doctor
@@ -126,28 +123,8 @@ def test_the_gmail_advice_is_doable_from_an_installed_package():
 
 
 # ---- speed ---------------------------------------------------------------
-
-def test_the_coding_agent_listing_is_fetched_once(monkeypatch):
-    """It was fetched twice, by two checks that each shelled out separately.
-    `claude mcp list` takes about fifteen seconds to start, so the whole command
-    took thirty-three seconds to run one subprocess twice, while every other
-    check in the report totals thirty milliseconds."""
-    calls = []
-
-    class Result:
-        stdout = "munim: /x/munim-mcp  - ✔ Connected\n"
-
-    monkeypatch.setattr(doctor, "_LISTING", None)
-    monkeypatch.setattr(doctor.shutil, "which", lambda name: "/usr/bin/claude")
-    monkeypatch.setattr(doctor.subprocess, "run",
-                        lambda *a, **k: calls.append(a) or Result())
-
-    doctor._mcp_registered()
-    doctor._mcp_command()
-    doctor._mcp_registered()
-
-    assert len(calls) == 1, f"ran `claude mcp list` {len(calls)} times"
-
+# The listing cache this section used to test is gone with the subprocess it
+# cached. tests/test_coding_agents.py asserts nothing shells out at all.
 
 def test_the_report_says_how_long_it_took(healthy, tmp_path, capsys):
     """Sixteen seconds of silence looks hung rather than busy, and naming the
@@ -156,68 +133,3 @@ def test_the_report_says_how_long_it_took(healthy, tmp_path, capsys):
     _run(tmp_path)
     out = capsys.readouterr().out
     assert "s)" in out.splitlines()[-1], out.splitlines()[-1]
-
-
-class _FakeTTY(io.StringIO):
-    def isatty(self): return True
-
-
-def test_the_spinner_draws_and_then_clears_up(monkeypatch):
-    """The one check worth a loader takes about fifteen seconds, and there is
-    nothing to make faster: it is Claude Code's startup, not ours."""
-    fake = _FakeTTY()
-    monkeypatch.setattr(doctor.sys, "stderr", fake)
-
-    with doctor.spinner("checking your coding agent"):
-        time.sleep(0.3)
-
-    written = fake.getvalue()
-    assert len({c for c in written if c in "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"}) > 1, "it did not animate"
-    assert "checking your coding agent" in written
-    assert not written.rstrip().endswith(tuple("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")), \
-        "the last frame was left on screen"
-
-
-def test_the_spinner_is_silent_when_piped(monkeypatch):
-    """Frames redrawn with a carriage return are noise in a pipe or a log, where
-    the return is not honoured and the half-erased text survives."""
-    fake = io.StringIO()          # a plain StringIO reports isatty() False
-    monkeypatch.setattr(doctor.sys, "stderr", fake)
-
-    with doctor.spinner("checking your coding agent"):
-        time.sleep(0.15)
-
-    assert fake.getvalue() == ""
-
-
-def test_the_spinner_stops_when_the_work_raises(monkeypatch):
-    """Otherwise a failing check leaves a thread redrawing over the traceback."""
-    fake = _FakeTTY()
-    monkeypatch.setattr(doctor.sys, "stderr", fake)
-
-    with pytest.raises(RuntimeError):
-        with doctor.spinner("checking"):
-            raise RuntimeError("the check blew up")
-
-    before = fake.getvalue()
-    time.sleep(0.25)
-    assert fake.getvalue() == before, "the spinner is still drawing"
-
-
-def test_the_report_itself_carries_no_spinner_frames(healthy, tmp_path, capsys):
-    """The loader belongs on stderr and must never reach the report."""
-    _run(tmp_path)
-    captured = capsys.readouterr()
-    assert not any(c in captured.out for c in "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
-
-
-def test_the_registration_fix_makes_munim_available_everywhere(monkeypatch):
-    """Registering per project means the next directory reports munim missing,
-    which is exactly what somebody hits the first time they use it outside the
-    repo they installed it from."""
-    monkeypatch.setattr(doctor, "_LISTING", ["no munim here\n"])
-    monkeypatch.setattr(doctor.shutil, "which", lambda name: "/usr/bin/claude")
-
-    finding = doctor._mcp_registered()
-    assert finding.status == doctor.BAD
-    assert "--scope user" in finding.fix

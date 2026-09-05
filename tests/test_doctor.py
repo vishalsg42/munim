@@ -152,12 +152,19 @@ def test_a_missing_keychain_does_not_take_the_client_list_down(monkeypatch, tmp_
     assert any("acme" in f.what for f in findings)
 
 
-def test_the_coding_agent_check_resolves_the_executable(monkeypatch):
-    """On Windows it is claude.cmd, which a bare name in a subprocess list does
-    not find."""
+def test_the_coding_agent_check_needs_no_executable():
+    """This used to guard `shutil.which("claude")`, because on Windows the
+    executable is claude.cmd and a bare name in a subprocess list does not find
+    it. Reading each client's config solves that more thoroughly: there is no
+    executable to resolve, on any platform, and no subprocess to start.
+
+    It also stopped being one vendor's question. `docs/ARCHITECTURE.md` draws
+    the client as "Claude Code, Codex, Cursor", and the check now reads all of
+    them.
+    """
     import inspect
 
     source = inspect.getsource(doctor._mcp_registered)
-    assert 'shutil.which("claude")' in source
-    assert '["claude", "mcp", "list"]' not in source, \
-        "passing the bare name will not resolve claude.cmd on Windows"
+    assert "subprocess" not in source
+    assert "shutil" not in source
+    assert "MCP_CLIENTS" in inspect.getsource(doctor._registrations)

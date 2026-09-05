@@ -8,11 +8,10 @@ command or URL that fixes it, rather than a stack trace.
 import os
 import platform
 import shutil
-import subprocess
+import json
+import re
 import sys
-import threading
 import time
-from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -153,111 +152,112 @@ def _agents() -> list[Finding]:
     return out
 
 
-@contextmanager
-def spinner(label: str):
-    """A loader for the one check that is slow enough to need one.
+# Every MCP client's own config, because munim is an MCP server and MCP is not
+# one vendor's protocol. `docs/ARCHITECTURE.md` has always drawn the client as
+# "Claude Code, Codex, Cursor", while this check shelled out to `claude` alone
+# and called it a problem to fix when munim was not registered there. For an
+# operator driving munim from Codex that verdict is meaningless, and it cost
+# eighteen of the command's eighteen and a half seconds to be wrong.
+#
+# Reading the files is also what makes `doctor` instant. `claude mcp list` takes
+# about fifteen seconds to start; every check here now totals milliseconds.
+MCP_CLIENTS = (
+    ("Claude Code", "~/.claude.json"),
+    ("Claude Desktop",
+     "~/Library/Application Support/Claude/claude_desktop_config.json"),
+    ("Codex", "~/.codex/config.toml"),
+    ("Cursor", "~/.cursor/mcp.json"),
+    ("Antigravity", "~/.gemini/antigravity/mcp_config.json"),
+    ("Gemini CLI", "~/.gemini/config/mcp_config.json"),
+    ("Windsurf", "~/.codeium/windsurf/mcp_config.json"),
+)
 
-    `claude mcp list` takes about fifteen seconds to start, which is nearly all
-    of this command's runtime and is Claude Code's cost rather than ours. There
-    is nothing to make faster, so the wait is shown instead of hidden.
 
-    Terminal only. Frames redrawn with a carriage return are noise in a pipe or
-    a log, where the return is not honoured and the half-erased text survives
-    into whatever reads it. It also clears the line on the way out rather than
-    leaving the last frame behind, and runs as a daemon thread so a Ctrl-C
-    cannot leave the spinner running after the command has gone.
+def _servers_in(path: Path) -> dict:
+    """The MCP servers one client has configured, as {name: command}.
+
+    Two shapes. JSON clients keep an `mcpServers` object, and Claude Code also
+    nests one per project under `projects`, which is how a server can be
+    registered in one directory and missing in the next. Codex uses TOML with a
+    `[mcp_servers.name]` table per server.
+
+    The TOML is scanned rather than parsed: `tomllib` is 3.11 and this package
+    supports 3.10, and all that is wanted here is the names and commands.
     """
-    if not sys.stderr.isatty():
-        yield
-        return
-
-    stop = threading.Event()
-
-    def spin() -> None:
-        frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
-        turn = 0
-        while not stop.is_set():
-            sys.stderr.write(f"\r  {frames[turn % len(frames)]} {label}")
-            sys.stderr.flush()
-            turn += 1
-            stop.wait(0.08)
-        sys.stderr.write("\r" + " " * (len(label) + 6) + "\r")
-        sys.stderr.flush()
-
-    thread = threading.Thread(target=spin, daemon=True)
-    thread.start()
     try:
-        yield
-    finally:
-        stop.set()
-        thread.join(timeout=1)
+        text = path.read_text(errors="ignore")
+    except OSError:
+        return {}
 
+    if path.suffix == ".toml":
+        found = {}
+        for name in re.findall(r"\[mcp_servers\.([A-Za-z0-9_.-]+)\]", text):
+            block = text.split(f"[mcp_servers.{name}]", 1)[1].split("\n[", 1)[0]
+            command = re.search(r'command\s*=\s*"([^"]*)"', block)
+            found[name] = command.group(1) if command else ""
+        return found
 
-_LISTING: list[str] | None = None
-
-
-def _mcp_listing() -> str:
-    """`claude mcp list`, run at most once.
-
-    Two checks need it and each was shelling out separately, which cost about
-    fifteen seconds apiece: the whole of `munim doctor` was thirty-three seconds
-    to run one subprocess twice. Everything else in the report totals thirty
-    milliseconds.
-    """
-    global _LISTING
-    if _LISTING is not None:
-        return _LISTING[0]
-
-    executable = shutil.which("claude")
-    if not executable:
-        _LISTING = [""]
-        return ""
     try:
-        out = subprocess.run([executable, "mcp", "list"], capture_output=True,
-                             text=True, timeout=30).stdout
-    except Exception:
-        out = ""
-    _LISTING = [out]
+        data = json.loads(text)
+    except ValueError:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+
+    found = {}
+    for holder in [data, *(data.get("projects") or {}).values()]:
+        if not isinstance(holder, dict):
+            continue
+        for name, entry in (holder.get("mcpServers") or {}).items():
+            command = entry.get("command", "") if isinstance(entry, dict) else ""
+            found.setdefault(name, command)
+    return found
+
+
+def _registrations() -> list[tuple[str, dict]]:
+    """(client name, its servers) for every MCP client present on this machine."""
+    out = []
+    for name, raw in MCP_CLIENTS:
+        path = Path(raw).expanduser()
+        if path.is_file():
+            out.append((name, _servers_in(path)))
     return out
 
 
 def _mcp_registered() -> Finding:
-    # shutil.which resolves the real thing, which on Windows is claude.cmd and
-    # would not have been found by passing the bare name to subprocess.
-    if not shutil.which("claude"):
-        return Finding(WARN, "Coding agent", "claude CLI not found",
-                       fix="add munim-mcp to your agent's MCP config by hand")
-    out = _mcp_listing()
-    for line in out.splitlines():
-        if line.strip().startswith("munim"):
-            if "✔" in line or "Connected" in line:
-                return Finding(OK, "Coding agent", "munim connected")
-            return Finding(BAD, "Coding agent", line.strip()[:60],
-                           fix="claude mcp remove munim && claude mcp add "
-                               "--scope user munim -- "
-                               f"{Path(sys.executable).parent / 'munim-mcp'}")
-    # --scope user, not the default. Registering per project means the next
-    # directory you work in reports munim as missing, which is exactly what
-    # somebody hits the first time they use it outside this repo.
-    return Finding(BAD, "Coding agent", "munim not registered",
-                   fix=f"claude mcp add --scope user munim -- "
-                       f"{Path(sys.executable).parent / 'munim-mcp'}"
-                       f"   (--scope user makes it available in every project)")
+    """Whether any coding agent on this machine knows about munim.
+
+    A note rather than a verdict when it does not. munim cannot see every MCP
+    client that exists, so "not registered in the ones I know about" is not the
+    same as broken, and reporting it as a problem was wrong for anybody using an
+    agent this list does not name.
+    """
+    found = _registrations()
+    if not found:
+        return Finding(OK, "Coding agent", "no MCP client config found here")
+
+    holding = [client for client, servers in found if "munim" in servers]
+    if holding:
+        return Finding(OK, "Coding agent", f"registered in {', '.join(holding)}")
+
+    seen = ", ".join(client for client, _ in found)
+    return Finding(WARN, "Coding agent", f"not registered in {seen}",
+                   fix=f"point your agent at "
+                       f"{Path(sys.executable).parent / 'munim-mcp'}. For Claude "
+                       f"Code: claude mcp add --scope user munim -- that path "
+                       f"(--scope user makes it available in every project)")
 
 
 def _mcp_command() -> str:
-    """The path the coding agent is configured to spawn, or "".
+    """The command a coding agent is configured to spawn for munim, or "".
 
-    Read from `claude mcp list` rather than from the config file, because the
-    file layout is the agent's business and the listing is the interface.
+    Read from the config rather than from `claude mcp list`, which only knew
+    about one client and took fifteen seconds to say so.
     """
-    for line in _mcp_listing().splitlines():
-        stripped = line.strip()
-        if not stripped.startswith("munim"):
-            continue
-        _, _, rest = stripped.partition(":")
-        # `munim: /path/to/munim-mcp  - ✔ Connected`
-        return rest.split(" - ")[0].strip()
+    for _, servers in _registrations():
+        command = servers.get("munim", "")
+        if command:
+            return command
     return ""
 
 
@@ -493,12 +493,8 @@ def run(registry: Registry | None = None, verbose: bool = False) -> int:
     health = [timed("config", _config), timed("settings", _settings_file),
               *timed("agents", _agents)]
 
-    # Only this one gets a spinner, because only this one is slow. Wrapping the
-    # whole report would flicker through eight instant checks to reach it.
-    with spinner("checking your coding agent"):
-        health.append(timed("coding agent", _mcp_registered))
-        health += timed("interpreter", _one_interpreter)
-
+    health.append(timed("coding agent", _mcp_registered))
+    health += timed("interpreter", _one_interpreter)
     health += [timed("control room", _room), timed("keychain", _keychain)]
     inventory = ([*timed("providers", _oauth_apps),
                   *timed("clients", lambda: _clients(registry))]
