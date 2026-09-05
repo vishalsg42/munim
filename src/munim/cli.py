@@ -392,7 +392,7 @@ def _redacted(url: str) -> str:
 ACCOUNT_NAMES_IT = "__account__"
 
 
-def ask_which_client(registry, ask=input, *, account_can_name=False) -> str | None:
+def ask_which_client(registry, ask=None, *, account_can_name=False) -> str | None:
     """Which client is this for.
 
     A URL that carries a credential cannot name itself the way an OAuth login
@@ -406,6 +406,12 @@ def ask_which_client(registry, ask=input, *, account_can_name=False) -> str | No
 
     Returns a client id, a new name, ACCOUNT_NAMES_IT, or None if they backed
     out.
+
+    `ask` defaults to None rather than to `input`. `choose` takes the live
+    arrow-key picker only when nothing was injected, so defaulting to the
+    builtin meant every real invocation fell through to the numbered prompt and
+    the picker was never reached outside its own tests. Passing `ask` is how a
+    test forces the numbered path, and that is the only thing it should mean.
     """
     records = sorted(registry.clients(), key=lambda r: r.name.lower())
 
