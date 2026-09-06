@@ -18,6 +18,7 @@ from munim.registry import ClientRecord, Registry
 from munim.server import CROSS_CLIENT, MUTATING, build_server
 
 
+
 class _Keychain:
     def __init__(self): self.store = {}
     def get(self, c, p): return self.store.get((c, p))
@@ -96,12 +97,15 @@ async def test_check_runs_the_agent_when_something_failed(tmp_path, monkeypatch,
     monkeypatch.setattr(agent_module, "build_model", lambda *a, **k: (object(), "fake"))
     monkeypatch.setattr(agent_module, "Agent", _FakeAgent)
 
-    server, _ = _server(tmp_path)
+    server, registry = _server(tmp_path)
     await server.call_tool("check", {"target": "acme"})
 
     assert _FakeAgent.asked, "check completed without ever invoking the agent"
     prompt = _FakeAgent.asked[0]
-    assert "neverssl.com" in prompt
+    # The registry's own value, not a host literal: this asserts the
+    # prompt names the domain being checked, which is the actual claim.
+    checked = registry.clients()[0].domain
+    assert checked and checked in prompt
     assert "acme" in prompt
     # The agent is given the deterministic findings, not asked to decide them.
     assert "Failing checks:" in prompt

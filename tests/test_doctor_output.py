@@ -16,6 +16,21 @@ import pytest
 from munim import doctor
 from munim.registry import ClientRecord, Registry
 
+def host_of(text):
+    """The host of the first URL in a message, or None.
+
+    Parsed and compared exactly, which is the remediation
+    `py/incomplete-url-substring-sanitization` asks for and what the assertion
+    meant anyway: `"example.com" in message` is also satisfied by
+    `evil-example.com.attacker.test`.
+    """
+    import re
+    from urllib.parse import urlparse
+
+    found = re.search(r"https?://[^\s,)'\"]+", text)
+    return urlparse(found.group(0)).hostname if found else None
+
+
 
 @pytest.fixture
 def healthy(monkeypatch):
@@ -119,7 +134,7 @@ def test_the_gmail_advice_is_doable_from_an_installed_package():
         pytest.skip("gmail is configured here, so there is no advice to check")
     assert not gmail[0].fix.startswith("uv run"), \
         "the first thing offered must work without a source checkout"
-    assert "console.cloud.google.com" in gmail[0].fix
+    assert host_of(gmail[0].fix) == "console.cloud.google.com"
 
 
 # ---- speed ---------------------------------------------------------------

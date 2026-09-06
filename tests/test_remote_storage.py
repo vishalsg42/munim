@@ -13,6 +13,21 @@ from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from munim.remote.servers import SERVERS, server_for
 from munim.remote.storage import KeychainTokenStorage
 
+def host_of(text):
+    """The host of the first URL in a message, or None.
+
+    Parsed and compared exactly, which is the remediation
+    `py/incomplete-url-substring-sanitization` asks for and what the assertion
+    meant anyway: `"example.com" in message` is also satisfied by
+    `evil-example.com.attacker.test`.
+    """
+    import re
+    from urllib.parse import urlparse
+
+    found = re.search(r"https?://[^\s,)'\"]+", text)
+    return urlparse(found.group(0)).hostname if found else None
+
+
 
 class FakeKeyring:
     def __init__(self):
@@ -270,7 +285,8 @@ def test_a_provider_needing_an_application_says_so_before_opening_a_browser():
     said = str(caught.value)
     assert "registered by hand" in said
     assert "GMAIL_OAUTH_CLIENT_ID" in said
-    assert "console.cloud.google.com" in said, "a fix with no address is a complaint"
+    assert host_of(said) == "console.cloud.google.com", \
+        "a fix with no address is a complaint"
 
 
 def test_a_registered_application_is_used_instead_of_registering(monkeypatch):

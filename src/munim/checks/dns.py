@@ -409,6 +409,17 @@ def cert_valid(domain: str, days: int = 14, timeout: float = 8.0,
     be completed is now reported as not determined rather than as a failure.
     """
     context = ssl.create_default_context()
+    # A floor, because `create_default_context` still permits TLS 1.0 and 1.1
+    # depending on the OpenSSL underneath, and a check whose job is to report on
+    # a domain's TLS should not itself speak a version it would flag. Nothing
+    # secret crosses this socket, so the risk is reputational rather than
+    # material; it is set anyway because the alternative is arguing with a
+    # scanner that is right.
+    #
+    # A domain offering nothing newer now fails the handshake, and the handling
+    # below already reports that as "not determined" rather than as a broken
+    # certificate (D20), so it degrades to silence rather than to a false alarm.
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     last: Exception | None = None
     for attempt in range(attempts):
         try:

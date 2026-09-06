@@ -15,6 +15,12 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Read the repository and nothing else. Both jobs here run the suites; neither
+# writes anything back, so the default grant is wider than the work. Same
+# pattern pages.yml already uses, which is why that one is not flagged.
+permissions:
+  contents: read
+
 jobs:
   python:
     runs-on: ubuntu-latest

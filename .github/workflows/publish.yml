@@ -12,6 +12,12 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
+# The default for every job below. `publish` overrides it, because a job-level
+# grant replaces this one rather than adding to it, and trusted publishing needs
+# a token minted for the occasion.
+permissions:
+  contents: read
+
 jobs:
   # The tests run again here rather than trusting the run on the commit. A tag
   # can point anywhere, including at something that never passed.
@@ -76,6 +82,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
+      contents: read    # restated: a job-level grant replaces, not extends
       id-token: write   # what trusted publishing uses instead of a token
     steps:
       - uses: actions/download-artifact@v8
