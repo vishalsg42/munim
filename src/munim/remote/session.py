@@ -14,6 +14,7 @@ a session for a client that is not registered.
 
 import asyncio
 import logging
+import sys
 import time
 import urllib.parse
 from contextlib import asynccontextmanager, contextmanager
@@ -470,7 +471,15 @@ def auth_for(client: str, provider: str, *, keyring=None,
             # "the Acme Ltd's cloudflare account" was reading badly:
             # the article and the possessive cannot both be there.
             whose = f"{label}'s " if not label.startswith("…") else "the "
-            print(f"Sign in to {whose}{provider} account:\n{url}", flush=True)
+            # stderr, and not for tidiness. The MCP server speaks JSON-RPC over
+            # **stdout**, so one non-protocol line there makes the client drop
+            # the server: an operator reported every tool vanishing mid-session
+            # and not coming back. No server path reaches this today, because
+            # each passes `allow_login=False` and `redirect` raises before it,
+            # but the default is `True` and the distance between "unreachable"
+            # and "reachable" is one keyword argument.
+            print(f"Sign in to {whose}{provider} account:\n{url}",
+                  file=sys.stderr, flush=True)
             webbrowser.open(url)
 
     async def callback() -> tuple[str, str | None]:
