@@ -76,3 +76,56 @@ async def test_a_real_oauth_failure_still_logs(caplog):
 
     assert quiet.filter(record(NeedsLogin("asked for"))) is False
     assert quiet.filter(record(ValueError("a real one"))) is True
+
+
+# ---- the noise a provider makes about a session it already dropped -------
+
+def test_a_teardown_404_is_not_reported_as_a_failure():
+    """Supabase issues a session id then answers the teardown DELETE with 404.
+    The SDK forgives 405 and warns on everything else, so every clean run ended
+    with `Session termination failed: 404` under a line saying it worked."""
+    import logging
+
+    from munim.remote.session import _QuietTeardown
+
+    quiet = _QuietTeardown()
+
+    def record(message):
+        return logging.LogRecord("mcp.client.streamable_http", logging.WARNING,
+                                 "", 0, message, (), None)
+
+    assert quiet.filter(record("Session termination failed: 404")) is False
+    assert quiet.filter(record("Session termination failed: 405")) is False
+
+
+def test_a_teardown_that_fails_for_another_reason_still_says_so():
+    """The session was closing anyway, but a transport error there is a signal
+    about the connection. Hiding every teardown failure would be the real bug."""
+    import logging
+
+    from munim.remote.session import _QuietTeardown
+
+    quiet = _QuietTeardown()
+
+    def record(message):
+        return logging.LogRecord("mcp.client.streamable_http", logging.WARNING,
+                                 "", 0, message, (), None)
+
+    assert quiet.filter(record("Session termination failed: 500")) is True
+    assert quiet.filter(
+        quiet and record("Session termination failed: ConnectError")) is True
+    assert quiet.filter(record("something else entirely")) is True
+
+
+def test_the_filter_is_not_stacked_once_per_session():
+    """It is added at import against the SDK's own logger; adding it per call
+    would pile up one copy per session opened."""
+    import logging
+
+    from munim.remote.session import hush_teardown
+
+    logger = logging.getLogger("mcp.client.streamable_http")
+    hush_teardown()
+    hush_teardown()
+    from munim.remote.session import _QuietTeardown
+    assert sum(isinstance(f, _QuietTeardown) for f in logger.filters) == 1

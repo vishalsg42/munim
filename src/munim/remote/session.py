@@ -636,6 +636,43 @@ class _QuietRefusal(logging.Filter):
         return not (info and isinstance(info[1], NeedsLogin))
 
 
+class _QuietTeardown(logging.Filter):
+    """Drop the noise a provider makes about a session it has already dropped.
+
+    Closing a streamable-HTTP session sends `DELETE <url>`. The SDK forgives a
+    405 as "server does not allow session termination" and logs it at debug, and
+    warns on anything else. Supabase issues a session id and then answers that
+    DELETE with 404, which means the same thing and takes the warning branch, so
+    every clean run of `doctor` or `clients` ends with
+
+        Session termination failed: 404
+
+    while the line above it says everything worked. Munim is doing the right
+    thing and Supabase's behaviour is not ours to change, so the line goes.
+
+    Only 404 and 405 are dropped. A teardown that fails for any other reason,
+    including a transport error, still logs: the session was closing anyway, but
+    that is a signal about the connection and hiding it would be the real bug.
+    """
+
+    IGNORED = ("Session termination failed: 404",
+               "Session termination failed: 405")
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return not record.getMessage().startswith(self.IGNORED)
+
+
+def hush_teardown() -> None:
+    """Idempotent, and applied once at import: this logger is the SDK's, and
+    adding the filter per session would stack one copy per call."""
+    logger = logging.getLogger("mcp.client.streamable_http")
+    if not any(isinstance(f, _QuietTeardown) for f in logger.filters):
+        logger.addFilter(_QuietTeardown())
+
+
+hush_teardown()
+
+
 @contextmanager
 def _quiet_refusals(active: bool):
     if not active:

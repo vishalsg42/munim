@@ -44,6 +44,10 @@ export const initialState = {
   client: null, stage: null, stagesDone: [], stagesSeen: [], stagesOff: [],
   checks: {},
   finding: null, awaitingConfirm: null, escalated: null,
+  // A cross-client answer has one finding per client, so one slot cannot hold
+  // it: five clients used to render as one heading and one card, whichever
+  // arrived last. Keyed by client, and `across` is the stage that fills it.
+  byClient: {}, question: null,
   events: [], done: false, connected: false,
 };
 
@@ -85,6 +89,13 @@ export function reduce(state, action) {
     case "finding":
       if (check) next.checks = { ...state.checks, [check]: "fail" };
       next.finding = e;
+      if (e.stage === "across" && e.client) {
+        next.byClient = {
+          ...state.byClient,
+          [e.client]: [...(state.byClient[e.client] || []), e],
+        };
+        if (e.detail && e.detail.question) next.question = e.detail.question;
+      }
       break;
     case "resolved":
       if (check) next.checks = { ...state.checks, [check]: "pass" };
@@ -101,6 +112,15 @@ export function reduce(state, action) {
       break;
     case "escalated":
       next.escalated = e;
+      // A cross-client escalation is "the agent named an account it never
+      // read". It belongs beside that client rather than replacing the single
+      // escalation slot, which a launch uses for something else entirely.
+      if (e.stage === "across" && e.client) {
+        next.byClient = {
+          ...state.byClient,
+          [e.client]: [...(state.byClient[e.client] || []), e],
+        };
+      }
       break;
     case "run_done":
       next.done = true;

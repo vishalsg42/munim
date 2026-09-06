@@ -72,3 +72,56 @@ test("an ordinary observation does not mark a stage off", () => {
   assert.deepEqual(s.stagesOff, []);
   assert.equal(s.checks.mx_present, "pass");
 });
+
+// ---- a cross-client answer is many clients, not one ----------------------
+//
+// `ask_across_clients` emits one finding per client. The reducer held a single
+// `client` and a single `finding`, so five clients rendered as one heading and
+// one card: whichever arrived last. Every test above is a launch, which really
+// is about one client, which is why nothing caught it.
+
+const across = (client, says, extra = {}) => ({
+  run_id: "r", seq: 1, ts: 0, client, stage: "across", kind: "finding",
+  human_text: says, detail: { provider: "resend", question: "who?", ...extra },
+});
+
+test("findings from several clients are all kept", () => {
+  let state = initialState;
+  for (const e of [across("Acme", "verified"),
+                   across("Ivy & Fern", "not verified"),
+                   across("Grafison", "verified")]) {
+    state = reduce(state, { type: "event", event: e });
+  }
+  assert.deepEqual(Object.keys(state.byClient).sort(),
+                   ["Acme", "Grafison", "Ivy & Fern"]);
+  assert.equal(state.byClient["Ivy & Fern"][0].human_text, "not verified");
+});
+
+test("two findings about one client both survive", () => {
+  let state = initialState;
+  state = reduce(state, { type: "event", event: across("Acme", "one") });
+  state = reduce(state, { type: "event", event: across("Acme", "two") });
+  assert.equal(state.byClient.Acme.length, 2);
+});
+
+test("the question being answered is carried alongside", () => {
+  const state = reduce(initialState,
+                       { type: "event", event: across("Acme", "verified") });
+  assert.equal(state.question, "who?");
+});
+
+test("an account the agent never read is grouped, not lost", () => {
+  const e = { ...across("Ghost", "named but never read"), kind: "escalated" };
+  const state = reduce(initialState, { type: "event", event: e });
+  assert.equal(state.byClient.Ghost[0].kind, "escalated");
+});
+
+test("a launch's own finding does not land in the cross-client grouping", () => {
+  const launch = {
+    run_id: "r", seq: 1, ts: 0, client: "Acme", stage: "verify",
+    kind: "finding", human_text: "two spf records", detail: { check: "spf_single" },
+  };
+  const state = reduce(initialState, { type: "event", event: launch });
+  assert.deepEqual(state.byClient, {});
+  assert.equal(state.finding.human_text, "two spf records");
+});

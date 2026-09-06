@@ -74,13 +74,17 @@ def connected_clients(clients, provider: str, keyring=None) -> list:
     return [c for c in clients if has_session(c)]
 
 
-async def ask(question: str, clients: list[str], *,
-              keyring=None) -> tuple["Answer", list["Finding"]]:
+async def ask(question: str, clients: list[str], *, keyring=None,
+              log=None) -> tuple["Answer", list["Finding"]]:
     """Answer `question` using every connected client's read-only tools.
 
     Returns the answer and whatever was set aside for naming a client the agent
     never actually read. Both halves matter to the caller, which is why this
     stopped returning a string.
+
+    `log` is optional and, when given, is what the control room reads. This was
+    the only agent-bearing tool that wrote nothing, so its result could not be
+    looked up afterwards and nothing could watch it happen.
     """
     # Ahead of the per-provider keychain reads below, for the same reason as
     # within.work_on: this is importable, and refusing after doing the work
@@ -161,6 +165,26 @@ async def ask(question: str, clients: list[str], *,
     answer.findings = kept
     if not answer.summary:
         answer.summary = prose
+
+    if log is not None:
+        for finding in kept:
+            log.append(client=finding.client, stage="across", kind="finding",
+                       human_text=finding.says,
+                       detail={"provider": finding.provider,
+                               "evidence": finding.evidence,
+                               "question": question})
+        for finding in discarded:
+            # `escalated` because it is the one that needs a person to look: the
+            # agent described an account whose tools never answered.
+            log.append(client=finding.client, stage="across", kind="escalated",
+                       human_text=f"Named {finding.client}, which was never "
+                                  f"read: {finding.says}",
+                       detail={"provider": finding.provider,
+                               "question": question})
+        log.append(client="every client", stage="across", kind="run_done",
+                   human_text=answer.summary,
+                   detail={"question": question,
+                           "findings": len(kept), "discarded": len(discarded)})
     return answer, discarded
 
 
