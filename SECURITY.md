@@ -30,7 +30,9 @@ lets a credential reach anywhere it was not meant to go. Specifically:
   is per call now rather than structural (D31), so this is the property most
   worth attacking.
 - A path, argument or provider response that causes a credential to be sent to a
-  host that is not the provider's.
+  host that is not the provider's. `call_provider_api` is the obvious target:
+  its only containment is a check in `remote/rawcall.py`, because httpx's
+  `base_url` does not contain an absolute URL (D33).
 - A credential reaching the run log, a report, a tool result, or a coding
   agent's context. Munim goes to some trouble to keep secrets out of all four
   (D6), and any route past that is a finding.
@@ -48,6 +50,13 @@ without a prompt. This is the same choice `gh`, `aws`, `docker`, `npm` and
 Claude Code's own `~/.claude/.credentials.json` make. It is recorded in D30 with
 what it costs, including that a backup or a disk image holds it in the clear.
 Encrypting it with a key stored beside it would be theatre.
+
+**`call_provider_api` can send any HTTP request to a provider's API.** It is
+deliberately powerful and deliberately narrow: a path and never a URL, one named
+client's credential, the provider's host asserted before the request is sent,
+every call recorded as a mutation whatever the method, and the response body
+never written to the run log. If you can get past any of those, that is a
+vulnerability and this paragraph does not cover it.
 
 **Cloudflare's `execute` runs JavaScript against the account.** That is
 Cloudflare's tool and Cloudflare's boundary. Munim forwards it with one client's

@@ -45,7 +45,7 @@ of the prose does not.
 
 ## Decisions
 
-`docs/DECISIONS.md` is a numbered log, currently through D32. If a change makes
+`docs/DECISIONS.md` is a numbered log, currently through D33. If a change makes
 a call that a later reader would otherwise have to reverse-engineer, add an
 entry. Several existing entries reverse an earlier one, and that is the point:
 the log records what was believed and when, not a tidy final answer.
