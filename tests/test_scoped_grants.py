@@ -55,7 +55,7 @@ def test_the_mcp_route_sets_no_scope_and_that_is_deliberate(monkeypatch):
     monkeypatch.setenv("GMAIL_OAUTH_CLIENT_ID", "an-id.apps.googleusercontent.com")
     monkeypatch.setenv("GMAIL_OAUTH_CLIENT_SECRET", "a-secret")
 
-    auth = auth_for("c_x", "gmail", label="Acme", backend=Ring())
+    auth = auth_for("c_x", "gmail", label="Acme", keyring=Ring())
 
     assert auth.context.client_metadata.scope is None
 
@@ -78,7 +78,7 @@ def test_an_unscoped_provider_sends_none():
     from munim.remote.session import auth_for
 
     assert not SERVERS["linear"].scopes, "linear now has scopes; pick another"
-    auth = auth_for("c_x", "linear", label="Acme", backend=Ring())
+    auth = auth_for("c_x", "linear", label="Acme", keyring=Ring())
 
     assert auth.context.client_metadata.scope is None
 

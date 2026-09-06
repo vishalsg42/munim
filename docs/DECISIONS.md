@@ -999,3 +999,75 @@ D29 stands as the record of why this was argued against, and this is what
 overruled it. Both are worth keeping: the next person deserves the argument, not
 just the outcome.
 
+
+---
+
+## D31: Forward the provider's tools instead of modelling them, and the isolation guarantee changes shape
+
+**Date:** 2026-09-05
+
+Munim could authenticate and diagnose. It could not change anything without
+starting a language model of its own, and that model was the single point of
+failure: Bedrock credentials expired, a Gemini key sat in a repo `.env` invisible
+from any other directory, and agents are off by default, correctly, so every
+write attempt no-opped. A day of real work on a live outage produced zero changes
+made through Munim.
+
+The model was doing a job nobody needed it to do. Munim is not a Cloudflare
+client; it is a credential broker in front of Cloudflare's own MCP server. To
+change a DNS record something has to pick a tool and call it with the right
+arguments, and Munim's answer was to spin up a sub-agent to decide. But the thing
+calling Munim is already an agent with a model. The operator is talking to a
+coding agent, and Munim was starting a second one.
+
+**Rejected first: a CLI verb per operation.** `munim dns proxied <client>
+<record> off` reads fine until you count. Eleven providers, three to thirty-seven
+tools each, and Cloudflare's `execute` takes JavaScript, so its parameter space
+has no bottom. Every provider release would be a Munim release. Modelling one
+tool's arguments as another tool's parameters is a losing game.
+
+**Built: two tools that forward.** `list_provider_tools` asks a client's live
+session what it exposes; `call_provider_tool` invokes one with that client's
+credentials, arguments untouched. Munim does the part only Munim can do, and the
+caller chooses what to call. No model host anywhere in this path, so the failure
+that blocked every write stops existing. Every provider in `servers.py` becomes
+reachable on the day this lands, not the three the mail tools happened to use.
+
+**What this costs, and it is the part worth reading.** D5's write-within
+guarantee was structural: a sub-agent built with one client's toolsets has
+nothing to reach a second account with, so the boundary is a property of which
+objects exist rather than an instruction a model is asked to follow. The
+passthrough cannot have that shape, because there is no agent to build. The
+guarantee becomes per call: `call_provider_tool` requires a named client and
+resolves credentials from that client's id alone, so one call touches exactly one
+account. Orchestration across clients becomes the caller's business, recorded
+rather than prevented.
+
+That is weaker on paper. Saying it is equivalent would be false. What it is
+instead is auditable, which is why every call goes to the run log with the tool,
+the client and the arguments before the result comes back, and why the tests
+assert that record rather than assuming it. A read-only tool is logged as an
+observation; anything else, including anything the provider did not annotate, is
+logged as a mutation, because a call that might have changed something belongs in
+the same list as one that did.
+
+`ask_across_clients` keeps its sub-agent and its read-only filter unchanged.
+Open-ended questions across a dozen clients are genuinely what an agent is for,
+and the structural boundary is worth keeping where it still fits. `work_on_client`
+stays too: this adds a way to work without a model, it does not remove the way
+that uses one.
+
+**`read_only` is reported, never enforced.** `list_provider_tools` passes on what
+the provider says about each tool, including that it said nothing. Filtering
+writes out here would defeat the purpose, because naming a client is what unlocks
+writing. It is three-valued for the same reason: `toolsets._is_read_only`
+collapses unknown to False because it decides what a cross-client agent may hold
+and default-deny is right there, but nothing is being decided here, and flattening
+"unannotated" into "writes" would make Munim assert something the provider never
+said.
+
+**It never opens a browser.** `allow_login=False` on every session. A tool call is
+the least attended place in this system: it runs inside a coding agent, in
+response to a model's decision, with nobody looking at a terminal. A consent
+screen appearing there is worse than a failure, so an expired session is a
+refusal naming the `munim connect` command that fixes it.

@@ -116,7 +116,7 @@ def test_the_consent_screen_names_the_client():
     application name they see has to say which client they are connecting."""
     from munim.remote.session import auth_for
 
-    auth = auth_for("Balaji Roofings", "cloudflare", backend=FakeKeyring())
+    auth = auth_for("Balaji Roofings", "cloudflare", keyring=FakeKeyring())
     assert auth.context.client_metadata.client_name == "Munim (Balaji Roofings)"
 
 
@@ -132,7 +132,7 @@ def test_every_provider_registers_as_a_public_client():
     from munim.remote.session import auth_for
 
     for provider in ("cloudflare", "vercel", "resend"):
-        auth = auth_for("X", provider, backend=FakeKeyring())
+        auth = auth_for("X", provider, keyring=FakeKeyring())
         assert auth.context.client_metadata.token_endpoint_auth_method == "none", provider
 
 
@@ -149,7 +149,7 @@ def test_a_provider_that_did_need_a_secret_would_ask_for_one():
     original = dict(servers_mod.SERVERS)
     servers_mod.SERVERS["acme"] = confidential
     try:
-        auth = auth_for("X", "acme", backend=FakeKeyring())
+        auth = auth_for("X", "acme", keyring=FakeKeyring())
         assert auth.context.client_metadata.token_endpoint_auth_method == "client_secret_post"
     finally:
         servers_mod.SERVERS.clear()
@@ -171,7 +171,7 @@ def test_a_provider_with_no_mcp_server_is_refused_at_construction():
     from munim.remote.session import NoRemoteServer, auth_for
 
     with pytest.raises(NoRemoteServer, match="Providers that do"):
-        auth_for("X", "a-provider-that-does-not-exist", backend=FakeKeyring())
+        auth_for("X", "a-provider-that-does-not-exist", keyring=FakeKeyring())
 
 
 def test_both_flows_agree_on_the_redirect():
@@ -181,7 +181,7 @@ def test_both_flows_agree_on_the_redirect():
     from munim.connect.oauth import REDIRECT_URI
     from munim.remote.session import auth_for
 
-    remote = auth_for("X", "cloudflare", backend=FakeKeyring())
+    remote = auth_for("X", "cloudflare", keyring=FakeKeyring())
     assert REDIRECT_URI == redirect_uri()
     assert str(remote.context.client_metadata.redirect_uris[0]) == redirect_uri()
 
@@ -266,7 +266,7 @@ def test_a_provider_needing_an_application_says_so_before_opening_a_browser():
     from munim.remote.session import NoRemoteServer, auth_for
 
     with pytest.raises(NoRemoteServer) as caught:
-        auth_for("X", "gmail", backend=FakeKeyring())
+        auth_for("X", "gmail", keyring=FakeKeyring())
     said = str(caught.value)
     assert "registered by hand" in said
     assert "GMAIL_OAUTH_CLIENT_ID" in said
@@ -283,7 +283,7 @@ def test_a_registered_application_is_used_instead_of_registering(monkeypatch):
     monkeypatch.setenv("GMAIL_OAUTH_CLIENT_SECRET", "their-secret")
     ring = FakeKeyring()
 
-    auth_for("c_1", "gmail", backend=ring)
+    auth_for("c_1", "gmail", keyring=ring)
 
     seeded = KeychainTokenStorage("c_1", "gmail", ring)._read("client")
     assert seeded["client_id"] == "theirs.apps.googleusercontent.com"
@@ -302,7 +302,7 @@ def test_a_registration_the_provider_issued_is_not_overwritten(monkeypatch):
                       '{"client_id": "issued-by-provider", "redirect_uris": []}')
 
     monkeypatch.setenv("GMAIL_OAUTH_CLIENT_ID", "mine")
-    auth_for("c_1", "gmail", backend=ring)
+    auth_for("c_1", "gmail", keyring=ring)
 
     assert store._read("client")["client_id"] == "issued-by-provider"
 

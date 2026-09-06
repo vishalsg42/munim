@@ -471,6 +471,37 @@ def _room() -> Finding:
                    fix="reinstall munim; the control room ships with it")
 
 
+# How long one provider gets to answer before the probe gives up on it. Short
+# on purpose: this runs on every `doctor`, and a provider that has not answered
+# in this long is not going to make the report more useful by answering later.
+def _sessions(registry: Registry) -> list[Finding]:
+    """Which stored sessions actually still open.
+
+    Everything else in this file reads local state. This one goes out to each
+    provider, because a dead session is not visible any other way. The probes
+    and their reasoning live in munim/health.py, shared with the navigable
+    client view, so there is one answer to "is this live" rather than two.
+    """
+    from munim import health
+
+    try:
+        results = health.check_all(registry)
+    except health.NotChecked as why:
+        return [Finding(WARN, "Sessions", f"could not be checked: {why}")]
+    if not results:
+        return []
+
+    dead = [r for r in results if not r.live]
+    if not dead:
+        return [Finding(OK, "Sessions", f"{len(results)} checked, all still open")]
+
+    # One line each rather than a single finding listing them all. Each has its
+    # own fix, and a semicolon-separated run of commands is something a person
+    # has to unpick before they can act on any of it.
+    return [Finding(WARN, "Session", f"{r.client}/{r.provider}: {r.detail}", r.fix)
+            for r in dead]
+
+
 def run(registry: Registry | None = None, verbose: bool = False) -> int:
     """What is wrong with this installation, and nothing else.
 
@@ -517,6 +548,10 @@ def run(registry: Registry | None = None, verbose: bool = False) -> int:
     health.append(timed("coding agent", _mcp_registered))
     health += timed("interpreter", _one_interpreter)
     health += [timed("control room", _room), timed("keychain", _keychain)]
+    # The one check that leaves the machine. Stored credentials say nothing
+    # about whether they still work, so every other report here called two dead
+    # sessions "connected" and only a failed call ever revealed otherwise.
+    health += timed("sessions", lambda: _sessions(registry))
     inventory = ([*timed("providers", _oauth_apps),
                   *timed("clients", lambda: _clients(registry))]
                  if verbose else [])

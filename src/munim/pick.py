@@ -17,7 +17,12 @@ Writes to stderr throughout, like every other prompt here, so a chooser cannot
 contaminate output something is parsing.
 """
 
+import os
+import select
+import shutil
 import sys
+from contextlib import contextmanager
+from dataclasses import dataclass
 
 try:
     import termios
@@ -31,6 +36,18 @@ BACKSPACE = ("\x7f", "\x08")
 ENTER, RETURN = "\r", "\n"
 CTRL_C, ESC = "\x03", "\x1b"
 
+# How long the rest of an escape sequence has to arrive. An arrow key sends
+# all three bytes at once, so this only ever waits when the key really was
+# a bare Esc.
+ESCAPE_TAIL = 0.05
+
+# How long a typed row number waits for another digit before it acts. Selecting
+# the moment a digit could only mean one row was clever and surprising: in a
+# short list "1" is unambiguous, so it fired instantly and the "0" of an
+# intended "10" landed on the next screen. Waiting is what makes typing a
+# number feel like typing a number.
+DIGIT_GAP = 0.4
+
 
 def interactive() -> bool:
     """Whether a live picker is possible. Both ends must be a terminal: reading
@@ -40,16 +57,28 @@ def interactive() -> bool:
 
 
 def _render(options: list[tuple[str, str]], cursor: int, typed: str,
-            new_row: str, drawn: int) -> int:
+            new_row: str, drawn: int, title: str = "",
+            numbering: str = "", back_word: str = "cancel") -> int:
     """Draw the list. The last row is a text field when there is one.
 
     Returns how many lines were used, so the next draw can move back over
     exactly those and redraw in place.
+
+    Homes instead when a walk owns the screen, the way `_draw` does. Without
+    this two prompts in a row stacked: `munim connect` drew its provider list,
+    then its client list underneath, and the one you were answering was the one
+    further down.
     """
-    if drawn:
+    if _owns_screen:
+        sys.stderr.write("\x1b[H")
+    elif drawn:
         sys.stderr.write(f"\x1b[{drawn}A")
 
     rows = [*options] + ([(new_row, "")] if new_row else [])
+    extra = 0
+    if _owns_screen and title:
+        sys.stderr.write(f"\x1b[2K{paint(title, BOLD)}\n\x1b[2K\n")
+        extra = 5      # title, blank, blank, footer, and the trailing newline
     for index, (label, hint) in enumerate(rows):
         here = index == cursor
         mark = "❯" if here else " "
@@ -64,52 +93,107 @@ def _render(options: list[tuple[str, str]], cursor: int, typed: str,
         else:
             body = label + (f"   {hint}" if hint else "")
 
-        sys.stderr.write(f"\x1b[2K {mark} {index + 1}  {body}\n")
+        # `1.` rather than `1  `, matching the navigable menu. Two numbering
+        # styles in one tool is one more than anybody should have to notice.
+        sys.stderr.write(f"\x1b[2K {mark} {index + 1}. {body}\n")
+    if _owns_screen:
+        pending = f"  {numbering}…" if numbering else ""
+        sys.stderr.write("\x1b[2K\n\x1b[2K"
+                         + paint(f"↑/↓ or a number{pending} · Enter select · "
+                                 f"Esc {back_word}", DIM)
+                         + "\n")
+        sys.stderr.write("\x1b[J")
     sys.stderr.flush()
-    return len(rows)
+    return len(rows) + extra
 
 
 def _read_key() -> str:
-    """One keypress, including the three bytes an arrow key arrives as."""
-    first = sys.stdin.read(1)
-    if first != ESC:
-        return first
-    rest = sys.stdin.read(2)            # arrows are ESC [ A/B
-    return first + rest if rest else ESC
+    """One keypress, including the three bytes an arrow key arrives as.
+
+    Read straight from the file descriptor, never through `sys.stdin`. Python's
+    text layer reads ahead, so an arrow's trailing "[B" ended up in *its*
+    buffer while `select` asked the kernel, saw nothing waiting, and concluded
+    the Esc was on its own. Pressing Down went back a screen.
+
+    Esc is both a key and the first byte of every arrow, so telling them apart
+    means waiting to see whether more follows. An arrow sends all three bytes
+    in a single write and they are already here; a finger is slower than any
+    terminal. Reading two bytes unconditionally instead made a bare Esc block
+    on bytes that were never coming, which looked like the picker had frozen.
+
+    A UTF-8 lead byte says how many continuation bytes to expect, because a
+    typed name may not be ASCII and half a character is not a keypress.
+    """
+    fd = sys.stdin.fileno()
+    data = os.read(fd, 1)
+    if not data:
+        return CTRL_C                   # the terminal went away
+
+    if data == ESC.encode():
+        if select.select([fd], [], [], ESCAPE_TAIL)[0]:
+            data += os.read(fd, 2)      # arrows are ESC [ A/B
+        return data.decode("utf-8", "replace")
+
+    lead = data[0]
+    need = (4 if lead >= 0xF0 else 3 if lead >= 0xE0 else
+            2 if lead >= 0xC0 else 1)
+    while len(data) < need:
+        more = os.read(fd, need - len(data))
+        if not more:
+            break
+        data += more
+    return data.decode("utf-8", "replace")
 
 
 def _live(prompt: str, options: list[tuple[str, str]], allow_new: bool,
-          new_hint: str):
-    print(prompt, file=sys.stderr)
+          new_hint: str, can_go_back: bool = False):
+    if not _owns_screen:
+        print(prompt, file=sys.stderr)
 
     new_row = new_hint or "a new one, type the name" if allow_new else ""
     count = len(options) + (1 if new_row else 0)
     typed, cursor, drawn = "", 0, 0
+    numbering = ""              # digits so far, when a row number is being typed
 
     saved = termios.tcgetattr(sys.stdin)
     try:
-        tty.setraw(sys.stdin.fileno())
+        tty.setraw(sys.stdin.fileno(), termios.TCSANOW)
         while True:
             termios.tcsetattr(sys.stdin, termios.TCSADRAIN, saved)
-            drawn = _render(options, cursor, typed, new_row, drawn)
-            tty.setraw(sys.stdin.fileno())
+            drawn = _render(options, cursor, typed, new_row, drawn, prompt,
+                            numbering, "back" if can_go_back else "cancel")
+            tty.setraw(sys.stdin.fileno(), termios.TCSANOW)
 
-            key = _read_key()
+            if numbering:
+                key = _read_within(DIGIT_GAP)
+                if key is None:
+                    wanted, numbering = int(numbering), ""
+                    if wanted <= len(options):
+                        return wanted - 1
+                    if new_row and wanted == count:
+                        cursor = count - 1      # into the field, not picked
+                    continue
+            else:
+                key = _read_key()
             on_new = bool(new_row) and cursor == count - 1
 
-            if key in (CTRL_C, ESC):
+            if key == CTRL_C:
                 return None
+            if key == ESC:
+                return BACK if can_go_back else None
             if key in (ENTER, RETURN):
+                if numbering and int(numbering) <= len(options):
+                    return int(numbering) - 1
                 if on_new:
                     if typed.strip():
                         return typed.strip()
                     continue            # an empty name is not a client
                 return cursor
             if key == UP:
-                cursor = (cursor - 1) % count
+                cursor, numbering = (cursor - 1) % count, ""
                 continue
             if key == DOWN:
-                cursor = (cursor + 1) % count
+                cursor, numbering = (cursor + 1) % count, ""
                 continue
             if on_new:
                 # Typing belongs to the field once you are standing in it.
@@ -118,12 +202,9 @@ def _live(prompt: str, options: list[tuple[str, str]], allow_new: bool,
                 elif key.isprintable():
                     typed += key
                 continue
-            if key.isdigit() and key != "0":
-                wanted = int(key) - 1
-                if wanted < len(options):
-                    return wanted
-                if new_row and wanted == count - 1:
-                    cursor = wanted     # move into the field rather than pick it
+            if key.isdigit():
+                numbering = _digit(numbering, key, count)
+                continue
     finally:
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, saved)
         sys.stderr.write("\n")
@@ -166,9 +247,16 @@ def _numbered(prompt: str, options: list[tuple[str, str]], ask,
 
 
 def choose(prompt: str, options: list[tuple[str, str]], ask=None,
-           resolve=None, allow_new: bool = False, new_hint: str = ""):
+           resolve=None, allow_new: bool = False, new_hint: str = "",
+           can_go_back: bool = False):
     """Pick one. Returns its index, a typed string when it names something new,
     or None if the operator backed out.
+
+    `can_go_back` splits Esc from Ctrl-C, the way `menu` already does. A
+    question that is one step of several returns BACK on Esc so the caller can
+    step up a level; a question standing on its own keeps returning None for
+    both, because there is nowhere above it to go and every existing caller
+    reads None as "backed out".
 
     `ask` forces the numbered path and is how the tests drive this: a raw-mode
     picker cannot be typed at by a test, and a chooser that could only be
@@ -177,5 +265,406 @@ def choose(prompt: str, options: list[tuple[str, str]], ask=None,
     if not options and not allow_new:
         return None
     if ask is None and interactive():
-        return _live(prompt, options, allow_new, new_hint)
+        return _live(prompt, options, allow_new, new_hint, can_go_back)
     return _numbered(prompt, options, ask, resolve, allow_new, new_hint)
+
+
+# ---------------------------------------------------------------------------
+# The navigable menu.
+#
+# `choose` above answers one question and returns. This answers "where do you
+# want to go", which is a different shape: rows are grouped under headers, a
+# long list has to page rather than scroll off, Esc means "up one level" rather
+# than "give up", and the footer has to say so because none of that is
+# guessable.
+#
+# Kept beside `choose` rather than folded into it. Every existing caller asks
+# one flat question, and giving them headers, paging and a back sentinel they
+# never use would put the risk of this change into paths that did not need it.
+# ---------------------------------------------------------------------------
+
+# Backing out one level. Distinct from None on purpose: `choose` returns None
+# for both Esc and Ctrl-C, so a caller could never tell "go up" from "quit",
+# and a nested view needs to.
+BACK = object()
+
+# Rows the cursor cannot land on, and the lines around the list, all cost
+# vertical space that the viewport has to leave room for.
+CHROME = 6
+
+
+@dataclass(frozen=True)
+class Head:
+    """A group label. Not selectable."""
+    text: str
+
+
+@dataclass(frozen=True)
+class Item:
+    label: str
+    hint: str = ""
+    value: object = None
+    mark: str = ""          # a status glyph, already coloured
+
+
+@dataclass(frozen=True)
+class Blank:
+    """Vertical space between groups."""
+
+
+# The alternate screen buffer. Entering it means a walk can clear and redraw
+# without destroying what was in the terminal before, and leaving it puts the
+# scrollback back exactly as it was. The first version of this drew each screen
+# below the last, so navigating four levels left four stacked screens on top of
+# each other and the one you were looking at was the one furthest down.
+ALT_ON, ALT_OFF = "\x1b[?1049h", "\x1b[?1049l"
+
+# The cursor is hidden for the length of a walk. It has nowhere useful to sit
+# in a menu, and leaving it visible makes it skid down the frame on every
+# redraw. Claude Code hides it for the same reason.
+CURSOR_OFF, CURSOR_ON = "\x1b[?25l", "\x1b[?25h"
+
+# Whether a walk currently owns the whole screen. When it does, each frame
+# homes the cursor and erases below rather than counting lines back, which is
+# both simpler and immune to a frame whose height changed.
+_owns_screen = False
+
+
+@contextmanager
+def full_screen():
+    """Own the terminal for the duration of a walk, and hand it back after."""
+    global _owns_screen
+    if not interactive():
+        yield
+        return
+    sys.stderr.write(ALT_ON + CURSOR_OFF)
+    sys.stderr.flush()
+    _owns_screen = True
+    try:
+        yield
+    finally:
+        _owns_screen = False
+        sys.stderr.write(CURSOR_ON + ALT_OFF)
+        sys.stderr.flush()
+
+
+@contextmanager
+def suspended():
+    """Step out of the full screen, run something, and come back.
+
+    An action that opens a browser, prompts, or prints progress cannot happen
+    inside a frame that redraws over it. The first version of this menu dodged
+    the problem by refusing to act at all and printing the command for the
+    operator to run themselves, which meant every item on it did nothing.
+    """
+    global _owns_screen
+    if not _owns_screen:
+        yield
+        return
+    _owns_screen = False
+    sys.stderr.write(CURSOR_ON + ALT_OFF)
+    sys.stderr.flush()
+    try:
+        yield
+    finally:
+        sys.stderr.write(ALT_ON + CURSOR_OFF)
+        sys.stderr.flush()
+        _owns_screen = True
+
+
+GREEN, RED, AMBER = "\x1b[32m", "\x1b[31m", "\x1b[33m"
+DIM, BOLD, CYAN, RESET = "\x1b[2m", "\x1b[1m", "\x1b[36m", "\x1b[0m"
+
+
+def coloured() -> bool:
+    """Whether to emit colour at all.
+
+    NO_COLOR is honoured because it is the convention, and stderr being a pipe
+    matters more: this whole module writes there, and escape codes in something
+    being parsed is the bug that makes people distrust a tool's output.
+    """
+    return not os.environ.get("NO_COLOR") and sys.stderr.isatty()
+
+
+def paint(text: str, code: str) -> str:
+    return f"{code}{text}{RESET}" if coloured() else text
+
+
+def _digit(buffer: str, key: str, count: int) -> str:
+    """Add a digit to a typed row number, or start over if it cannot be one.
+
+    Numbering used to stop at nine, because one keypress is one digit and a
+    list of eleven showed a 10 and an 11 that nothing could select. Removing
+    the numbers was the wrong half of the fix: the answer is to let a number
+    take more than one keypress.
+
+    Nothing is selected here. An earlier version acted the moment a digit could
+    only mean one row, which is clever and wrong: in a short list "1" is
+    unambiguous, so it fired at once and the "0" of an intended "10" arrived
+    after the screen had already moved on. The caller waits DIGIT_GAP for
+    another digit instead, so typing a number behaves like typing a number
+    whatever the list length.
+    """
+    candidate = buffer + key
+    if 1 <= int(candidate) <= count:
+        return candidate
+    # Not a row. Treat the digit as a fresh attempt rather than ignoring it.
+    return key if 1 <= int(key) <= count else ""
+
+
+def _read_within(seconds: float):
+    """One keypress, or None if none arrives in time."""
+    if not select.select([sys.stdin], [], [], seconds)[0]:
+        return None
+    return _read_key()
+
+
+def _selectable(rows) -> list[int]:
+    return [i for i, row in enumerate(rows) if isinstance(row, Item)]
+
+
+def _viewport(rows, cursor: int, height: int) -> tuple[int, int]:
+    """Which slice of rows to draw, keeping the cursor inside it."""
+    if len(rows) <= height:
+        return 0, len(rows)
+    half = height // 2
+    start = max(0, min(cursor - half, len(rows) - height))
+    return start, start + height
+
+
+def _draw(title, subtitle, rows, cursor, footer, numbered, drawn, height,
+          header=()):
+    if _owns_screen:
+        sys.stderr.write("\x1b[H")     # home; erase below happens after
+    elif drawn:
+        sys.stderr.write(f"\x1b[{drawn}A")
+
+    lines = [paint(title, BOLD)] if title else []
+    if subtitle:
+        lines.append(paint(subtitle, DIM))
+    lines.extend(header)
+    lines.append("")
+
+    start, end = _viewport(rows, cursor, height)
+    lines.append(paint(f"  ↑ {start} more above", DIM) if start else "")
+
+    order = _selectable(rows)
+    for index in range(start, end):
+        row = rows[index]
+        if isinstance(row, Blank):
+            lines.append("")
+            continue
+        if isinstance(row, Head):
+            lines.append("  " + paint(row.text, BOLD))
+            continue
+
+        here = index == cursor
+        pointer = paint("❯", CYAN) if here else " "
+        # Numbered only when every row is reachable by one keypress. Offering
+        # "7" on a list of forty is a promise the keyboard cannot keep.
+        number = f"{order.index(index) + 1}. " if numbered else ""
+        label = paint(row.label, CYAN) if here else row.label
+        body = label + (f" · {row.mark}" if row.mark else "")
+        if row.hint:
+            body += "   " + paint(row.hint, DIM)
+        lines.append(f" {pointer} {number}{body}")
+
+    below = len(rows) - end
+    lines.append(paint(f"  ↓ {below} more below", DIM) if below else "")
+    lines.append("")
+    lines.append(paint(footer, DIM))
+
+    for line in lines:
+        sys.stderr.write(f"\x1b[2K{line}\n")
+    if _owns_screen:
+        sys.stderr.write("\x1b[J")     # nothing from a taller previous screen
+    sys.stderr.flush()
+    return len(lines)
+
+
+def ask_line(prompt: str, *, default: str = "") -> str | None:
+    """One typed line, with Esc to cancel. None when cancelled.
+
+    `input()` was used here first, and it has no idea what Escape means: it
+    inserted the raw bytes, so the prompt filled with ^[^[^[ while the operator
+    waited for it to back out. Every other key in this walk cancels with Esc,
+    and a prompt that alone does not is the sort of inconsistency people stop
+    trusting a tool over.
+
+    Falls back to `input()` where there is no terminal, like everything else
+    here, and returns None on EOF or interrupt so the caller has one thing to
+    check either way.
+    """
+    if not interactive():
+        try:
+            return input()
+        except (EOFError, KeyboardInterrupt):
+            return None
+
+    typed = ""
+    saved = termios.tcgetattr(sys.stdin)
+    # Visible while typing. A walk hides the cursor, and a field you cannot see
+    # your position in is worse than no field.
+    sys.stderr.write(CURSOR_ON)
+    try:
+        while True:
+            sys.stderr.write(f"\r\x1b[2K{prompt}{typed}")
+            sys.stderr.flush()
+            tty.setraw(sys.stdin.fileno(), termios.TCSANOW)
+            try:
+                key = _read_key()
+            finally:
+                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, saved)
+
+            if key in (CTRL_C, ESC):
+                return None
+            if key in (ENTER, RETURN):
+                return typed or default
+            if key in BACKSPACE:
+                typed = typed[:-1]
+            elif key.isprintable():
+                typed += key
+    finally:
+        sys.stderr.write(CURSOR_OFF if _owns_screen else "")
+        sys.stderr.write("\n")
+        sys.stderr.flush()
+
+
+def menu(title: str, rows: list, *, subtitle: str = "", header=(),
+         can_go_back: bool = True, keys=None, refresh=None, tick=0.15):
+    """Navigate a grouped list. Returns the chosen Item's value, BACK, or None.
+
+    None is Ctrl-C, which quits from any depth. BACK is Esc, which the caller
+    turns into "up one level", or into a quit at the top.
+
+    `keys` is the seam, and it is here for the reason `ask` is on `choose`: a
+    raw-mode loop that can only be driven by hand is one nobody will change
+    with confidence. Pass an iterable of keypresses and raw mode is skipped
+    entirely, so the drawing and the navigation stay testable without a
+    terminal.
+
+    Pass an *iterator* when several menus make up one walk. iter() on a list
+    restarts it, so handing the same list to each screen replays the same
+    keypresses forever; iter() on an iterator returns the same object, which
+    is what lets position carry across screens.
+
+    `refresh` makes the menu able to change without a keypress. It is called
+    from the idle path every `tick` seconds and answers one of three things:
+
+        (rows, subtitle)  something moved, redraw
+        False             nothing moved, keep waiting, do not redraw
+        None              nothing left to wait for, stop asking
+
+    Three and not two, because "nothing moved" and "nothing left" are
+    different, and a two-valued version made the caller hand back whatever rows
+    it had captured in its closure, which reverted the screen to a frame from
+    before the last update.
+    """
+    order = _selectable(rows)
+    if not order:
+        return BACK if can_go_back else None
+    if keys is None and not interactive():
+        return BACK
+
+    at, drawn = 0, 0
+    typing = ""                 # digits so far, when a row number is being typed
+    scripted = iter(keys) if keys is not None else None
+    streaming = refresh is not None
+
+    def shape():
+        """Recomputed per frame, because rows can change while streaming."""
+        order = _selectable(rows)
+        numbered = True
+        pending = f"  {typing}…" if typing else ""
+        footer = (f"↑/↓ or a number{pending} · Enter select · "
+                  f"Esc {'back' if can_go_back else 'quit'}")
+        height = max(3, shutil.get_terminal_size().lines - CHROME
+                     - (2 if subtitle else 1) - len(header))
+        return order, numbered, footer, height
+
+    order, numbered, footer, height = shape()
+    # Only paint when something actually changed. A refresh tick that redrew
+    # regardless repainted the whole frame several times a second for the
+    # entire time the probes ran, which is flicker over anything but a local
+    # terminal.
+    dirty = True
+
+    saved = termios.tcgetattr(sys.stdin) if scripted is None else None
+    try:
+        if scripted is None:
+            tty.setraw(sys.stdin.fileno(), termios.TCSANOW)
+        while True:
+            if dirty:
+                order, numbered, footer, height = shape()
+                if scripted is None:
+                    termios.tcsetattr(sys.stdin, termios.TCSADRAIN, saved)
+                # Clamped rather than trusted. The row set is meant to be
+                # stable while streaming, and a cursor that outruns it would
+                # raise under the operator's hands rather than look wrong.
+                at = min(at, len(order) - 1)
+                drawn = _draw(title, subtitle, rows, order[at], footer,
+                              numbered, drawn, height, header)
+                dirty = False
+            if scripted is None:
+                # TCSANOW, not the TCSAFLUSH tty.setraw defaults to. FLUSH
+                # discards input received but not yet read, and this runs once
+                # per frame. Blocking on a keypress that window is invisible;
+                # with a refresh tick it opens several times a second and eats
+                # keys the operator has already pressed.
+                tty.setraw(sys.stdin.fileno(), termios.TCSANOW)
+
+            if scripted is None and typing:
+                # A number is half typed. Give the next digit a moment to
+                # arrive; if none does, the number is finished.
+                key = _read_within(DIGIT_GAP)
+                if key is None:
+                    wanted, typing, dirty = int(typing), "", True
+                    if wanted <= len(order):
+                        return rows[order[wanted - 1]].value
+                    continue
+            elif scripted is None:
+                if streaming and not select.select([sys.stdin], [], [], tick)[0]:
+                    # Nothing typed. Let the caller move things along, redraw
+                    # if it did, and go round again.
+                    moved = refresh()
+                    if moved is None:
+                        streaming = False       # settled: block from here on
+                        continue
+                    if moved is False:
+                        continue                # nothing new, nothing to draw
+                    rows, subtitle = moved
+                    order, numbered, footer, height = shape()
+                    dirty = True
+                    continue
+                key = _read_key()
+            elif scripted is not None:
+                # Running out of scripted keys means the caller expected the
+                # menu to have returned by now. Backing out beats blocking.
+                key = next(scripted, ESC)
+            if key == CTRL_C:
+                return None
+            if key == ESC:
+                return BACK
+            if key in (ENTER, RETURN):
+                # A number half typed and then confirmed means that row, not
+                # whatever the cursor happens to be sitting on.
+                if typing and int(typing) <= len(order):
+                    return rows[order[int(typing) - 1]].value
+                return rows[order[at]].value
+            if key == UP:
+                at, typing, dirty = (at - 1) % len(order), "", True
+            elif key == DOWN:
+                at, typing, dirty = (at + 1) % len(order), "", True
+            elif key.isdigit():
+                typing, dirty = _digit(typing, key, len(order)), True
+            elif key in BACKSPACE and typing:
+                typing, dirty = typing[:-1], True
+            else:
+                if typing:
+                    typing, dirty = "", True
+    finally:
+        if scripted is None:
+            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, saved)
+        if not _owns_screen:
+            sys.stderr.write("\n")
+        sys.stderr.flush()

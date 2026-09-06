@@ -6,6 +6,7 @@ time; a registration and a token set per client is what removes it.
 """
 
 import json
+import time
 
 from mcp.client.auth import TokenStorage
 
@@ -13,6 +14,10 @@ from munim import vault
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 
 SERVICE = "munim-mcp"
+
+# Munim's own key inside the stored token record. Underscored like
+# `_seeded` so it reads as bookkeeping rather than something a provider sent.
+ISSUED_AT = "_obtained_at"
 
 
 # How Munim authenticates when a provider issues it a secret. Named once and
@@ -30,36 +35,78 @@ class KeychainTokenStorage(TokenStorage):
     be, and the failure is silent.
     """
 
-    def __init__(self, client: str, provider: str, backend=None) -> None:
+    def __init__(self, client: str, provider: str, keyring=None) -> None:
         self._client = client
         self._provider = provider
         # Resolved here, not as a default argument. A default is bound when the
         # module is imported, so the store could never be substituted after
         # that: a caller passing nothing always reached the real one, including
         # from a test that had replaced it.
-        self._backend = backend if backend is not None else vault
+        # Named `keyring`, not `backend`. A CredentialBackend is a different
+        # object with different methods, and calling both of them "backend" put
+        # the wrong one in here twice: once in health.py and once in the MCP
+        # server, where every OAuth provider raised AttributeError on
+        # get_password while the identical CLI command worked.
+        self._keyring = keyring if keyring is not None else vault
 
     def _service(self, kind: str) -> str:
         return f"{SERVICE}:{self._provider}:{kind}"
 
     def _read(self, kind: str) -> dict | None:
         try:
-            raw = self._backend.get_password(self._service(kind), self._client)
+            raw = self._keyring.get_password(self._service(kind), self._client)
         except vault.StoreUnavailable:
             # Nowhere to store means nothing stored. See KeychainBackend.get.
             return None
         return json.loads(raw) if raw else None
 
-    def _write(self, kind: str, payload) -> None:
-        self._backend.set_password(self._service(kind), self._client,
-                                   payload.model_dump_json())
+    def _write(self, kind: str, payload, **extra) -> None:
+        # Written through the dict rather than the model so Munim's own
+        # bookkeeping can ride along in the same record. `get_tokens` and
+        # `get_client_info` pop their key back out, so nothing the provider
+        # defined is touched and no model needs an extra field.
+        record = payload.model_dump(mode="json")
+        record.update(extra)
+        self._keyring.set_password(self._service(kind), self._client,
+                                   json.dumps(record))
 
     async def get_tokens(self) -> OAuthToken | None:
         data = self._read("tokens")
-        return OAuthToken(**data) if data else None
+        if not data:
+            return None
+        data.pop(ISSUED_AT, None)   # our bookkeeping, not the provider's
+        return OAuthToken(**data)
 
     async def set_tokens(self, tokens: OAuthToken) -> None:
-        self._write("tokens", tokens)
+        self._write("tokens", tokens, **{ISSUED_AT: time.time()})
+
+    def expires_at(self) -> float | None:
+        """When the stored access token stops being accepted, or None if unknown.
+
+        The reason this exists is a bug that made every session look like it
+        expired in a day. OAuth grants `expires_in`, a duration, and the SDK
+        turns it into an absolute time on the object it is holding
+        (`_TokenContext.update_token_expiry`). That object dies with the
+        process. Nothing wrote the absolute time down, so the next run loaded a
+        token with no idea how old it was.
+
+        `is_token_valid()` treats "no expiry known" as valid, so a fresh
+        process believed a day-old token, sent it, got a 401, and the SDK went
+        straight to a full browser login without ever trying the refresh token
+        sitting beside it. A one-hour token therefore read as "you must sign in
+        again", daily, for as long as this was unfixed.
+
+        Recording the issue time is the whole fix. Tokens stored before this
+        existed have no issue time and return None, which reproduces exactly
+        the old behaviour for them rather than guessing an age.
+        """
+        data = self._read("tokens")
+        if not data:
+            return None
+        issued, lasts = data.get(ISSUED_AT), data.get("expires_in")
+        if issued is None or lasts is None:
+            return None
+        return float(issued) + float(lasts)
 
     async def get_client_info(self) -> OAuthClientInformationFull | None:
         data = self._read("client")
@@ -80,7 +127,7 @@ class KeychainTokenStorage(TokenStorage):
         existing = self._read("client")
         if existing and not existing.get("_seeded"):
             return
-        self._backend.set_password(self._service("client"), self._client,
+        self._keyring.set_password(self._service("client"), self._client,
                                    json.dumps({
                                        "client_id": client_id,
                                        "client_secret": client_secret or None,
@@ -102,11 +149,11 @@ class KeychainTokenStorage(TokenStorage):
         servers.json, because that file is a list of servers and this is a
         credential belonging to one client.
         """
-        self._backend.set_password(self._service("endpoint"), self._client, url)
+        self._keyring.set_password(self._service("endpoint"), self._client, url)
 
     def endpoint(self) -> str | None:
         try:
-            return self._backend.get_password(self._service("endpoint"), self._client)
+            return self._keyring.get_password(self._service("endpoint"), self._client)
         except vault.StoreUnavailable:
             return None
 
@@ -118,11 +165,11 @@ class KeychainTokenStorage(TokenStorage):
         maintains. Two copies of a fact one of them can never update is how
         `ClientRecord.providers` came to be wrong about everything.
         """
-        self._backend.set_password(self._service("account"), self._client, account)
+        self._keyring.set_password(self._service("account"), self._client, account)
 
     def account(self) -> str | None:
         try:
-            return self._backend.get_password(self._service("account"), self._client)
+            return self._keyring.get_password(self._service("account"), self._client)
         except vault.StoreUnavailable:
             return None
 
@@ -139,7 +186,7 @@ class KeychainTokenStorage(TokenStorage):
         found = []
         for kind in ("client", "tokens", "account", "endpoint"):
             try:
-                if self._backend.get_password(self._service(kind), self._client):
+                if self._keyring.get_password(self._service(kind), self._client):
                     found.append(kind)
             except vault.StoreUnavailable:
                 return []
@@ -154,9 +201,9 @@ class KeychainTokenStorage(TokenStorage):
         """
         gone = []
         for kind in ("client", "tokens", "account", "endpoint"):
-            if self._backend.get_password(self._service(kind), self._client):
+            if self._keyring.get_password(self._service(kind), self._client):
                 try:
-                    self._backend.delete_password(self._service(kind), self._client)
+                    self._keyring.delete_password(self._service(kind), self._client)
                     gone.append(kind)
                 except Exception:
                     pass
@@ -171,14 +218,14 @@ class KeychainTokenStorage(TokenStorage):
         delete that fails after a successful copy costs a stale entry, and one
         that fails before costs the session.
         """
-        moved = KeychainTokenStorage(client, self._provider, self._backend)
+        moved = KeychainTokenStorage(client, self._provider, self._keyring)
         for kind in ("client", "tokens", "account", "endpoint"):
-            raw = self._backend.get_password(self._service(kind), self._client)
+            raw = self._keyring.get_password(self._service(kind), self._client)
             if raw is not None:
-                self._backend.set_password(moved._service(kind), client, raw)
+                self._keyring.set_password(moved._service(kind), client, raw)
         for kind in ("client", "tokens", "account", "endpoint"):
             try:
-                self._backend.delete_password(self._service(kind), self._client)
+                self._keyring.delete_password(self._service(kind), self._client)
             except Exception:
                 pass  # a leftover provisional entry is harmless
         return moved

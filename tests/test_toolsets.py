@@ -39,7 +39,7 @@ def test_a_name_that_leaves_nothing_is_refused():
 
 def test_each_client_gets_its_own_prefix():
     sets = toolsets_for(["Balaji Roofings", "Kloudfirst"], "cloudflare",
-                        backend=FakeKeyring())
+                        keyring=FakeKeyring())
     assert len(sets) == 2
 
 
@@ -48,22 +48,22 @@ def test_two_clients_that_would_share_a_prefix_are_refused():
     means one client's tools answer for the other, which is a successful
     mutation on the wrong account: the fault D5 exists to prevent."""
     with pytest.raises(ValueError, match="both become"):
-        toolsets_for(["acme-uk", "Acme UK"], "cloudflare", backend=FakeKeyring())
+        toolsets_for(["acme-uk", "Acme UK"], "cloudflare", keyring=FakeKeyring())
 
 
 def test_a_provider_with_no_mcp_server_is_refused():
     """Named a real provider once, and that provider turned out to have a
     server. A name that cannot acquire one keeps the assertion about the code."""
     with pytest.raises(NoRemoteServer):
-        toolset_for("Acme", "a-provider-that-does-not-exist", backend=FakeKeyring())
+        toolset_for("Acme", "a-provider-that-does-not-exist", keyring=FakeKeyring())
 
 
 def test_two_toolsets_for_one_provider_are_told_apart_by_name():
     """Same server, same process, two clients. The prefix is what a tool call
     uses to say which account it means."""
     ring = FakeKeyring()
-    a = toolset_for("Balaji Roofings", "cloudflare", backend=ring)
-    b = toolset_for("Kloudfirst", "cloudflare", backend=ring)
+    a = toolset_for("Balaji Roofings", "cloudflare", keyring=ring)
+    b = toolset_for("Kloudfirst", "cloudflare", keyring=ring)
     assert a is not b
     assert a._prefix == "balaji_roofings"
     assert b._prefix == "kloudfirst"
@@ -75,8 +75,8 @@ def test_each_client_authenticates_as_itself():
     from munim.remote.session import auth_for
 
     ring = FakeKeyring()
-    a = auth_for("Balaji Roofings", "cloudflare", backend=ring)
-    b = auth_for("Kloudfirst", "cloudflare", backend=ring)
+    a = auth_for("Balaji Roofings", "cloudflare", keyring=ring)
+    b = auth_for("Kloudfirst", "cloudflare", keyring=ring)
     assert a is not b
     assert a.context.client_metadata.client_name == "Munim (Balaji Roofings)"
     assert b.context.client_metadata.client_name == "Munim (Kloudfirst)"
@@ -114,7 +114,7 @@ def test_a_destructive_tool_is_excluded_even_if_it_claims_read_only():
 
 def test_a_cross_client_toolset_carries_the_filter_and_a_single_client_does_not():
     """Write within: naming one client is what unlocks its writes."""
-    across = toolset_for("Acme", "cloudflare", backend=FakeKeyring(), read_only=True)
-    within = toolset_for("Acme", "cloudflare", backend=FakeKeyring())
+    across = toolset_for("Acme", "cloudflare", keyring=FakeKeyring(), read_only=True)
+    within = toolset_for("Acme", "cloudflare", keyring=FakeKeyring())
     assert across._tool_filters is not None
     assert within._tool_filters is None

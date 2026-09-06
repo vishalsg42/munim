@@ -13,8 +13,9 @@ a session for a client that is not registered.
 """
 
 import asyncio
+import logging
 import urllib.parse
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 
 from mcp import ClientSession
 from mcp.client.auth import OAuthClientProvider
@@ -126,7 +127,79 @@ def _apply_sep_2207() -> None:
     oauth2.get_client_metadata_scopes = wrapped
 
 
-def auth_for(client: str, provider: str, *, backend=None,
+class _RemembersExpiry(OAuthClientProvider):
+    """An OAuth client that knows how old the tokens it just loaded are.
+
+    The SDK computes an absolute expiry only when it obtains tokens itself
+    (`_TokenContext.update_token_expiry`, called from the authorization and
+    refresh handlers). `_initialize` loads tokens from storage and sets
+    `current_tokens` without ever setting `token_expiry_time`.
+
+    That is benign in a long-lived process and wrong in this one. Every `munim`
+    command is a fresh process, and `is_token_valid()` reads
+
+        not self.token_expiry_time or time.time() <= self.token_expiry_time
+
+    so an unset expiry means "valid". A day-old access token therefore passed
+    the check, went out on the wire, came back 401, and the SDK's 401 branch is
+    a full authorization rather than a refresh. The refresh token sat unused on
+    disk while Munim demanded a browser.
+
+    So the one-hour token behaved like a one-hour *account*: reconnect, work,
+    come back tomorrow, sign in again. Filling in the expiry the store recorded
+    is what lets the refresh branch fire instead.
+    """
+
+    async def _initialize(self) -> None:
+        await super()._initialize()
+        self._adopt_expiry()
+
+    def _adopt_expiry(self) -> None:
+        expires = getattr(self.context.storage, "expires_at", None)
+        when = expires() if callable(expires) else None
+        if when is not None:
+            self.context.token_expiry_time = when
+
+    async def async_auth_flow(self, request):
+        """Re-read the store before every request, because we are not alone.
+
+        Cloudflare rotates refresh tokens: using one invalidates it. Munim runs
+        as a long-lived MCP server *and* as a CLI, so several processes share
+        one store, each holding whatever it loaded at startup. When one of them
+        refreshes, every other copy is instantly dead, and the SDK's answer to
+        a rejected refresh is a full browser authorization.
+
+        That is the "authorize again, and again" this fix chases. Ironically it
+        only became reachable once expiry was recorded at all: before that no
+        refresh ever fired, so nothing ever rotated, and the operator simply
+        got a browser login every hour instead.
+
+        Re-reading here costs one file read per request and means a process
+        refreshes with the newest token on disk, or discovers it does not need
+        to because somebody else already did.
+        """
+        if self._initialized:
+            held = await self.context.storage.get_tokens()
+            if held is not None and held.access_token:
+                self.context.current_tokens = held
+                self._adopt_expiry()
+
+        # Proxied with asend, not `async for`. httpx's auth flow is a two-way
+        # generator: it yields a request and expects the response sent back in.
+        # Iterating it feeds None where the response belongs, and the SDK then
+        # reads `.status_code` off it.
+        inner = super().async_auth_flow(request)
+        answer = None
+        try:
+            while True:
+                answer = yield await inner.asend(answer)
+        except StopAsyncIteration:
+            return
+        finally:
+            await inner.aclose()
+
+
+def auth_for(client: str, provider: str, *, keyring=None,
              on_url=None, label: str | None = None,
              allow_login: bool = True) -> OAuthClientProvider:
     """The OAuth client for one (client, provider), storing to the keychain.
@@ -148,7 +221,7 @@ def auth_for(client: str, provider: str, *, backend=None,
             "Providers that do: " + ", ".join(sorted(SERVERS))
         )
 
-    storage = (KeychainTokenStorage(client, provider, backend) if backend
+    storage = (KeychainTokenStorage(client, provider, keyring) if keyring
                else KeychainTokenStorage(client, provider))
 
     # The state the SDK put on the authorization request. The listener waits for
@@ -175,8 +248,10 @@ def auth_for(client: str, provider: str, *, backend=None,
             # The caller may not have a name yet: connecting without one uses a
             # provisional key until the provider says which account it was, and
             # printing that key reads as gibberish.
-            whose = f"{label}'s " if not label.startswith("…") else ""
-            print(f"Sign in to the {whose}{provider} account:\n{url}", flush=True)
+            # "the Balaji Roofings's cloudflare account" was reading badly:
+            # the article and the possessive cannot both be there.
+            whose = f"{label}'s " if not label.startswith("…") else "the "
+            print(f"Sign in to {whose}{provider} account:\n{url}", flush=True)
             webbrowser.open(url)
 
     async def callback() -> tuple[str, str | None]:
@@ -223,7 +298,7 @@ def auth_for(client: str, provider: str, *, backend=None,
                 f"need this.")
         storage.seed_client_info(*registered, redirect_uri())
 
-    return OAuthClientProvider(
+    return _RemembersExpiry(
         server_url=server.url,
         client_metadata=meta,
         storage=storage,
@@ -232,7 +307,7 @@ def auth_for(client: str, provider: str, *, backend=None,
     )
 
 
-def headers_for(client: str, provider: str, backend=None) -> dict | None:
+def headers_for(client: str, provider: str, keys=None) -> dict | None:
     """The header this client authenticates to this provider with, if any.
 
     A fourth way in beside registering a client, registering an application and
@@ -247,8 +322,12 @@ def headers_for(client: str, provider: str, backend=None) -> dict | None:
         return None
 
     from munim.container import KeychainBackend
-    backend = backend or KeychainBackend()
-    key = backend.get(client, provider)
+
+    # `keys`, and a CredentialBackend, because this is the pasted-API-key half.
+    # The other half of this module wants a vault-shaped `keyring`. Two names
+    # for two objects, since one name for both shipped a bug twice.
+    keys = keys or KeychainBackend()
+    key = keys.get(client, provider)
     if not key:
         raise NeedsLogin(
             f"{provider} authenticates with an API key and none is stored for "
@@ -257,7 +336,7 @@ def headers_for(client: str, provider: str, backend=None) -> dict | None:
     return {server.header: key}
 
 
-def endpoint_for(client: str, provider: str, backend=None) -> str:
+def endpoint_for(client: str, provider: str, keyring=None) -> str:
     """Where this client's server is.
 
     Usually the provider's one address for everybody. For a provider whose URL
@@ -271,7 +350,7 @@ def endpoint_for(client: str, provider: str, backend=None) -> str:
     if server.auth != "url":
         return server.url
 
-    stored = KeychainTokenStorage(client, provider, backend).endpoint()
+    stored = KeychainTokenStorage(client, provider, keyring).endpoint()
     if not stored:
         raise NoRemoteServer(
             f"{provider} identifies a client by their own endpoint URL, and "
@@ -284,7 +363,8 @@ class WrongAccount(Exception):
     """The session opened, and it is not the account this client was bound to."""
 
 
-async def _verify_account(session, client: str, provider: str, backend=None) -> None:
+async def _verify_account(session, client: str, provider: str,
+                          keyring=None) -> None:
     """Refuse a session that has drifted to another account.
 
     Access tokens expire, and a refresh that fails becomes a fresh
@@ -299,7 +379,7 @@ async def _verify_account(session, client: str, provider: str, backend=None) -> 
     """
     from munim.remote.identity import identity_of
 
-    store = KeychainTokenStorage(client, provider, backend)
+    store = KeychainTokenStorage(client, provider, keyring)
     expected = store.account()
     if not expected:
         # Never recorded, so there is nothing to compare against. Record it now
@@ -319,37 +399,84 @@ async def _verify_account(session, client: str, provider: str, backend=None) -> 
         )
 
 
+class _QuietRefusal(logging.Filter):
+    """Drop the SDK's traceback for a refusal Munim asked for on purpose.
+
+    `mcp.client.auth.oauth2` ends its flow with `logger.exception("OAuth flow
+    error")` and re-raises, which is right for a real failure. With
+    `allow_login=False` the failure is `NeedsLogin`, and that is the designed
+    outcome, not a fault: a fourteen-line traceback printed above a one-line
+    "run munim connect" is the opposite of the legible refusal the flag exists
+    to produce.
+
+    Only that exception is dropped. Any other OAuth error still logs in full,
+    because those are faults and hiding them would be the real bug.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        info = record.exc_info
+        return not (info and isinstance(info[1], NeedsLogin))
+
+
+@contextmanager
+def _quiet_refusals(active: bool):
+    if not active:
+        yield
+        return
+    logger = logging.getLogger("mcp.client.auth.oauth2")
+    quiet = _QuietRefusal()
+    logger.addFilter(quiet)
+    try:
+        yield
+    finally:
+        logger.removeFilter(quiet)
+
+
 @asynccontextmanager
-async def session_for(client: str, provider: str, *, backend=None, on_url=None,
-                      verify: bool = True, label: str | None = None,
-                      allow_login: bool = True):
-    """Open one client's session with one provider's MCP server."""
+async def session_for(client: str, provider: str, *, keyring=None, keys=None,
+                      on_url=None, verify: bool = True,
+                      label: str | None = None, allow_login: bool = True):
+    """Open one client's session with one provider's MCP server.
+
+    Two stores, deliberately two arguments. `keyring` holds tokens and
+    endpoints and is vault-shaped, with get_password and set_password. `keys`
+    holds pasted API keys and is a CredentialBackend, with get and set. They
+    are different objects with different methods, and both default sensibly.
+
+    This used to be one `backend` handed to both. Whichever kind a caller
+    passed, the other kind of provider broke: a CredentialBackend raised
+    AttributeError on get_password for every OAuth provider, which is how the
+    MCP server's `list_provider_tools` failed while the identical CLI command
+    worked. It bit twice before it was split.
+    """
     server = server_for(provider)
     if server is None:
         raise NoRemoteServer(f"{provider} runs no MCP server")
 
-    url = endpoint_for(client, provider, backend)
+    url = endpoint_for(client, provider, keyring)
 
     if server.auth in ("url", "header"):
         # Neither has anything to authorise and neither opens a browser. For
         # `url` the address is the credential; for `header` it is a key the
         # operator pasted once, sent on every request.
-        headers = headers_for(client, provider, backend)
+        headers = headers_for(client, provider, keys)
         async with streamablehttp_client(url, headers=headers) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 yield session
         return  # neither kind has an account that can drift
 
-    auth = auth_for(client, provider, backend=backend, on_url=on_url,
+    auth = auth_for(client, provider, keyring=keyring, on_url=on_url,
                     label=label, allow_login=allow_login)
     try:
-        async with streamablehttp_client(url, auth=auth) as (read, write, _):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                if verify:
-                    await _verify_account(session, client, provider, backend)
-                yield session
+        with _quiet_refusals(not allow_login):
+            async with streamablehttp_client(url, auth=auth) as (read, write, _):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    if verify:
+                        await _verify_account(session, client, provider,
+                                              keyring)
+                    yield session
     except BaseExceptionGroup as group:
         # The transport runs inside an anyio task group, so anything raised in
         # here comes back wrapped. A caller cannot catch these through a group,

@@ -1,0 +1,564 @@
+"""The navigable view, driven through the menu's keys seam.
+
+The property this file guards hardest is that nothing changed for anything
+without a terminal. `munim clients | jq`, CI, Windows and every existing test
+take the flat path, and a navigable view that quietly started emitting escape
+codes into a pipe would be worse than not having one.
+"""
+
+from types import SimpleNamespace
+
+import pytest
+
+from munim import browse, cli, health, pick
+from munim.registry import ClientRecord, Registry
+
+
+def status(client, provider, state=health.LIVE, tools=3, detail=""):
+    return health.Status(client, provider, state, detail, tools)
+
+
+@pytest.fixture
+def estate(tmp_path, monkeypatch):
+    reg = Registry(tmp_path / "r.json")
+    reg.add(ClientRecord(name="Balaji Roofings", domain="balaji.test"))
+    reg.add(ClientRecord(name="Ivy & Fern"))
+    monkeypatch.setattr(cli, "_registry", lambda: reg)
+    return reg
+
+
+class SettledStream:
+    """A stream whose probes have already finished.
+
+    Every navigation test wants a list to walk, not a spinner. The streaming
+    path is exercised in tests/test_health_stream.py and through the pty
+    harness, which is the only place a tick without a keypress is observable.
+    """
+
+    settled = True
+
+    def __init__(self, statuses):
+        self.statuses = list(statuses)
+        self.pumped = 0
+        self.closed = 0
+
+    def pump(self, slice_seconds=0.0):
+        self.pumped += 1
+        return False
+
+    def close(self):
+        self.closed += 1
+
+
+def probed(monkeypatch, *statuses):
+    monkeypatch.setattr(health, "check_all", lambda *a, **k: list(statuses))
+    monkeypatch.setattr(health, "Stream",
+                        lambda registry, backend=None: SettledStream(statuses))
+
+
+# ---- the client screen ------------------------------------------------
+
+
+def test_providers_are_grouped_under_their_client(estate, monkeypatch):
+    probed(monkeypatch,
+           status("Balaji Roofings", "cloudflare"),
+           status("Balaji Roofings", "vercel"),
+           status("Ivy & Fern", "cloudflare"))
+
+    rows = browse._clients_screen(estate, health.check_all(estate))
+    heads = [r.text for r in rows if isinstance(r, pick.Head)]
+
+    assert any("Balaji Roofings" in h for h in heads)
+    assert any("Ivy & Fern" in h for h in heads)
+    assert any("balaji.test" in h for h in heads), "the domain belongs on the group"
+
+
+def test_a_client_with_nothing_connected_still_appears(estate, monkeypatch):
+    """Otherwise the one client who most needs an instruction is invisible."""
+    probed(monkeypatch, status("Balaji Roofings", "cloudflare"))
+
+    rows = browse._clients_screen(estate, health.check_all(estate))
+    labels = [r.label for r in rows if isinstance(r, pick.Item)]
+
+    assert "nothing connected" in labels
+
+
+def test_an_expired_session_is_marked_differently_from_a_live_one(
+        estate, monkeypatch):
+    probed(monkeypatch,
+           status("Balaji Roofings", "cloudflare", health.EXPIRED,
+                  detail="the session expired"),
+           status("Ivy & Fern", "cloudflare", health.LIVE))
+
+    rows = browse._clients_screen(estate, health.check_all(estate))
+    marks = " ".join(r.mark for r in rows if isinstance(r, pick.Item))
+
+    assert "needs authentication" in marks
+    assert "connected" in marks
+
+
+def test_an_unreachable_provider_is_not_called_expired(estate, monkeypatch):
+    """Reconnecting does not fix a network that is down."""
+    probed(monkeypatch,
+           status("Balaji Roofings", "cloudflare", health.UNREACHABLE,
+                  detail="no answer in 8s"))
+
+    rows = browse._clients_screen(estate, health.check_all(estate))
+    marks = " ".join(r.mark for r in rows if isinstance(r, pick.Item))
+
+    assert "could not be reached" in marks
+    assert "needs authentication" not in marks
+
+
+# ---- the tool detail, which is the whole point ------------------------
+
+
+LONG = ("Execute JavaScript code against the Cloudflare API. First use the "
+        "'search' tool to find the right endpoints, then write code using "
+        "the cloudflare.request() function. This sentence exists to push the "
+        "description well past the seventy characters the old listing cut at.")
+
+
+def test_the_description_is_printed_whole(capsys):
+    """The bug this screen exists for: the listing cut `execute` at 70
+    characters, and the part it cut is the part telling you what to pass."""
+    record = ClientRecord(name="Acme")
+    browse.tool_detail(record, "cloudflare", {
+        "tool": "execute", "does": LONG, "read_only": None, "arguments": {}})
+
+    err = capsys.readouterr().err
+    assert LONG.split(". ")[-1][:40] in err.replace("\n  ", " "), \
+        "the tail of the description was lost"
+    assert len(err) > 300
+
+
+def test_blank_lines_in_a_description_survive(capsys):
+    """These are interface listings, not prose. The shape carries meaning."""
+    record = ClientRecord(name="Acme")
+    browse.tool_detail(record, "cloudflare", {
+        "tool": "execute", "does": "one\n\ntwo", "read_only": None,
+        "arguments": {}})
+
+    assert "  one\n\n  two" in capsys.readouterr().err
+
+
+def test_flat_arguments_render_as_a_table():
+    lines = browse._arguments({
+        "type": "object",
+        "properties": {"code": {"type": "string", "description": "The JS"},
+                       "dry": {"type": "boolean"}},
+        "required": ["code"]})
+    text = "\n".join(lines)
+
+    assert "code" in text and "string" in text and "required" in text
+    assert "dry" in text and "optional" in text
+    assert "The JS" in text
+
+
+def test_a_nested_schema_is_not_flattened_into_one_row():
+    """Vercel's tools take nested objects. A table would render the whole
+    thing as `options object required` and hide everything that matters,
+    which is the truncation bug one level down."""
+    lines = browse._arguments({
+        "type": "object",
+        "properties": {"project": {"type": "object",
+                                   "properties": {"name": {"type": "string"}}}},
+        "required": ["project"]})
+    text = "\n".join(lines)
+
+    assert "name" in text, "the nested property vanished"
+    assert "\"properties\"" in text, "expected the schema itself, pretty-printed"
+
+
+def test_a_tool_with_no_arguments_says_so():
+    assert browse._arguments({"type": "object"}) == ["  none"]
+    assert browse._arguments(None) == ["  none"]
+
+
+def test_the_access_label_is_three_valued(capsys):
+    record = ClientRecord(name="Acme")
+    for annotated, expected in ((True, "read-only"), (False, "writes")):
+        browse.tool_detail(record, "cloudflare", {
+            "tool": "t", "does": "", "read_only": annotated, "arguments": {}})
+        assert expected in capsys.readouterr().err
+
+    browse.tool_detail(record, "cloudflare", {
+        "tool": "t", "does": "", "read_only": None, "arguments": {}})
+    err = capsys.readouterr().err
+    assert "Access:" not in err, \
+        "an unannotated tool must not be labelled; the provider said nothing"
+
+
+def test_the_detail_names_the_command_that_runs_it(capsys):
+    browse.tool_detail(ClientRecord(name="Balaji Roofings"), "cloudflare",
+                       {"tool": "execute", "does": "", "read_only": None,
+                        "arguments": {}})
+
+    assert 'munim call "Balaji Roofings" cloudflare execute' in \
+        capsys.readouterr().err
+
+
+# ---- navigation -------------------------------------------------------
+
+
+def test_escape_at_the_top_leaves_with_success(estate, monkeypatch, capsys):
+    probed(monkeypatch, status("Balaji Roofings", "cloudflare"))
+    assert browse.walk(estate, keys=[pick.ESC]) == 0
+
+
+def test_control_c_at_the_top_exits_cancelled(estate, monkeypatch, capsys):
+    probed(monkeypatch, status("Balaji Roofings", "cloudflare"))
+    assert browse.walk(estate, keys=[pick.CTRL_C]) == cli.CANCELLED
+
+
+def test_no_clients_says_how_to_add_one(tmp_path, capsys):
+    empty = Registry(tmp_path / "r.json")
+    assert browse.walk(empty) == 0
+    assert "munim clients add" in capsys.readouterr().err
+
+
+def test_a_dead_session_explains_rather_than_listing_tools(
+        estate, monkeypatch, capsys):
+    """Opening a session to list tools would need a login nobody asked for.
+
+    The message is *returned* rather than printed. Printed, the very next
+    redraw covered it, so choosing "View tools" on a dead session looked like
+    the menu had done nothing at all.
+    """
+    dead = status("Balaji Roofings", "cloudflare", health.EXPIRED, tools=0,
+                  detail="the session expired")
+
+    said = browse._tools_walk(ClientRecord(name="Balaji Roofings"), dead)
+
+    assert isinstance(said, str)
+    assert "the session expired" in said
+    assert "munim connect" in said
+    assert capsys.readouterr().err == "", \
+        "nothing may be printed outside the frame that owns the screen"
+
+
+def test_the_reason_is_shown_inside_the_next_frame(estate, monkeypatch, capsys):
+    """Choosing an action must leave visible evidence it did something."""
+    dead = status("Balaji Roofings", "cloudflare", health.EXPIRED, tools=0,
+                  detail="the session expired")
+    record = ClientRecord(name="Balaji Roofings")
+
+    # "View tools", then Esc out of the provider screen.
+    browse._provider_walk(record, dead, keys=[pick.ENTER, pick.ESC])
+
+    err = capsys.readouterr().err
+    assert "Cannot list tools" in err
+    assert "munim connect" in err
+
+
+def test_disconnect_asks_first_and_then_actually_removes(
+        estate, monkeypatch, capsys):
+    """The menu used to print `munim disconnect ...` and return, so clicking it
+    did nothing. It acts now, and the confirmation is the gate that earns it."""
+    called = []
+    monkeypatch.setattr("munim.cli.disconnect",
+                        lambda *a, **k: called.append(a) or 0)
+
+    live = status("Balaji Roofings", "cloudflare")
+    record = ClientRecord(name="Balaji Roofings")
+
+    # Down twice to Disconnect, Enter, then Down to "Yes", Enter.
+    browse._provider_walk(record, live,
+                          keys=[pick.DOWN, pick.DOWN, pick.ENTER,
+                                pick.DOWN, pick.ENTER])
+
+    assert called, "Disconnect did not run anything"
+    assert called[0][:2] == ("Balaji Roofings", "cloudflare")
+
+
+def test_declining_the_confirmation_removes_nothing(estate, monkeypatch):
+    called = []
+    monkeypatch.setattr("munim.cli.disconnect",
+                        lambda *a, **k: called.append(a) or 0)
+
+    browse._provider_walk(ClientRecord(name="Balaji Roofings"),
+                          status("Balaji Roofings", "cloudflare"),
+                          keys=[pick.DOWN, pick.DOWN, pick.ENTER,
+                                pick.ENTER,      # lands on Cancel
+                                pick.ESC])
+
+    assert called == [], "a credential was removed without a yes"
+
+
+def test_reconnect_runs_the_login_and_re_probes(estate, monkeypatch, capsys):
+    ran = []
+    monkeypatch.setattr("munim.cli.connect_via_mcp",
+                        lambda client, provider: ran.append((client, provider)) or 0)
+    monkeypatch.setattr(health, "check_all_for",
+                        lambda record, provider, backend=None, keyring=None:
+                        status("Balaji Roofings", provider, health.LIVE))
+
+    browse._provider_walk(ClientRecord(name="Balaji Roofings"),
+                          status("Balaji Roofings", "cloudflare", health.EXPIRED,
+                                 detail="the session expired"),
+                          keys=[pick.DOWN, pick.ENTER, pick.ESC])
+
+    assert ran == [("Balaji Roofings", "cloudflare")]
+    assert "Reconnected." in capsys.readouterr().err
+
+
+def test_reconnect_uses_the_command_its_own_hint_names(estate, monkeypatch):
+    """The row says `munim connect "<client>" <provider>`, and that runs
+    connect_via_mcp for a provider with its own MCP server. Calling the older
+    application-credential path instead made Reconnect ask for an API key."""
+    def wrong(*a, **k):
+        raise AssertionError("Reconnect used the application-credential path")
+
+    monkeypatch.setattr("munim.cli.connect", wrong)
+    monkeypatch.setattr("munim.cli.connect_via_mcp", lambda c, p: 0)
+    monkeypatch.setattr(health, "check_all_for",
+                        lambda record, provider, backend=None, keyring=None:
+                        status("Balaji Roofings", provider, health.LIVE))
+
+    browse._provider_walk(ClientRecord(name="Balaji Roofings"),
+                          status("Balaji Roofings", "cloudflare",
+                                 health.EXPIRED, detail="the session expired"),
+                          keys=[pick.DOWN, pick.ENTER, pick.ESC])
+
+
+def test_a_failed_reconnect_says_so_rather_than_claiming_success(
+        estate, monkeypatch, capsys):
+    monkeypatch.setattr("munim.cli.connect_via_mcp", lambda client, provider: 2)
+
+    browse._provider_walk(ClientRecord(name="Balaji Roofings"),
+                          status("Balaji Roofings", "cloudflare", health.EXPIRED,
+                                 detail="the session expired"),
+                          keys=[pick.DOWN, pick.ENTER, pick.ESC])
+
+    assert "was not reconnected" in capsys.readouterr().err
+
+
+def test_set_domain_writes_it_and_re_reads_the_given_registry(
+        estate, monkeypatch, capsys):
+    """It used to build a Registry from the default path, ignoring the one the
+    walk was handed. With cli.REGISTRY overridden the write went to one file
+    and the read to another, and `get` raised inside the frame."""
+    written = []
+
+    def write(name, site):
+        written.append((name, site))
+        record = estate.get(name)
+        estate.set_domain(record.id, site) if hasattr(estate, "set_domain") \
+            else None
+        return 0
+
+    monkeypatch.setattr("munim.cli.set_domain", write)
+    monkeypatch.setattr("builtins.input", lambda: "newsite.test")
+
+    record = estate.get("Balaji Roofings")
+    browse._provider_walk(record, status("Balaji Roofings", "cloudflare"),
+                          registry=estate,
+                          keys=[pick.DOWN, pick.DOWN, pick.DOWN, pick.ENTER,
+                                pick.ESC])
+
+    assert written == [("Balaji Roofings", "newsite.test")]
+    assert "Domain set to" in capsys.readouterr().err
+
+
+def test_an_empty_domain_changes_nothing(estate, monkeypatch, capsys):
+    written = []
+    monkeypatch.setattr("munim.cli.set_domain",
+                        lambda name, site: written.append(site) or 0)
+    monkeypatch.setattr("builtins.input", lambda: "")
+
+    browse._provider_walk(estate.get("Balaji Roofings"),
+                          status("Balaji Roofings", "cloudflare"),
+                          registry=estate,
+                          keys=[pick.DOWN, pick.DOWN, pick.DOWN, pick.ENTER,
+                                pick.ESC])
+
+    assert written == []
+    assert "unchanged" in capsys.readouterr().err
+
+
+# ---- nothing changed for anything without a terminal ------------------
+
+
+def test_the_flat_listing_is_untouched_when_not_a_terminal(
+        estate, monkeypatch, capsys):
+    """`munim clients | cat` must be byte-identical to what it always was."""
+    monkeypatch.setattr(pick, "interactive", lambda: False)
+    monkeypatch.setattr("munim.container.vault",
+                        type("R", (), {"get_password": lambda *a: None,
+                                       "set_password": lambda *a: None,
+                                       "delete_password": lambda *a: None})())
+
+    assert cli.main(["clients"]) == 0
+    out = capsys.readouterr()
+
+    assert "Balaji Roofings" in out.err or "Balaji Roofings" in out.out
+    assert "\x1b[" not in out.err + out.out, "escape codes reached a pipe"
+    assert "Checking sessions" not in out.err, "a pipe must not pay for a probe"
+
+
+def test_json_never_reaches_the_navigable_path(estate, monkeypatch, capsys):
+    import json
+
+    monkeypatch.setattr(pick, "interactive", lambda: True)
+    called = []
+    monkeypatch.setattr(health, "check_all", lambda *a, **k: called.append(1) or [])
+
+    assert cli.main(["clients", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)
+    assert called == [], "--json opened network sessions"
+
+
+# ---- a dead session is no longer a dead end ---------------------------
+
+
+def test_a_remembered_list_is_shown_when_the_session_is_dead(
+        estate, monkeypatch, capsys):
+    """Both providers refuse `initialize` without a token, so the list cannot
+    be fetched again once the credential dies. It was known once."""
+    from munim import toolcache
+
+    record = ClientRecord(name="Balaji Roofings")
+    toolcache.remember(record.id, "cloudflare",
+                       [{"tool": "execute", "does": "Run JS",
+                         "read_only": None, "arguments": {}}])
+    dead = status("Balaji Roofings", "cloudflare", health.EXPIRED, tools=0,
+                  detail="the session expired")
+
+    browse._tools_walk(record, dead, keys=[pick.ESC])
+
+    err = capsys.readouterr().err
+    assert "execute" in err, "the remembered tool was not shown"
+    assert "Remembered from" in err, "a cached list must say that it is cached"
+    assert "still needs a live session" in err, \
+        "browsing from memory must not imply you can call from memory"
+
+
+def test_nothing_remembered_still_explains_rather_than_showing_nothing(
+        estate, monkeypatch):
+    dead = status("Balaji Roofings", "cloudflare", health.EXPIRED, tools=0,
+                  detail="the session expired")
+
+    said = browse._tools_walk(ClientRecord(name="Nobody Here"), dead)
+
+    assert isinstance(said, str) and "Cannot list tools" in said
+
+
+def test_a_live_listing_carries_no_stale_banner(estate, monkeypatch, capsys):
+    """The banner is deliberately loud, so it must never appear when the list
+    was read a moment ago."""
+    import asyncio
+
+    live = status("Balaji Roofings", "cloudflare", health.LIVE)
+    monkeypatch.setattr(
+        "munim.remote.passthrough.tools_for",
+        lambda *a, **k: asyncio.sleep(0, result=[
+            {"tool": "execute", "does": "", "read_only": None, "arguments": {}}]))
+
+    browse._tools_walk(ClientRecord(name="Balaji Roofings"), live,
+                       keys=[pick.ESC])
+
+    err = capsys.readouterr().err
+    assert "execute" in err
+    assert "Remembered from" not in err
+
+
+# ---- the list behind an action must not lie ---------------------------
+
+
+def watch_screens(monkeypatch):
+    """Record the statuses each clients frame was built from.
+
+    Asserting on raw output does not work here: with no tty `_draw` takes the
+    cursor-up path and never emits the home sequence, so there are no frame
+    boundaries to split on. The seam is the honest place to look anyway.
+    """
+    seen = []
+    real = browse._clients_screen
+
+    def spy(registry, statuses):
+        seen.append(list(statuses))
+        return real(registry, statuses)
+
+    monkeypatch.setattr(browse, "_clients_screen", spy)
+    return seen
+
+
+def test_disconnecting_removes_the_row_behind_it(estate, monkeypatch, capsys):
+    """The clients screen is drawn from a snapshot taken before the walk, so
+    without a refresh the provider you just deleted stays listed as connected,
+    and selecting it again opens a screen for a credential that is gone."""
+    monkeypatch.setattr("munim.cli.disconnect", lambda *a, **k: 0)
+    probed(monkeypatch, status("Balaji Roofings", "cloudflare"))
+    seen = watch_screens(monkeypatch)
+
+    browse.walk(estate, keys=[pick.ENTER,
+                              pick.DOWN, pick.DOWN, pick.ENTER,
+                              pick.DOWN, pick.ENTER,
+                              pick.ESC])
+
+    assert len(seen) >= 2, "the clients screen was never redrawn"
+    assert any(s.provider == "cloudflare" for s in seen[0])
+    assert not any(s.provider == "cloudflare" for s in seen[-1]), \
+        "the disconnected provider was still in the refreshed list"
+
+
+def test_reconnecting_updates_the_mark_behind_it(estate, monkeypatch, capsys):
+    # connect_via_mcp, not connect: patching the older name let the real login
+    # run and try to bind the callback port.
+    monkeypatch.setattr("munim.cli.connect_via_mcp", lambda client, provider: 0)
+    monkeypatch.setattr(health, "check_all_for",
+                        lambda record, provider, backend=None, keyring=None:
+                        status("Balaji Roofings", provider, health.LIVE))
+    probed(monkeypatch, status("Balaji Roofings", "cloudflare", health.EXPIRED,
+                               detail="the session expired"))
+    seen = watch_screens(monkeypatch)
+
+    browse.walk(estate, keys=[pick.ENTER, pick.DOWN, pick.ENTER, pick.ESC,
+                              pick.ESC])
+
+    assert len(seen) >= 2
+    assert seen[0][0].state == health.EXPIRED
+    assert [s.state for s in seen[-1]] == [health.LIVE], \
+        "the reconnected provider still showed as expired"
+
+
+def test_a_client_with_nothing_connected_reports_inside_the_frame(
+        estate, monkeypatch, capsys):
+    """Printed into the frame, the next redraw erased it, so choosing the row
+    did nothing visible. Same bug as the two already fixed."""
+    probed(monkeypatch)      # nothing connected anywhere
+    headers = []
+    real = browse.menu
+
+    def spy(title, rows, **kwargs):
+        headers.append(kwargs.get("header", ()))
+        return real(title, rows, **kwargs)
+
+    monkeypatch.setattr(browse, "menu", spy)
+    browse.walk(estate, keys=[pick.ENTER, pick.ESC])
+
+    assert any("munim connect" in "".join(h) for h in headers), \
+        "the instruction never reached a frame"
+
+
+def test_a_settled_stream_is_not_polled(estate, monkeypatch):
+    """Nothing left to wait for means the menu blocks rather than ticking."""
+    stream = SettledStream([status("Balaji Roofings", "cloudflare")])
+    monkeypatch.setattr(health, "Stream", lambda *a, **k: stream)
+
+    browse.walk(estate, keys=[pick.ESC])
+
+    assert stream.pumped == 0, "an idle screen paid for a refresh"
+
+
+def test_the_stream_is_closed_even_when_the_walk_raises(estate, monkeypatch):
+    """It owns an event loop, and leaking one leaks file descriptors."""
+    stream = SettledStream([])
+    monkeypatch.setattr(health, "Stream", lambda *a, **k: stream)
+    monkeypatch.setattr(browse, "_walk",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")))
+
+    with pytest.raises(RuntimeError):
+        browse.walk(estate)
+
+    assert stream.closed == 1

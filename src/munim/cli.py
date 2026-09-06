@@ -17,7 +17,7 @@ from munim.connect.oauth import (PROVIDERS, SHIPPED_CLIENT_IDS,
 from munim.connect.token import TokenConnector
 from munim.container import KEY_PROVIDERS, KeychainBackend
 from munim.env import load as load_env
-from munim.pick import choose
+from munim.pick import BACK, choose
 from munim.registry import ClientRecord, Registry, UnknownClient
 
 REGISTRY = None  # resolved at call time so tests can point it elsewhere
@@ -167,6 +167,36 @@ def confirm(planned, ask=None) -> bool:
         return False
 
 
+def _record_removal(records, removed: list[str], everything: bool) -> None:
+    """Write a credential removal to the run log.
+
+    Everything else that changes an account is recorded, and this was the one
+    thing that changed one and left nothing behind. When a machine's Cloudflare
+    and Vercel credentials turned out to be gone, there was no way to tell what
+    had removed them or when, and the honest answer to "what happened" was that
+    nobody could know.
+
+    Best effort on purpose. A log that cannot be written must not stop a
+    credential being removed, because the operator asked for the removal and
+    the audit trail is the lesser promise.
+    """
+    from munim.runlog import RunLog, new_run_id
+
+    try:
+        log = RunLog(new_run_id())
+        log.append(
+            client=(records[0].name if len(records) == 1 and not everything
+                    else "every client"),
+            stage="disconnect",
+            kind="mutation",
+            human_text=f"{len(removed)} credential(s) removed",
+            detail={"removed": removed, "everything": everything,
+                    "clients": [r.name for r in records]},
+        )
+    except Exception:
+        pass
+
+
 def disconnect(client: str | None, provider: str | None, everything: bool,
                assume_yes: bool = False, dry_run: bool = False,
                ask=None) -> int:
@@ -218,6 +248,8 @@ def disconnect(client: str | None, provider: str | None, everything: bool,
     if not removed:
         print("Nothing was stored.", file=sys.stderr)
         return 0
+
+    _record_removal(records, removed, everything)
 
     for line in removed:
         print(f"  removed {line}", file=sys.stderr)
@@ -378,7 +410,8 @@ def _redacted(url: str) -> str:
 ACCOUNT_NAMES_IT = "__account__"
 
 
-def ask_which_client(registry, ask=None, *, account_can_name=False) -> str | None:
+def ask_which_client(registry, ask=None, *, account_can_name=False,
+                     can_go_back=False):
     """Which client is this for.
 
     A URL that carries a credential cannot name itself the way an OAuth login
@@ -433,9 +466,10 @@ def ask_which_client(registry, ask=None, *, account_can_name=False) -> str | Non
     # is the announcement.
     picked = choose("Which client is this for?", options, ask=ask,
                     resolve=resolve, allow_new=True,
-                    new_hint="a new client, I will type the name")
-    if picked is None:
-        return None
+                    new_hint="a new client, I will type the name",
+                    can_go_back=can_go_back)
+    if picked is None or picked is BACK:
+        return picked
     if isinstance(picked, str):
         return picked                       # a name for a client not yet known
     if picked < len(records):
@@ -443,19 +477,22 @@ def ask_which_client(registry, ask=None, *, account_can_name=False) -> str | Non
     return ACCOUNT_NAMES_IT
 
 
-def _pick_client(registry, prompt: str = "Which client?", ask=None) -> str | None:
+def _pick_client(registry, prompt: str = "Which client?", ask=None,
+                 can_go_back: bool = False):
     """One of the clients already registered, or None if there are none."""
     records = sorted(registry.clients(), key=lambda r: r.name.lower())
     if not records:
         print("No clients registered yet.", file=sys.stderr)
         return None
-    picked = choose(prompt, [(r.name, r.domain or "") for r in records], ask=ask)
-    if picked is None:
-        return None
+    picked = choose(prompt, [(r.name, r.domain or "") for r in records],
+                    ask=ask, can_go_back=can_go_back)
+    if picked is None or picked is BACK:
+        return picked
     return records[picked].name if isinstance(picked, int) else picked
 
 
-def choose_one(prompt: str, labels: list[str], ask=None) -> str | None:
+def choose_one(prompt: str, labels: list[str], ask=None,
+               can_go_back: bool = False):
     """Pick one of a fixed set, for a command that was given no argument.
 
     Every choice in this CLI used to be an argument you had to already know:
@@ -464,9 +501,10 @@ def choose_one(prompt: str, labels: list[str], ask=None) -> str | None:
     is the same picker `connect` uses for clients, so one thing to learn rather
     than one per command.
     """
-    picked = choose(prompt, [(label, "") for label in labels], ask=ask)
-    if picked is None:
-        return None
+    picked = choose(prompt, [(label, "") for label in labels], ask=ask,
+                    can_go_back=can_go_back)
+    if picked is None or picked is BACK:
+        return picked
     return labels[picked] if isinstance(picked, int) else picked
 
 
@@ -598,6 +636,178 @@ def config(action: str, provider: str | None, client_id: str | None) -> int:
     remember(provider, client_id, secret)
     print(f"Stored the {provider} application in your keychain. It works from "
           f"any directory.", file=sys.stderr)
+    return 0
+
+
+def _resolved(client: str):
+    """The client record, or None with the reason already printed."""
+    try:
+        return _registry().get(client)
+    except UnknownClient as unknown:
+        print(str(unknown), file=sys.stderr)
+        return None
+
+
+def _tool_names(client: str, provider: str) -> list[str] | None:
+    """The provider's tool names, for the picker. None if it could not be asked."""
+    import asyncio
+
+    from munim.remote.passthrough import tools_for
+    from munim.remote.session import NeedsLogin, NoRemoteServer
+
+    record = _resolved(client)
+    if record is None:
+        return None
+    try:
+        return [t["tool"] for t in asyncio.run(tools_for(record.id, provider))]
+    except NeedsLogin:
+        print(f"{provider} is not connected for {record.name!r}, or the session "
+              f"expired.", file=sys.stderr)
+        print(f'  munim connect "{record.name}" {provider}', file=sys.stderr)
+        return None
+    except NoRemoteServer as unknown:
+        print(str(unknown), file=sys.stderr)
+        return None
+
+
+def list_tools(client: str, provider: str, tool: str | None = None,
+               as_json: bool = False) -> int:
+    """What this client's provider account can be asked to do.
+
+    The counterpart to `munim call`. Every provider here runs its own MCP
+    server and publishes its own tools, so this reads that list rather than
+    Munim keeping a copy that goes stale the moment the provider ships one.
+    """
+    import asyncio
+    import json
+
+    from munim.remote.passthrough import UnknownTool, describe_tool, tools_for
+    from munim.remote.session import NeedsLogin, NoRemoteServer
+
+    record = _resolved(client)
+    if record is None:
+        return 2
+
+    try:
+        if tool is not None:
+            one = asyncio.run(describe_tool(record.id, provider, tool))
+            if as_json:
+                print(json.dumps(one, indent=2))
+                return 0
+            from munim.browse import tool_detail
+            tool_detail(record, provider, one)
+            return 0
+        tools = asyncio.run(tools_for(record.id, provider))
+    except NeedsLogin:
+        # Both providers refuse `initialize` without a token, so the list
+        # cannot be fetched again once the credential dies. What it said last
+        # time is better than nothing, provided the answer says so out loud.
+        from munim import toolcache
+
+        held = toolcache.recall(record.id, provider)
+        if held is None or tool is not None:
+            print(f"{provider} is not connected for {record.name!r}, or the "
+                  f"session expired.", file=sys.stderr)
+            print(f'  munim connect "{record.name}" {provider}', file=sys.stderr)
+            return 2
+        tools, age = held
+        stale = (f"Remembered from a session {toolcache.age_in_words(age)}. "
+                 f"Not read live, so it may be out of date, and calling one "
+                 f"still needs a live session. Reconnect with: "
+                 f'munim connect "{record.name}" {provider}')
+        if as_json:
+            print(json.dumps({"stale": True, "age_seconds": round(age),
+                              "tools": tools}, indent=2))
+            return 0
+        print(f"⚠ {stale}\n", file=sys.stderr)
+    except NoRemoteServer as unknown:
+        print(str(unknown), file=sys.stderr)
+        return 2
+    except UnknownTool as missing:
+        print(str(missing), file=sys.stderr)
+        print(f'  munim tools "{record.name}" {provider}', file=sys.stderr)
+        return 2
+
+    if as_json:
+        print(json.dumps(tools, indent=2))
+        return 0
+
+    if not tools:
+        print(f"{provider} exposes no tools for {record.name}.", file=sys.stderr)
+        return 0
+
+    print(f"{provider} tools for {record.name}:", file=sys.stderr)
+    for tool in tools:
+        # Three states, not two. A provider that annotates nothing is not the
+        # same as one that says a tool writes, and printing "write" for both
+        # would be Munim asserting something the provider never said.
+        mark = {True: "read-only", False: "writes", None: ""}[tool["read_only"]]
+        first = (tool["does"].splitlines() or [""])[0][:70]
+        print(f"  {mark:<9} {tool['tool']:<28} {first}", file=sys.stderr)
+    print(f"\n{len(tools)} tools. To see one in full:", file=sys.stderr)
+    print(f'  munim tools "{record.name}" {provider} <tool>', file=sys.stderr)
+    return 0
+
+
+def call_tool(client: str, provider: str, tool: str, args_json: str | None,
+              as_json: bool = False) -> int:
+    """Call one provider tool with one client's credentials.
+
+    No model anywhere in this path, which is the point: it works with agents
+    off. The arguments go to the provider exactly as given, and the call lands
+    in the run log with the tool and its arguments, because per-call isolation
+    is only as good as the record of what was called (D31).
+    """
+    import asyncio
+    import json
+
+    from munim.remote.passthrough import (MissingArguments, UnknownTool,
+                                          call_tool as invoke)
+    from munim.remote.session import NeedsLogin, NoRemoteServer
+    from munim.runlog import RunLog, new_run_id
+
+    record = _resolved(client)
+    if record is None:
+        return 2
+
+    try:
+        arguments = json.loads(args_json) if args_json else {}
+    except ValueError as bad:
+        print(f"--args is not JSON: {bad}", file=sys.stderr)
+        return 2
+    if not isinstance(arguments, dict):
+        print("--args must be a JSON object, because tool arguments are named.",
+              file=sys.stderr)
+        return 2
+
+    log = RunLog(new_run_id())
+    try:
+        result = asyncio.run(invoke(record.id, provider, tool, arguments, log=log))
+    except NeedsLogin:
+        print(f"{provider} is not connected for {record.name!r}, or the session "
+              f"expired.", file=sys.stderr)
+        print(f'  munim connect "{record.name}" {provider}', file=sys.stderr)
+        return 2
+    except NoRemoteServer as unknown:
+        print(str(unknown), file=sys.stderr)
+        return 2
+    except UnknownTool as missing:
+        print(str(missing), file=sys.stderr)
+        print(f'  munim tools "{record.name}" {provider}', file=sys.stderr)
+        return 2
+    except MissingArguments as short:
+        print(str(short).replace("<client>", record.name), file=sys.stderr)
+        return 2
+
+    # The result goes to stdout and everything else to stderr, so piping this
+    # into jq works without a flag for it.
+    print(json.dumps(result["result"] if not as_json else result,
+                     indent=2, default=str))
+    if result["failed"]:
+        print(f"{provider}.{tool} refused. Recorded as {log.run_id}.",
+              file=sys.stderr)
+        return 1
+    print(f"Recorded as {log.run_id}.", file=sys.stderr)
     return 0
 
 
@@ -1195,6 +1405,31 @@ def main(argv: list[str] | None = None) -> int:
                    help="the application's client id, for `app set`. The "
                         "secret is prompted, never passed as an argument")
 
+    # The first two operational verbs this CLI has had. Everything before them
+    # is setup: connect an account, name a client, check the install. These do
+    # work, and they do it by forwarding the provider's own tools rather than
+    # growing a verb per operation (D31).
+    tl = sub.add_parser("tools", help="what a provider can be asked to do")
+    tl.add_argument("client", nargs="?")
+    tl.add_argument("provider", nargs="?")
+    tl.add_argument("tool", nargs="?",
+                    help="name one to see it in full: the whole description "
+                         "and its arguments")
+    tl.add_argument("--json", action="store_true", dest="as_json",
+                    help="machine-readable, for scripts")
+
+    cl = sub.add_parser("call", help="call one of a provider's tools")
+    cl.add_argument("client", nargs="?")
+    cl.add_argument("provider", nargs="?")
+    cl.add_argument("tool", nargs="?")
+    cl.add_argument("--args", dest="args_json",
+                    help="the tool's arguments as a JSON object, or - to read "
+                         "them from stdin")
+    cl.add_argument("--args-file", dest="args_file",
+                    help="read the arguments from a JSON file")
+    cl.add_argument("--json", action="store_true", dest="as_json",
+                    help="wrap the result with the client, tool and run id")
+
     dr = sub.add_parser("doctor", help="what is wrong with this installation")
     dr.add_argument("--verbose", "-v", action="store_true",
                     help="also list what is connected")
@@ -1257,6 +1492,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # `munim connect cloudflare` reads as one positional, and argparse fills the
     # first one. Shift it: a lone argument that names a provider is a provider.
+    already_asked = False
     if args.command == "connect" and args.provider is None:
         from munim.remote.servers import all_servers
         known = sorted({*all_servers(), *KEY_PROVIDERS})
@@ -1266,10 +1502,45 @@ def main(argv: list[str] | None = None) -> int:
             # Nothing named at all. The list is right here; making somebody
             # recall eleven provider names to type one is the friction this
             # picker exists to remove.
-            picked = choose_one("Connect which provider?", known)
-            if picked is None:
-                return CANCELLED
-            args.provider = picked
+            #
+            # Both questions share one screen, so the second replaces the first
+            # rather than being drawn underneath it, and the screen is handed
+            # back before the browser flow prints anything worth keeping.
+            from munim import pick as _pick
+
+            with _pick.full_screen():
+                # A loop, not two statements in a row, because Esc on the
+                # second question means "I picked the wrong provider" far more
+                # often than it means "abandon the command".
+                while True:
+                    picked = choose_one("Connect which provider?", known,
+                                        can_go_back=False)
+                    if picked is None or picked is BACK:
+                        return CANCELLED
+                    args.provider = picked
+                    if not _registry().clients():
+                        break
+
+                    from munim.remote.identity import can_name_itself
+
+                    named = ask_which_client(
+                        _registry(),
+                        account_can_name=can_name_itself(args.provider),
+                        can_go_back=True)
+                    if named is BACK:
+                        continue            # up a level, back to the providers
+                    if named is None:
+                        return CANCELLED
+                    args.client = (None if named == ACCOUNT_NAMES_IT else named)
+                    already_asked = True
+                    break
+            # Printed after the screen is handed back, so the transcript still
+            # records what was chosen. A picker that leaves nothing behind is
+            # fine for browsing and wrong for a command you may need to explain
+            # later.
+            print(f"Connecting {args.provider}"
+                  + (f" for {args.client}" if args.client else ""),
+                  file=sys.stderr)
         else:
             parser.error(f"unknown provider {args.client!r}. Choose from: "
                          + ", ".join(known))
@@ -1307,6 +1578,71 @@ def main(argv: list[str] | None = None) -> int:
         from munim.doctor import run as doctor_run
         return doctor_run(_registry(), verbose=args.verbose)
 
+    if args.command in ("tools", "call"):
+        from munim.remote.passthrough import known_providers
+
+        from munim import pick as _pick
+
+        # Client, then provider, then tool: three questions that are one
+        # decision, so Esc steps up a level rather than throwing the whole
+        # command away. Only the first has nowhere above it to go.
+        with _pick.full_screen():
+            client, provider, tool = args.client, args.provider, args.tool
+            while True:
+                if client is None:
+                    client = _pick_client(_registry(), "Whose account?")
+                    if client is None or client is BACK:
+                        return CANCELLED
+                if provider is None:
+                    provider = choose_one("Which provider?", known_providers(),
+                                          can_go_back=True)
+                    if provider is BACK:
+                        client, provider = (None if args.client is None
+                                            else args.client), None
+                        if args.client is not None:
+                            return CANCELLED    # nothing above it to go back to
+                        continue
+                    if provider is None:
+                        return CANCELLED
+                if args.command == "tools" or tool is not None:
+                    break
+
+                names = _tool_names(client, provider)
+                if names is None:
+                    return 2
+                tool = choose_one(f"Which {provider} tool?", names,
+                                  can_go_back=True)
+                if tool is BACK:
+                    provider, tool = (None if args.provider is None
+                                      else args.provider), None
+                    if args.provider is not None:
+                        return CANCELLED
+                    continue
+                if tool is None:
+                    return CANCELLED
+                break
+
+        if args.command == "tools":
+            return list_tools(client, provider, tool, args.as_json)
+        given = args.args_json
+        if args.args_file:
+            if given:
+                parser.error("pass --args or --args-file, not both")
+            from pathlib import Path
+
+            try:
+                given = Path(args.args_file).read_text(encoding="utf-8")
+            except OSError as unreadable:
+                print(f"cannot read {args.args_file}: {unreadable}",
+                      file=sys.stderr)
+                return 2
+        elif given == "-":
+            # Reading arguments from a pipe is what lets a tool found by
+            # browsing be run from a script:
+            #   munim tools A B t --json | jq '...' | munim call A B t --args -
+            given = sys.stdin.read()
+        return call_tool(client, provider, tool, given, args.as_json)
+
     if args.command == "clients":
         # Accepted-and-ignored is worse than refused. `--json` only shapes the
         # listing, and `--verbose` is read by nothing at all.
@@ -1319,18 +1655,60 @@ def main(argv: list[str] | None = None) -> int:
                              'munim clients add "Ivy & Fern"')
             return add_client(args.names[0], args.domain)
         if args.action == "rename":
-            if len(args.names) != 2:
+            if len(args.names) == 2:
+                return rename(*args.names)
+            if len(args.names) == 1:
                 parser.error("clients rename takes the old name and the new one")
-            return rename(*args.names)
+            from munim import pick as _pick
+
+            with _pick.full_screen():
+                while True:
+                    old_name = _pick_client(_registry(),
+                                            "Rename which client?")
+                    if old_name is None or old_name is BACK:
+                        return CANCELLED
+                    fresh = _pick.ask_line(
+                        f"  New name for {old_name} "
+                        f"(Esc to pick a different client): ")
+                    if fresh is None:
+                        continue        # up a level, pick a different client
+                    fresh = fresh.strip()
+                    if not fresh:
+                        return CANCELLED
+                    break
+            return rename(old_name, fresh)
         if args.action == "forget":
             name = args.names[0] if args.names else _pick_client(_registry())
             if name is None:
                 return 2
             return forget(name)
         if args.action == "merge":
-            if len(args.names) != 2:
+            if len(args.names) == 2:
+                return merge(*args.names)
+            if len(args.names) == 1:
                 parser.error("clients merge takes a source and a target")
-            return merge(*args.names)
+            # Two pickers rather than one, because merge is not symmetric: the
+            # source is emptied into the target and then stops existing. Asking
+            # twice, in that order, is what makes which is which visible.
+            from munim import pick as _pick
+
+            with _pick.full_screen():
+                while True:
+                    source = _pick_client(_registry(),
+                                          "Merge which client away?")
+                    if source is None or source is BACK:
+                        return CANCELLED
+                    target = _pick_client(_registry(), "Into which client?",
+                                          can_go_back=True)
+                    if target is BACK:
+                        continue        # up a level, pick a different source
+                    if target is None:
+                        return CANCELLED
+                    break
+            if source == target:
+                print("A client cannot be merged into itself.", file=sys.stderr)
+                return 2
+            return merge(source, target)
         if args.action == "domain":
             if len(args.names) == 2:
                 return set_domain(*args.names)
@@ -1338,15 +1716,22 @@ def main(argv: list[str] | None = None) -> int:
                 parser.error('clients domain takes a client and a site: '
                              'munim clients domain "Balaji Roofings" '
                              'balajiroofingindustries.com')
-            name = _pick_client(_registry())
-            if name is None:
-                return 2
-            print(f"Site for {name!r}: ", end="", file=sys.stderr, flush=True)
-            try:
-                site = input().strip()
-            except (EOFError, KeyboardInterrupt):
-                print(file=sys.stderr)
-                return 2
+            from munim import pick as _pick
+
+            with _pick.full_screen():
+                while True:
+                    name = _pick_client(_registry())
+                    if name is None or name is BACK:
+                        return CANCELLED
+                    site = _pick.ask_line(
+                        f"  Site for {name} "
+                        f"(Esc to pick a different client): ")
+                    if site is None:
+                        continue        # up a level, pick a different client
+                    site = site.strip()
+                    if not site:
+                        return CANCELLED
+                    break
             return set_domain(name, site)
 
         from munim.connected import connections, describe
@@ -1367,6 +1752,17 @@ def main(argv: list[str] | None = None) -> int:
                             "api_keys": keys, "mcp_sessions": sessions})
             print(json_module.dumps(out, indent=2))
             return 0
+
+        # On a terminal this is navigable: the flat list tells you what is
+        # stored, and stored is not the same as working, which is how two dead
+        # sessions read as connected all day. Piped or redirected it stays
+        # exactly the table it was, because that is what scripts read and what
+        # every existing test asserts.
+        from munim import pick
+
+        if pick.interactive():
+            from munim.browse import walk
+            return walk(_registry())
 
         for record in records:
             print(f"{record.name:32} {record.domain or '-':32} "
@@ -1413,7 +1809,11 @@ def main(argv: list[str] | None = None) -> int:
     # Not asked when there is nothing to choose from, because a prompt with one
     # option is worse than the zero-setup path it replaces, and not asked
     # without a terminal, because a prompt nobody can answer is a hang.
-    if args.client is None and sys.stdin.isatty():
+    # `already_asked` matters when the provider was picked from the list: that
+    # path asks both questions on one screen, and choosing "named after the
+    # account" leaves client as None on purpose. Without this the question came
+    # round a second time.
+    if args.client is None and sys.stdin.isatty() and not already_asked:
         if _registry().clients():
             from munim.remote.identity import can_name_itself
 

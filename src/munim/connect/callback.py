@@ -17,12 +17,30 @@ import urllib.parse
 DEFAULT_PORT = 8976
 CALLBACK_PATH = "/oauth/callback"
 
+# The page tries to close itself, and says what to do when it cannot.
+#
+# `window.close()` only works on a window script opened, and this tab was
+# opened by the operating system on Munim's behalf, so most browsers refuse it
+# outright and a few allow it. Trying costs nothing; promising it would be a
+# lie, which is why the fallback line is written as though the close will fail
+# rather than hidden behind it and revealed on a timer.
 _PAGE = (
-    b"<!doctype html><meta charset=utf-8>"
+    b"<!doctype html><meta charset=utf-8><title>Connected</title>"
     b"<body style='font:16px -apple-system,sans-serif;color:#17191c;"
     b"background:#fbfaf8;display:grid;place-items:center;height:100vh;margin:0'>"
     b"<div style='text-align:center'><p style='font-size:20px'>Connected.</p>"
-    b"<p style='color:#5f6368'>You can close this tab.</p></div>"
+    b"<p id=hint style='color:#5f6368'>You can close this tab.</p></div>"
+    b"<script>"
+    b"setTimeout(function(){"
+    b"  try { window.close(); } catch (e) {}"
+    b"  setTimeout(function(){"
+    b"    var hint = document.getElementById('hint');"
+    b"    if (hint && !window.closed) {"
+    b"      hint.textContent = 'You can close this tab.';"
+    b"    }"
+    b"  }, 300);"
+    b"}, 400);"
+    b"</script>"
 )
 
 

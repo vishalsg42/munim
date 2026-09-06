@@ -78,7 +78,7 @@ async def _log_in(client: str, ring: FakeKeyring) -> str:
     async def capture(url: str) -> None:
         seen_url["url"] = url
 
-    auth = auth_for(client, "cloudflare", backend=ring, on_url=capture)
+    auth = auth_for(client, "cloudflare", keyring=ring, on_url=capture)
 
     async def callback() -> tuple[str, str | None]:
         # The provider redirected; read the state back off the URL it opened.
