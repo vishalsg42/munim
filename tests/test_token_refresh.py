@@ -18,6 +18,8 @@ rather than a refresh. The refresh token was never once used.
 
 import time
 
+import httpx
+
 import pytest
 from mcp.shared.auth import OAuthToken
 
@@ -174,3 +176,76 @@ async def test_an_unknown_age_keeps_the_old_optimistic_behaviour():
 
     assert auth.context.token_expiry_time is None
     assert auth.context.is_token_valid() is True
+
+
+# ---- several processes, one store, rotating refresh tokens ------------
+
+
+async def test_a_request_re_reads_tokens_another_process_may_have_rotated():
+    """Cloudflare rotates refresh tokens: using one invalidates it.
+
+    Munim runs as a long-lived MCP server and as a CLI, so several processes
+    share one store, each holding whatever it loaded at startup. When one
+    refreshes, every other copy is dead on arrival, and the SDK answers a
+    rejected refresh with a full browser authorization. That is the "authorize
+    again, and again" this exists to stop.
+    """
+    from munim.remote.session import auth_for
+
+    ring = Ring()
+    store = KeychainTokenStorage("c_1", "cloudflare", ring)
+    await store.set_tokens(token(access_token="first", refresh_token="r1"))
+    store.seed_client_info("id", "secret", "http://127.0.0.1:8976/callback")
+
+    auth = auth_for("c_1", "cloudflare", backend=ring, allow_login=False)
+    await auth._initialize()
+    assert auth.context.current_tokens.access_token == "first"
+
+    # Another process refreshes and rotates. Our copy is now stale.
+    await store.set_tokens(token(access_token="second", refresh_token="r2"))
+
+    flow = auth.async_auth_flow(httpx.Request("GET", "https://example.test"))
+    await flow.__anext__()
+    await flow.aclose()
+
+    assert auth.context.current_tokens.access_token == "second", \
+        "the request went out with a token another process had replaced"
+    assert auth.context.current_tokens.refresh_token == "r2", \
+        "a refresh would have used a token Cloudflare already invalidated"
+
+
+async def test_the_expiry_is_re_read_along_with_the_tokens():
+    """Adopting new tokens while keeping the old expiry would call a fresh
+    token expired and refresh it for nothing, rotating again."""
+    from munim.remote.session import auth_for
+
+    ring = Ring()
+    store = KeychainTokenStorage("c_1", "cloudflare", ring)
+    await store.set_tokens(token())
+    store.seed_client_info("id", "secret", "http://127.0.0.1:8976/callback")
+
+    auth = auth_for("c_1", "cloudflare", backend=ring, allow_login=False)
+    await auth._initialize()
+    aged = time.time() - 86400
+    raw = store._read("tokens")
+    raw[ISSUED_AT] = aged
+    ring.set_password("munim-mcp:cloudflare:tokens", "c_1",
+                      __import__("json").dumps(raw))
+    auth.context.token_expiry_time = time.time() + 9999      # a stale belief
+
+    flow = auth.async_auth_flow(httpx.Request("GET", "https://example.test"))
+    await flow.__anext__()
+    await flow.aclose()
+
+    assert auth.context.token_expiry_time == pytest.approx(
+        aged + 3600, abs=0.01), "the expiry came from memory, not the store"
+
+
+async def test_nothing_is_re_read_before_the_first_initialize():
+    """`_initialize` does the first load; doing it twice would be wasted IO."""
+    from munim.remote.session import auth_for
+
+    ring = Ring()
+    auth = auth_for("c_1", "cloudflare", backend=ring, allow_login=False)
+    assert auth._initialized is False
+    assert auth.context.current_tokens is None

@@ -17,7 +17,7 @@ from munim.connect.oauth import (PROVIDERS, SHIPPED_CLIENT_IDS,
 from munim.connect.token import TokenConnector
 from munim.container import KEY_PROVIDERS, KeychainBackend
 from munim.env import load as load_env
-from munim.pick import choose
+from munim.pick import BACK, choose
 from munim.registry import ClientRecord, Registry, UnknownClient
 
 REGISTRY = None  # resolved at call time so tests can point it elsewhere
@@ -378,7 +378,8 @@ def _redacted(url: str) -> str:
 ACCOUNT_NAMES_IT = "__account__"
 
 
-def ask_which_client(registry, ask=None, *, account_can_name=False) -> str | None:
+def ask_which_client(registry, ask=None, *, account_can_name=False,
+                     can_go_back=False):
     """Which client is this for.
 
     A URL that carries a credential cannot name itself the way an OAuth login
@@ -433,9 +434,10 @@ def ask_which_client(registry, ask=None, *, account_can_name=False) -> str | Non
     # is the announcement.
     picked = choose("Which client is this for?", options, ask=ask,
                     resolve=resolve, allow_new=True,
-                    new_hint="a new client, I will type the name")
-    if picked is None:
-        return None
+                    new_hint="a new client, I will type the name",
+                    can_go_back=can_go_back)
+    if picked is None or picked is BACK:
+        return picked
     if isinstance(picked, str):
         return picked                       # a name for a client not yet known
     if picked < len(records):
@@ -443,19 +445,22 @@ def ask_which_client(registry, ask=None, *, account_can_name=False) -> str | Non
     return ACCOUNT_NAMES_IT
 
 
-def _pick_client(registry, prompt: str = "Which client?", ask=None) -> str | None:
+def _pick_client(registry, prompt: str = "Which client?", ask=None,
+                 can_go_back: bool = False):
     """One of the clients already registered, or None if there are none."""
     records = sorted(registry.clients(), key=lambda r: r.name.lower())
     if not records:
         print("No clients registered yet.", file=sys.stderr)
         return None
-    picked = choose(prompt, [(r.name, r.domain or "") for r in records], ask=ask)
-    if picked is None:
-        return None
+    picked = choose(prompt, [(r.name, r.domain or "") for r in records],
+                    ask=ask, can_go_back=can_go_back)
+    if picked is None or picked is BACK:
+        return picked
     return records[picked].name if isinstance(picked, int) else picked
 
 
-def choose_one(prompt: str, labels: list[str], ask=None) -> str | None:
+def choose_one(prompt: str, labels: list[str], ask=None,
+               can_go_back: bool = False):
     """Pick one of a fixed set, for a command that was given no argument.
 
     Every choice in this CLI used to be an argument you had to already know:
@@ -464,9 +469,10 @@ def choose_one(prompt: str, labels: list[str], ask=None) -> str | None:
     is the same picker `connect` uses for clients, so one thing to learn rather
     than one per command.
     """
-    picked = choose(prompt, [(label, "") for label in labels], ask=ask)
-    if picked is None:
-        return None
+    picked = choose(prompt, [(label, "") for label in labels], ask=ask,
+                    can_go_back=can_go_back)
+    if picked is None or picked is BACK:
+        return picked
     return labels[picked] if isinstance(picked, int) else picked
 
 

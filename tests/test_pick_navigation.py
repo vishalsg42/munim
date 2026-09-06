@@ -390,20 +390,22 @@ def test_every_row_is_numbered_however_many_there_are(capsys):
     assert "a number" in err, "the footer should offer numbers, not 1-9"
 
 
-def test_an_unambiguous_digit_selects_at_once():
-    """In a list of eleven, 2 can only ever mean row 2."""
-    assert pick.menu("Long", many(11), keys=["2"]) == 1
+def test_a_two_digit_number_reaches_the_row_it_names():
+    """Typing 10 must mean row 10, in any length of list."""
+    assert pick.menu("Long", many(11), keys=["1", "0", pick.ENTER]) == 9
+    assert pick.menu("Long", many(11), keys=["1", "1", pick.ENTER]) == 10
 
 
-def test_an_ambiguous_digit_waits_for_the_next_one():
-    """1 could still become 10 or 11, so it must not act on its own."""
-    assert pick.menu("Long", many(11), keys=["1", "0"]) == 9
-    assert pick.menu("Long", many(11), keys=["1", "1"]) == 10
-
-
-def test_enter_commits_a_number_that_is_still_ambiguous():
+def test_enter_commits_a_half_typed_number():
     """Typing 1 and pressing Enter means row 1, not whatever the cursor is on."""
     assert pick.menu("Long", many(11), keys=["1", pick.ENTER]) == 0
+
+
+def test_a_digit_never_selects_on_its_own():
+    """It used to act the moment it could only mean one row, so in a short list
+    "1" fired instantly and the "0" of an intended "10" arrived after the
+    screen had already moved on. Nothing is chosen until Enter or a pause."""
+    assert pick.menu("Short", many(2), keys=["1", pick.ESC]) is BACK
 
 
 def test_the_pending_digits_are_shown_rather_than_kept_secret(capsys):
@@ -417,13 +419,14 @@ def test_an_arrow_abandons_a_half_typed_number():
 
 
 def test_a_number_past_the_end_starts_over_from_that_digit():
-    """9 in a list of eleven is row 9, and it cannot become anything longer."""
-    assert pick.menu("Long", many(11), keys=["9"]) == 8
+    """99 is not a row in a list of eleven, so the second 9 is read as a fresh
+    attempt rather than silently ignored."""
+    assert pick.menu("Long", many(11), keys=["9", "9", pick.ENTER]) == 8
 
 
-def test_a_short_list_still_acts_on_one_digit():
-    """Nothing about this may slow down the common case."""
-    assert pick.menu("Short", many(4), keys=["3"]) == 2
+def test_a_short_list_needs_no_second_digit():
+    """3 of 4 can only be 3, so Enter finishes it with no pause worth noticing."""
+    assert pick.menu("Short", many(4), keys=["3", pick.ENTER]) == 2
 
 
 def test_the_one_question_picker_numbers_past_nine_too(capsys):

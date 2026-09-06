@@ -41,6 +41,13 @@ CTRL_C, ESC = "\x03", "\x1b"
 # a bare Esc.
 ESCAPE_TAIL = 0.05
 
+# How long a typed row number waits for another digit before it acts. Selecting
+# the moment a digit could only mean one row was clever and surprising: in a
+# short list "1" is unambiguous, so it fired instantly and the "0" of an
+# intended "10" landed on the next screen. Waiting is what makes typing a
+# number feel like typing a number.
+DIGIT_GAP = 0.4
+
 
 def interactive() -> bool:
     """Whether a live picker is possible. Both ends must be a terminal: reading
@@ -51,7 +58,7 @@ def interactive() -> bool:
 
 def _render(options: list[tuple[str, str]], cursor: int, typed: str,
             new_row: str, drawn: int, title: str = "",
-            numbering: str = "") -> int:
+            numbering: str = "", back_word: str = "cancel") -> int:
     """Draw the list. The last row is a text field when there is one.
 
     Returns how many lines were used, so the next draw can move back over
@@ -93,7 +100,7 @@ def _render(options: list[tuple[str, str]], cursor: int, typed: str,
         pending = f"  {numbering}…" if numbering else ""
         sys.stderr.write("\x1b[2K\n\x1b[2K"
                          + paint(f"↑/↓ or a number{pending} · Enter select · "
-                                 f"Esc cancel", DIM)
+                                 f"Esc {back_word}", DIM)
                          + "\n")
         sys.stderr.write("\x1b[J")
     sys.stderr.flush()
@@ -139,7 +146,7 @@ def _read_key() -> str:
 
 
 def _live(prompt: str, options: list[tuple[str, str]], allow_new: bool,
-          new_hint: str):
+          new_hint: str, can_go_back: bool = False):
     if not _owns_screen:
         print(prompt, file=sys.stderr)
 
@@ -154,14 +161,26 @@ def _live(prompt: str, options: list[tuple[str, str]], allow_new: bool,
         while True:
             termios.tcsetattr(sys.stdin, termios.TCSADRAIN, saved)
             drawn = _render(options, cursor, typed, new_row, drawn, prompt,
-                            numbering)
+                            numbering, "back" if can_go_back else "cancel")
             tty.setraw(sys.stdin.fileno(), termios.TCSANOW)
 
-            key = _read_key()
+            if numbering:
+                key = _read_within(DIGIT_GAP)
+                if key is None:
+                    wanted, numbering = int(numbering), ""
+                    if wanted <= len(options):
+                        return wanted - 1
+                    if new_row and wanted == count:
+                        cursor = count - 1      # into the field, not picked
+                    continue
+            else:
+                key = _read_key()
             on_new = bool(new_row) and cursor == count - 1
 
-            if key in (CTRL_C, ESC):
+            if key == CTRL_C:
                 return None
+            if key == ESC:
+                return BACK if can_go_back else None
             if key in (ENTER, RETURN):
                 if numbering and int(numbering) <= len(options):
                     return int(numbering) - 1
@@ -184,13 +203,8 @@ def _live(prompt: str, options: list[tuple[str, str]], allow_new: bool,
                     typed += key
                 continue
             if key.isdigit():
-                numbering, picked = _digit(numbering, key, count)
-                if picked is None:
-                    continue
-                if picked < len(options):
-                    return picked
-                if new_row and picked == count - 1:
-                    cursor = picked     # move into the field rather than pick it
+                numbering = _digit(numbering, key, count)
+                continue
     finally:
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, saved)
         sys.stderr.write("\n")
@@ -233,9 +247,16 @@ def _numbered(prompt: str, options: list[tuple[str, str]], ask,
 
 
 def choose(prompt: str, options: list[tuple[str, str]], ask=None,
-           resolve=None, allow_new: bool = False, new_hint: str = ""):
+           resolve=None, allow_new: bool = False, new_hint: str = "",
+           can_go_back: bool = False):
     """Pick one. Returns its index, a typed string when it names something new,
     or None if the operator backed out.
+
+    `can_go_back` splits Esc from Ctrl-C, the way `menu` already does. A
+    question that is one step of several returns BACK on Esc so the caller can
+    step up a level; a question standing on its own keeps returning None for
+    both, because there is nowhere above it to go and every existing caller
+    reads None as "backed out".
 
     `ask` forces the numbered path and is how the tests drive this: a raw-mode
     picker cannot be typed at by a test, and a chooser that could only be
@@ -244,7 +265,7 @@ def choose(prompt: str, options: list[tuple[str, str]], ask=None,
     if not options and not allow_new:
         return None
     if ask is None and interactive():
-        return _live(prompt, options, allow_new, new_hint)
+        return _live(prompt, options, allow_new, new_hint, can_go_back)
     return _numbered(prompt, options, ask, resolve, allow_new, new_hint)
 
 
@@ -369,29 +390,33 @@ def paint(text: str, code: str) -> str:
     return f"{code}{text}{RESET}" if coloured() else text
 
 
-def _digit(buffer: str, key: str, count: int):
-    """Accumulate a typed row number. Returns (buffer, chosen index or None).
+def _digit(buffer: str, key: str, count: int) -> str:
+    """Add a digit to a typed row number, or start over if it cannot be one.
 
     Numbering used to stop at nine, because one keypress is one digit and a
     list of eleven showed a 10 and an 11 that nothing could select. Removing
-    the numbers was the wrong half of the fix: the answer is to let a number be
-    more than one keypress.
+    the numbers was the wrong half of the fix: the answer is to let a number
+    take more than one keypress.
 
-    A digit selects at once when it can only mean one row. In a list of eleven
-    "2" is unambiguous and acts immediately, while "1" could still become 10 or
-    11, so it waits: a further digit, or Enter, decides. That is why the buffer
-    is shown in the footer rather than kept secret.
+    Nothing is selected here. An earlier version acted the moment a digit could
+    only mean one row, which is clever and wrong: in a short list "1" is
+    unambiguous, so it fired at once and the "0" of an intended "10" arrived
+    after the screen had already moved on. The caller waits DIGIT_GAP for
+    another digit instead, so typing a number behaves like typing a number
+    whatever the list length.
     """
     candidate = buffer + key
-    if int(candidate) < 1 or int(candidate) > count:
-        # Not a row. Start again from this digit if that alone is one.
-        candidate = key
-        if int(candidate) < 1 or int(candidate) > count:
-            return "", None
-    value = int(candidate)
-    ambiguous = any(str(n).startswith(candidate) and n != value
-                    for n in range(1, count + 1))
-    return (candidate, None) if ambiguous else ("", value - 1)
+    if 1 <= int(candidate) <= count:
+        return candidate
+    # Not a row. Treat the digit as a fresh attempt rather than ignoring it.
+    return key if 1 <= int(key) <= count else ""
+
+
+def _read_within(seconds: float):
+    """One keypress, or None if none arrives in time."""
+    if not select.select([sys.stdin], [], [], seconds)[0]:
+        return None
+    return _read_key()
 
 
 def _selectable(rows) -> list[int]:
@@ -588,7 +613,16 @@ def menu(title: str, rows: list, *, subtitle: str = "", header=(),
                 # keys the operator has already pressed.
                 tty.setraw(sys.stdin.fileno(), termios.TCSANOW)
 
-            if scripted is None:
+            if scripted is None and typing:
+                # A number is half typed. Give the next digit a moment to
+                # arrive; if none does, the number is finished.
+                key = _read_within(DIGIT_GAP)
+                if key is None:
+                    wanted, typing, dirty = int(typing), "", True
+                    if wanted <= len(order):
+                        return rows[order[wanted - 1]].value
+                    continue
+            elif scripted is None:
                 if streaming and not select.select([sys.stdin], [], [], tick)[0]:
                     # Nothing typed. Let the caller move things along, redraw
                     # if it did, and go round again.
@@ -603,7 +637,7 @@ def menu(title: str, rows: list, *, subtitle: str = "", header=(),
                     dirty = True
                     continue
                 key = _read_key()
-            else:
+            elif scripted is not None:
                 # Running out of scripted keys means the caller expected the
                 # menu to have returned by now. Backing out beats blocking.
                 key = next(scripted, ESC)
@@ -622,10 +656,7 @@ def menu(title: str, rows: list, *, subtitle: str = "", header=(),
             elif key == DOWN:
                 at, typing, dirty = (at + 1) % len(order), "", True
             elif key.isdigit():
-                typing, picked = _digit(typing, key, len(order))
-                dirty = True
-                if picked is not None:
-                    return rows[order[picked]].value
+                typing, dirty = _digit(typing, key, len(order)), True
             elif key in BACKSPACE and typing:
                 typing, dirty = typing[:-1], True
             else:

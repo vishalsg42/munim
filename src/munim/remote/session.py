@@ -152,10 +152,51 @@ class _RemembersExpiry(OAuthClientProvider):
 
     async def _initialize(self) -> None:
         await super()._initialize()
+        self._adopt_expiry()
+
+    def _adopt_expiry(self) -> None:
         expires = getattr(self.context.storage, "expires_at", None)
         when = expires() if callable(expires) else None
         if when is not None:
             self.context.token_expiry_time = when
+
+    async def async_auth_flow(self, request):
+        """Re-read the store before every request, because we are not alone.
+
+        Cloudflare rotates refresh tokens: using one invalidates it. Munim runs
+        as a long-lived MCP server *and* as a CLI, so several processes share
+        one store, each holding whatever it loaded at startup. When one of them
+        refreshes, every other copy is instantly dead, and the SDK's answer to
+        a rejected refresh is a full browser authorization.
+
+        That is the "authorize again, and again" this fix chases. Ironically it
+        only became reachable once expiry was recorded at all: before that no
+        refresh ever fired, so nothing ever rotated, and the operator simply
+        got a browser login every hour instead.
+
+        Re-reading here costs one file read per request and means a process
+        refreshes with the newest token on disk, or discovers it does not need
+        to because somebody else already did.
+        """
+        if self._initialized:
+            held = await self.context.storage.get_tokens()
+            if held is not None and held.access_token:
+                self.context.current_tokens = held
+                self._adopt_expiry()
+
+        # Proxied with asend, not `async for`. httpx's auth flow is a two-way
+        # generator: it yields a request and expects the response sent back in.
+        # Iterating it feeds None where the response belongs, and the SDK then
+        # reads `.status_code` off it.
+        inner = super().async_auth_flow(request)
+        answer = None
+        try:
+            while True:
+                answer = yield await inner.asend(answer)
+        except StopAsyncIteration:
+            return
+        finally:
+            await inner.aclose()
 
 
 def auth_for(client: str, provider: str, *, backend=None,

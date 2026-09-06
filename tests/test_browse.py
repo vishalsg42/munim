@@ -503,7 +503,9 @@ def test_disconnecting_removes_the_row_behind_it(estate, monkeypatch, capsys):
 
 
 def test_reconnecting_updates_the_mark_behind_it(estate, monkeypatch, capsys):
-    monkeypatch.setattr("munim.cli.connect", lambda client, provider: 0)
+    # connect_via_mcp, not connect: patching the older name let the real login
+    # run and try to bind the callback port.
+    monkeypatch.setattr("munim.cli.connect_via_mcp", lambda client, provider: 0)
     monkeypatch.setattr(health, "check_all_for",
                         lambda record, provider, backend=None, keyring=None:
                         status("Balaji Roofings", provider, health.LIVE))
