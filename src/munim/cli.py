@@ -604,9 +604,14 @@ def config(action: str, provider: str | None, client_id: str | None) -> int:
             if entry is None:
                 print(f"  {name:10} not set", file=sys.stderr)
             else:
-                secret = "with a secret" if entry["secret"] else "no secret"
-                print(f"  {name:10} {entry['client_id']}  ({secret}, from the "
-                      f"{entry['from']})", file=sys.stderr)
+                # Named for what it holds. Called `secret` it read as the
+                # credential itself, to a scanner and to anyone skimming, when
+                # it is a four-word description of whether one exists. The
+                # credential is never printed here and that is the point of the
+                # line.
+                has_secret = "with a secret" if entry["secret"] else "no secret"
+                print(f"  {name:10} {entry['client_id']}  ({has_secret}, from "
+                      f"the {entry['from']})", file=sys.stderr)
         if not needs_one:
             print("No provider needs an application registered by hand.",
                   file=sys.stderr)
