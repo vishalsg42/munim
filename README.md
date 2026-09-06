@@ -91,7 +91,7 @@ Anthropic, which Strands ships as extras: `pip install 'munim[gemini]'`.
 One thing this does not change: Munim runs as an MCP server, so whatever its
 tools return goes into your coding agent's context and therefore to whichever
 model that agent runs on. Turning agents off stops Munim calling a model of its
-own; it cannot change how MCP works. The [privacy policy](site/privacy.html)
+own; it cannot change how MCP works. The [privacy policy](https://vishalsg42.github.io/munim/privacy.html)
 says so plainly.
 
 **`munim doctor`** says what is set up, what is not, and the exact command to fix

@@ -1,0 +1,59 @@
+name: pages
+
+# The privacy policy and terms have to be reachable at a URL, because Google's
+# OAuth consent screen links to them and a link into a git repository is not a
+# published policy.
+#
+# Published from `site/` rather than moved into `docs/`, which already holds the
+# written record and is not a website. An artifact upload keeps the source where
+# it belongs and still lets Pages serve it.
+#
+# Deliberately not Vercel. The only Vercel account Munim holds belongs to a
+# client, and putting this project's own site in somebody else's account is the
+# exact mistake this tool exists to prevent.
+on:
+  push:
+    branches: [main]
+    paths: ["site/**", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+
+# Read the repository, mint the Pages token, prove the deployment came from
+# here. Nothing wider: this workflow publishes three static files.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One at a time, and a running deploy is not cancelled. Half a policy page is
+# worse than yesterday's.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Refuse to publish a policy that contradicts the code
+        run: |
+          # The policy said credentials live in the keychain long after they
+          # moved to a file. A stale policy is worse than none, because people
+          # act on it, so the build fails rather than shipping the old claim.
+          grep -q 'credentials.json' site/privacy.html
+          if grep -qi 'keychain' site/privacy.html; then
+            echo "site/privacy.html still mentions the keychain." >&2
+            echo "Credentials live in ~/.munim/credentials.json (D30)." >&2
+            exit 1
+          fi
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4
