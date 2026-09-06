@@ -124,6 +124,17 @@
         margin-top: 32px; border-radius: 8px; padding: 24px;
         box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
       }
+      /* The cross-client answer. One block per client, because the whole point
+         is that they are separate accounts: rendering them as an undifferentiated
+         list would show exactly the thing the product exists to prevent. */
+      #across .q { font-size: 11px; text-transform: uppercase;
+                   letter-spacing: 0.08em; color: var(--stone-400); }
+      #across .who { margin-top: 12px; font-weight: 600; font-size: 15px; }
+      #across .says { margin-top: 2px; font-size: 14px; color: var(--stone-600); }
+      #across .unread { color: var(--rose-700); }
+      #across pre { margin-top: 4px; font-family: var(--mono); font-size: 11px;
+                    color: var(--stone-500); white-space: pre-wrap; }
+
       /* A finding is a mode, not a row in a list. It takes the screen because
          it is the only thing on it that needs a person. */
       #finding { border: 1px solid var(--rose-300); background: var(--rose-50); }
@@ -187,6 +198,7 @@
       <h1 id="client"></h1>
       <ol class="stages" id="stages"></ol>
       <div class="chips" id="chips"></div>
+      <section class="card" id="across" hidden></section>
       <section class="card" id="finding" hidden></section>
       <section class="card" id="confirm" hidden></section>
       <section id="log"><div id="lines"></div></section>
@@ -223,7 +235,10 @@
       let rendered = 0;  // how many log lines are already in the DOM
 
       function render(state) {
-        const live = state.client !== null;
+        // A cross-client answer has no single client, so keying "is anything
+        // happening" off one would leave the screen empty for the whole run.
+        const live = state.client !== null
+          || Object.keys(state.byClient).length > 0;
         $("dot").className = "dot" + (state.done || state.connected ? " on" : "");
         $("badge").textContent = state.done ? "done" : state.connected ? "live" : "waiting";
         $("empty").hidden = live;
@@ -234,7 +249,8 @@
           state.stagesSeen.length > 0 && state.stagesSeen.every((s) => CHECK_ONLY.includes(s))
             ? "Checking"
             : "Launching";
-        $("client").textContent = text(state.client);
+        $("client").textContent = state.stagesSeen.includes("across")
+          ? "Across every client" : text(state.client);
 
         for (const stage of STAGES) {
           const done = state.stagesDone.includes(stage);
@@ -252,6 +268,7 @@
           chipEls[check].className = "chip " + (state.checks[check] || "idle");
         }
 
+        renderAcross(state);
         renderFinding(state.finding);
         renderConfirm(state.awaitingConfirm);
 
@@ -274,6 +291,31 @@
           // The newest line is the one that matters; a log that has to be
           // scrolled is a log nobody reads, on camera or otherwise.
           lines.lastElementChild?.scrollIntoView({ block: "end", behavior: "smooth" });
+        }
+      }
+
+      function renderAcross(state) {
+        const box = $("across");
+        const clients = Object.keys(state.byClient).sort();
+        box.hidden = clients.length === 0;
+        if (box.hidden) return;
+        box.replaceChildren();
+        if (state.question) box.appendChild(el("p", "q", text(state.question)));
+        for (const client of clients) {
+          box.appendChild(el("p", "who", text(client)));
+          for (const e of state.byClient[client]) {
+            // An escalation here means the agent named an account whose tools
+            // never answered. It reads differently from a finding on purpose.
+            const unread = e.kind === "escalated";
+            box.appendChild(el("p", "says" + (unread ? " unread" : ""),
+                               text(e.human_text)));
+            const evidence = e.detail && e.detail.evidence;
+            if (evidence) {
+              const pre = document.createElement("pre");
+              pre.textContent = text(evidence);
+              box.appendChild(pre);
+            }
+          }
         }
       }
 

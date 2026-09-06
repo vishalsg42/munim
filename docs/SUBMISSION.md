@@ -58,8 +58,14 @@ That last part is why several accounts can be live at once. A coding agent holds
 one account per provider because one client id shares one token store. Munim
 registers separately per client, so as far as Cloudflare or Vercel or Resend is
 concerned these are different applications, and there is nothing shared to
-clobber. Nobody registers an application by hand: all three providers issue a
+clobber. Nobody registers an application by hand: every provider here issues a
 client on demand, so connecting is a browser window and nothing else.
+
+Eleven providers are wired: Cloudflare, Vercel, Netlify, Supabase, Resend,
+Sentry, Linear, Notion, Gmail, Stitch and Zoho. Munim models none of their
+tools. It asks each server what it publishes and forwards the one that was
+named, with the named client's credentials, which is why adding a provider is a
+line in a table rather than an adapter.
 
 - **Read across every client.** One question, answered over all of them at once,
   using each client's own account.
@@ -68,6 +74,12 @@ client on demand, so connecting is a browser window and nothing else.
   changes something is not present to be called.
 - **The account names the client.** The provider is asked which account was
   authorised, so a name and an account cannot drift apart.
+- **Anything the provider can do, through the client you named.**
+  `list_provider_tools` returns a provider's own tools and `call_provider_tool`
+  invokes one. No model sits on that path: the agent choosing the tool is the
+  one already on the other end of the pipe. Modelling one provider's tools as
+  another tool's parameters is a losing game, and Cloudflare's `execute` takes
+  JavaScript.
 - **Find what fails silently, then fix it properly.** When a domain carries two
   sender policies, the agent does not add a third. It combines them, keeping
   every sender, taking the strictest qualifier, and refusing if the merged policy
@@ -120,9 +132,15 @@ added beside it. A client's real accounts are read from, because that is the
 whole point, but their domains are not named and their records are not shown:
 they did not consent to a public repository or video.
 
-**Not implemented:** Vercel write operations, and resuming an interrupted launch
-from the run log. Both are absent rather than present and inert. Resend does
-write: it can create a domain and trigger verification.
+**Writes.** Nine of Vercel's own tools are write tools and every one of them is
+reachable through `call_provider_tool`, along with Cloudflare's `execute`, which
+has been used against a live client zone. What Vercel's MCP server does **not**
+publish is an environment-variable write or a way to attach a domain to a
+project, so those two operations are reachable through no tool at any layer and
+Munim does not fake them. Resend writes: it can create a domain and trigger
+verification.
+
+**Not implemented:** resuming an interrupted launch from the run log.
 
 **Not deployed to AgentCore**, and the reason is worth stating: Bedrock is
 unreachable on this account because AWS Marketplace cannot bill AISPL customers
@@ -161,16 +179,22 @@ the providers' own MCP servers (`mcp.cloudflare.com`, `mcp.vercel.com`,
 
 ## What is left
 
-**Repair is written and not exposed.** `agent/mail.py:set_up_mail` performs the
-Resend-to-Cloudflare handoff and `agent/launch.py:fix_spf` performs the
-approval-gated SPF merge. Both are tested and neither has a caller outside its
-own module, so neither is reachable through the MCP tools. Said plainly because
-an external reviewer found it before we did, and because the video script
-demonstrates one of them: a capability that cannot be invoked is not a
-capability, and filming it would be showing something a judge cannot reproduce.
+**Repair is reachable now.** An earlier version of this section said the
+Resend-to-Cloudflare handoff and the SPF merge were written and could not be
+invoked, because both took an `approve` callback and a callback cannot cross an
+MCP tool boundary: a tool call returns once, so there is nowhere for a question
+to go. `agent/mailplan.py` splits that into two calls, `plan_mail_setup` reads
+what is there and says what would change, `apply_mail_setup` carries out a plan
+the operator has seen, and approval becomes the gap between them, which is the
+only shape that survives the boundary.
 
-Vercel write operations. Resuming an interrupted launch from the run log. Both
-absent rather than present and inert.
+`agent/launch.py:fix_spf` has been **deleted** rather than fixed. It did the same
+merge as `mailplan`, with the callback shape that does not work, and this
+section previously claimed it was tested. It was not: it had no test and no
+caller anywhere in the repository. Recorded here because that sentence was
+wrong, and a claims discipline that only runs forward is not one.
+
+Resuming an interrupted launch from the run log is still not implemented.
 
 The check catalogue is complete at thirteen, all of which need no provider
 account: they read public DNS and make a public HTTPS request. Anyone can run

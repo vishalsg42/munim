@@ -9,12 +9,21 @@
 // Fixed order. Chips render greyed at these positions from the first frame and
 // light up in place - nothing is inserted, so nothing moves and the eye can
 // track one cell changing.
+// Only checks something actually emits. This listed twenty and the catalogue
+// emits thirteen, so seven cells sat grey through every run: five had no
+// producer anywhere in the codebase, and a permanently grey chip reads as a
+// step that hung rather than one that does not exist. `cert_www`,
+// `env_redeployed`, `return_path`, `site_responds` and `ssl_mode` are gone.
+//
+// `deploy_current` and `env_scoped` stay: they come from the Vercel adapter,
+// so they are idle on a DNS-only check and real on a launch with Vercel
+// connected. `tests/room/reduce.test.mjs` pins this list against the producers.
 export const CHECKS = [
   "spf_single", "spf_lookups", "dkim_present", "dkim_chunking",
-  "dmarc_present", "dmarc_policy", "mx_present", "return_path",
-  "ns_delegated", "cert_valid", "cert_www", "caa_allows",
-  "apex_resolves", "www_redirect", "https_enforced", "ssl_mode",
-  "deploy_current", "env_scoped", "env_redeployed", "site_responds",
+  "dmarc_present", "dmarc_policy", "mx_present",
+  "ns_delegated", "cert_valid", "caa_allows",
+  "apex_resolves", "www_redirect", "https_enforced",
+  "deploy_current", "env_scoped",
 ];
 
 export const CHECK_LABELS = {
@@ -44,6 +53,10 @@ export const initialState = {
   client: null, stage: null, stagesDone: [], stagesSeen: [], stagesOff: [],
   checks: {},
   finding: null, awaitingConfirm: null, escalated: null,
+  // A cross-client answer has one finding per client, so one slot cannot hold
+  // it: five clients used to render as one heading and one card, whichever
+  // arrived last. Keyed by client, and `across` is the stage that fills it.
+  byClient: {}, question: null,
   events: [], done: false, connected: false,
 };
 
@@ -85,6 +98,13 @@ export function reduce(state, action) {
     case "finding":
       if (check) next.checks = { ...state.checks, [check]: "fail" };
       next.finding = e;
+      if (e.stage === "across" && e.client) {
+        next.byClient = {
+          ...state.byClient,
+          [e.client]: [...(state.byClient[e.client] || []), e],
+        };
+        if (e.detail && e.detail.question) next.question = e.detail.question;
+      }
       break;
     case "resolved":
       if (check) next.checks = { ...state.checks, [check]: "pass" };
@@ -101,6 +121,15 @@ export function reduce(state, action) {
       break;
     case "escalated":
       next.escalated = e;
+      // A cross-client escalation is "the agent named an account it never
+      // read". It belongs beside that client rather than replacing the single
+      // escalation slot, which a launch uses for something else entirely.
+      if (e.stage === "across" && e.client) {
+        next.byClient = {
+          ...state.byClient,
+          [e.client]: [...(state.byClient[e.client] || []), e],
+        };
+      }
       break;
     case "run_done":
       next.done = true;

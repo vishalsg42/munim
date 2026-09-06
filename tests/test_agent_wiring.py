@@ -9,6 +9,8 @@ Nothing about the tool's output would have revealed it, which is why it is
 pinned here.
 """
 
+from types import SimpleNamespace
+
 import pytest
 
 import munim.agent.launch as agent_module
@@ -60,16 +62,33 @@ def _canned_checks(monkeypatch):
     monkeypatch.setattr(agent_module, "run_reachability_async", none)
 
 
+class _Reply(str):
+    """An AgentResult's useful surface: it stringifies, and it says which tools
+    were actually called. `across.ask` reads the second to decide whether a
+    finding describes an account it really read."""
+
+    metrics = SimpleNamespace(tool_metrics={})
+    structured_output = None
+
+
 class _FakeAgent:
     """Stands in for Strands. Records that it was asked."""
     asked = []
+    # Set by a test that wants phase two to produce findings.
+    shaped = None
+    used: dict = {}
 
     def __init__(self, **kwargs):
         self.kwargs = kwargs
 
-    async def invoke_async(self, prompt):
+    async def invoke_async(self, prompt, **kwargs):
         _FakeAgent.asked.append(prompt)
-        return "Your mail is not signed, so receivers cannot prove it is you."
+        reply = _Reply("Your mail is not signed, so receivers cannot prove "
+                       "it is you.")
+        reply.metrics = SimpleNamespace(tool_metrics=_FakeAgent.used)
+        if kwargs.get("structured_output_model") is not None:
+            reply.structured_output = _FakeAgent.shaped
+        return reply
 
 
 async def test_check_runs_the_agent_when_something_failed(tmp_path, monkeypatch, agents_on):
@@ -186,14 +205,24 @@ async def test_the_agent_gets_provider_tools_for_connected_providers(tmp_path, m
     import munim.remote.storage as storage_mod
     import munim.remote.toolsets as toolsets_mod
 
-    connected = {("acme", "cloudflare")}
+    # Keyed by the client **id**, which is what sessions are filed under. This
+    # fixture used to key on the name, so it asserted the bug: `launch` was
+    # handed a label, looked it up in a store keyed by identity, matched
+    # nothing for every real client, and reported no error at all.
+    # Built first so the id below is the one this server will actually use;
+    # `_server` makes a fresh registry per call.
+    server, registry = _server(tmp_path)
+    record = registry.clients()[0]
+    connected = {(record.id, "cloudflare")}
     monkeypatch.setattr(
         storage_mod.KeychainTokenStorage, "_read",
         lambda self, kind: {"access_token": "t"} if (self._client, self._provider) in connected else None)
+    monkeypatch.setattr(storage_mod.KeychainTokenStorage, "endpoint",
+                        lambda self: "")
 
     built = []
     monkeypatch.setattr(toolsets_mod, "toolset_for",
-                        lambda c, p, **k: built.append((c, p)) or _Stub(p))
+                        lambda c, p, **k: built.append((c, p, k)) or _Stub(p))
     monkeypatch.setattr(agent_module, "build_model", lambda *a, **k: (object(), "fake"))
 
     captured = {}
@@ -205,11 +234,15 @@ async def test_the_agent_gets_provider_tools_for_connected_providers(tmp_path, m
 
     monkeypatch.setattr(agent_module, "Agent", Recording)
 
-    server, _ = _server(tmp_path)
     await server.call_tool("check", {"target": "acme"})
 
-    assert built == [("acme", "cloudflare")], \
-        "only the connected provider should have a toolset built"
+    assert [(c, p) for c, p, _ in built] == [(record.id, "cloudflare")], \
+        "the session was looked up by something other than the client id"
+    kwargs = built[0][2]
+    assert kwargs.get("label") == record.name, \
+        "without a label every tool prefix becomes the opaque client id"
+    assert kwargs.get("read_only") is True, \
+        "a diagnosis agent was handed unfiltered write tools"
     names = [getattr(t, "_prefix", None) for t in captured["tools"]]
     assert "cloudflare" in names, f"the agent did not receive it: {names}"
 
@@ -292,3 +325,330 @@ async def test_working_on_one_client_is_declared_mutating(tmp_path):
     assert "client" in tools["work_on_client"].inputSchema.get("required", [])
     assert "work_on_client" not in CROSS_CLIENT, \
         "a tool that can write must never be allowed to span clients"
+
+
+# ---- through the real toolset helpers, not around them -------------------
+#
+# Every test above replaces `toolsets_for` / `toolset_for` with a `**k` stub,
+# which is exactly why three faults lived here unseen: the real signatures were
+# never called. `across` and `within` passed `backend=` to functions that take
+# `keyring=`, so both raised TypeError the moment agents were on; `launch`
+# looked sessions up by label in a store keyed by identity and silently found
+# none; and nothing passed `allow_login=False`, so a question could have opened
+# a browser and blocked for five minutes.
+#
+# So these fake one level deeper, at MCPClient.
+
+
+class _Client:
+    """Stands in for strands' MCPClient, recording how it was constructed."""
+
+    made = []
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+        self._prefix = kwargs.get("prefix")
+        _Client.made.append(kwargs)
+
+    def list_tools_sync(self):
+        return []
+
+
+@pytest.fixture
+def real_toolsets(monkeypatch):
+    import munim.remote.toolsets as toolsets_mod
+    _Client.made = []
+    monkeypatch.setattr(toolsets_mod, "MCPClient", _Client)
+    return _Client
+
+
+async def test_asking_across_clients_reaches_a_client(
+        tmp_path, monkeypatch, agents_on, real_toolsets):
+    """The TypeError. `across` called `toolsets_for(..., backend=...)` and the
+    helper takes `keyring=`, so this raised for every real caller."""
+    import munim.agent.across as across_mod
+    import munim.remote.storage as storage_mod
+
+    monkeypatch.setattr(storage_mod.KeychainTokenStorage, "_read",
+                        lambda self, kind: {"access_token": "t"}
+                        if self._provider == "resend" else None)
+    monkeypatch.setattr(across_mod, "build_model",
+                        lambda *a, **k: (object(), "fake"))
+    monkeypatch.setattr(across_mod, "Agent", _FakeAgent)
+
+    await across_mod.ask("who?", [ClientRecord(name="acme")])
+
+    assert real_toolsets.made, "no toolset was built through the real helper"
+
+
+async def test_working_on_one_client_reaches_it(
+        tmp_path, monkeypatch, agents_on, real_toolsets):
+    """The same fault in `within`, which nothing exercised either."""
+    import munim.agent.within as within_mod
+    import munim.remote.storage as storage_mod
+
+    monkeypatch.setattr(storage_mod.KeychainTokenStorage, "_read",
+                        lambda self, kind: {"access_token": "t"}
+                        if self._provider == "resend" else None)
+    monkeypatch.setattr(storage_mod.KeychainTokenStorage, "endpoint",
+                        lambda self: "")
+    monkeypatch.setattr(within_mod, "build_model",
+                        lambda *a, **k: (object(), "fake"))
+    monkeypatch.setattr(within_mod, "Agent", _FakeAgent)
+
+    class Log:
+        def append(self, **k): pass
+
+    await within_mod.work_on("c_1", "Acme Ltd", "do a thing", Log())
+
+    assert real_toolsets.made, "no toolset was built through the real helper"
+
+
+async def test_no_agent_path_may_open_a_browser(
+        tmp_path, monkeypatch, agents_on, real_toolsets):
+    """The one that turns a crash into something worse.
+
+    `toolset_for` built its auth provider with the default `allow_login=True`,
+    so once the TypeError above was fixed an unattended cross-client question
+    could open a browser and block for five minutes waiting for a callback
+    nobody is there to complete."""
+    import munim.agent.across as across_mod
+    import munim.remote.session as session_mod
+    import munim.remote.storage as storage_mod
+
+    asked = []
+    real = session_mod.auth_for
+    monkeypatch.setattr(
+        "munim.remote.toolsets.auth_for",
+        lambda c, p, **k: asked.append(k) or real(c, p, **k))
+    monkeypatch.setattr(storage_mod.KeychainTokenStorage, "_read",
+                        lambda self, kind: {"access_token": "t"}
+                        if self._provider == "resend" else None)
+    monkeypatch.setattr(across_mod, "build_model",
+                        lambda *a, **k: (object(), "fake"))
+    monkeypatch.setattr(across_mod, "Agent", _FakeAgent)
+
+    await across_mod.ask("who?", [ClientRecord(name="acme")])
+
+    assert asked, "the real auth path was never reached"
+    for kwargs in asked:
+        assert kwargs.get("allow_login") is False, \
+            "an agent path was built with a browser login still allowed"
+
+
+async def test_a_provider_that_will_not_open_does_not_take_the_others_with_it(
+        tmp_path, monkeypatch, agents_on):
+    """MCPClient connects and lists tools while the Agent is constructed, so a
+    single expired provider could abort the whole diagnosis."""
+    import munim.agent.launch as launch_mod
+    import munim.remote.storage as storage_mod
+    import munim.remote.toolsets as toolsets_mod
+
+    monkeypatch.setattr(storage_mod.KeychainTokenStorage, "_read",
+                        lambda self, kind: {"access_token": "t"})
+    monkeypatch.setattr(storage_mod.KeychainTokenStorage, "endpoint",
+                        lambda self: "")
+
+    def sometimes(client, provider, **k):
+        if provider == "cloudflare":
+            raise RuntimeError("session will not open")
+        return _Stub(provider)
+
+    monkeypatch.setattr(toolsets_mod, "toolset_for", sometimes)
+
+    written = []
+
+    class Log:
+        def append(self, **k): written.append(k)
+
+    ready = launch_mod._connected_toolsets("c_1", "Acme Ltd", Log())
+
+    assert ready, "one bad provider took every other provider with it"
+    assert any("cloudflare" in (e.get("human_text") or "") for e in written), \
+        "the provider that failed was dropped without saying so"
+
+
+async def test_a_toolset_with_no_tools_is_not_counted_as_one(
+        tmp_path, monkeypatch, agents_on):
+    """Cloudflare annotates nothing, so a read-only filter leaves it empty. The
+    log said "1 provider toolset(s) available" while the agent held nothing,
+    which is the bug wearing a reassuring number."""
+    import munim.agent.launch as launch_mod
+    import munim.remote.storage as storage_mod
+    import munim.remote.toolsets as toolsets_mod
+
+    monkeypatch.setattr(storage_mod.KeychainTokenStorage, "_read",
+                        lambda self, kind: {"access_token": "t"}
+                        if self._provider == "cloudflare" else None)
+    monkeypatch.setattr(storage_mod.KeychainTokenStorage, "endpoint",
+                        lambda self: "")
+    monkeypatch.setattr(toolsets_mod, "toolset_for",
+                        lambda c, p, **k: _Stub(p))
+
+    written = []
+
+    class Log:
+        def append(self, **k): written.append(k)
+
+    launch_mod._connected_toolsets("c_1", "Acme Ltd", Log())
+
+    counted = [e for e in written if "available" in (e.get("human_text") or "")]
+    assert counted, "nothing was reported at all"
+    assert "0 provider tool(s)" in counted[0]["human_text"], \
+        f"an empty toolset was counted as available: {counted[0]['human_text']}"
+
+
+# ---- an answer describes what was read, or says it did not ---------------
+#
+# The failure this guards against is the one that looks best: a perfectly typed
+# Answer whose evidence no provider ever produced. Passing the schema into a
+# single invocation registers it as one more tool from the first turn, so the
+# model can answer before calling anything; the deprecated
+# `Agent.structured_output()` never runs the tool loop at all. Both validate.
+
+
+def _answer(**kw):
+    from munim.agent.across import Answer
+    return Answer(**kw)
+
+
+def _finding(client, provider="resend", says="something", evidence=""):
+    from munim.agent.across import Finding
+    return Finding(client=client, provider=provider, says=says,
+                   evidence=evidence)
+
+
+@pytest.fixture
+def one_connected_client(monkeypatch):
+    import munim.agent.across as across_mod
+    import munim.remote.storage as storage_mod
+    import munim.remote.toolsets as toolsets_mod
+
+    monkeypatch.setattr(storage_mod.KeychainTokenStorage, "_read",
+                        lambda self, kind: {"access_token": "t"}
+                        if self._provider == "resend" else None)
+    monkeypatch.setattr(toolsets_mod, "toolset_for",
+                        lambda c, p, **k: _Stub(p))
+    monkeypatch.setattr(across_mod, "build_model",
+                        lambda *a, **k: (object(), "fake"))
+    monkeypatch.setattr(across_mod, "Agent", _FakeAgent)
+    _FakeAgent.asked = []
+    _FakeAgent.shaped = None
+    _FakeAgent.used = {}
+    return across_mod
+
+
+async def test_the_investigation_happens_before_the_shaping(
+        one_connected_client, agents_on):
+    """Two calls, in that order. One call with the schema attached lets the
+    model finish on its first turn without having called a provider."""
+    across_mod = one_connected_client
+    _FakeAgent.shaped = _answer(summary="done")
+
+    await across_mod.ask("who?", [ClientRecord(name="acme")])
+
+    assert len(_FakeAgent.asked) == 2, \
+        "the answer was shaped in the same pass that was supposed to gather it"
+    assert "Question: who?" in _FakeAgent.asked[0]
+    assert _FakeAgent.asked[1] == across_mod.SHAPE_IT
+
+
+async def test_a_finding_about_an_account_never_read_is_set_aside(
+        one_connected_client, agents_on):
+    """Naming a real client is not evidence of having looked at it. A client
+    can be offered a provider whose every tool the read-only filter removed."""
+    across_mod = one_connected_client
+    _FakeAgent.used = {}                       # nothing was actually called
+    _FakeAgent.shaped = _answer(findings=[_finding("acme")], summary="s")
+
+    answer, discarded = await across_mod.ask("who?", [ClientRecord(name="acme")])
+
+    assert answer.findings == [], "an unread account was reported as a finding"
+    assert [f.client for f in discarded] == ["acme"], \
+        "it was dropped silently instead of surfaced"
+
+
+async def test_a_grounded_finding_is_kept(one_connected_client, agents_on):
+    """The other direction. Setting everything aside would pass the test above
+    while making the tool useless."""
+    across_mod = one_connected_client
+    _FakeAgent.used = {"acme_resend_list_domains":
+                       SimpleNamespace(success_count=1)}
+    _FakeAgent.shaped = _answer(findings=[_finding("acme")], summary="s")
+
+    answer, discarded = await across_mod.ask("who?", [ClientRecord(name="acme")])
+
+    assert [f.client for f in answer.findings] == ["acme"]
+    assert discarded == []
+
+
+async def test_a_tool_that_only_errored_does_not_count_as_read(
+        one_connected_client, agents_on):
+    """`call_count` would say the tool was reached. `success_count` says it
+    answered, and only an answer is evidence."""
+    across_mod = one_connected_client
+    _FakeAgent.used = {"acme_resend_list_domains":
+                       SimpleNamespace(success_count=0)}
+    _FakeAgent.shaped = _answer(findings=[_finding("acme")], summary="s")
+
+    answer, discarded = await across_mod.ask("who?", [ClientRecord(name="acme")])
+
+    assert answer.findings == []
+    assert len(discarded) == 1
+
+
+async def test_a_model_that_cannot_produce_the_schema_still_answers(
+        one_connected_client, agents_on, monkeypatch):
+    """Strands raises rather than returning prose when the schema will not
+    validate. Loud is right; loud as an unhandled exception inside an MCP tool
+    is a traceback where the operator wanted an answer."""
+    across_mod = one_connected_client
+
+    class Refuses(_FakeAgent):
+        async def invoke_async(self, prompt, **kwargs):
+            if kwargs.get("structured_output_model") is not None:
+                raise RuntimeError("could not produce structured output")
+            return await super().invoke_async(prompt)
+
+    monkeypatch.setattr(across_mod, "Agent", Refuses)
+
+    answer, discarded = await across_mod.ask("who?", [ClientRecord(name="acme")])
+
+    assert answer.findings == []
+    assert "mail is not signed" in answer.summary, \
+        "the prose the model did produce was thrown away"
+
+
+async def test_a_client_named_with_different_capitals_is_still_that_client(
+        one_connected_client, agents_on):
+    """Found end to end: the model wrote "Grafison" for a client registered as
+    "grafison", and the grounding check discarded a correct finding and raised
+    it as an account never read. Case is the model's to get wrong and not the
+    operator's to pay for."""
+    across_mod = one_connected_client
+    _FakeAgent.used = {"grafison_resend_list_domains":
+                       SimpleNamespace(success_count=1)}
+    _FakeAgent.shaped = _answer(findings=[_finding("Grafison")], summary="s")
+
+    answer, discarded = await across_mod.ask(
+        "who?", [ClientRecord(name="grafison")])
+
+    assert discarded == [], "a grounded finding was reported as never read"
+    assert [f.client for f in answer.findings] == ["grafison"], \
+        "the answer renamed the operator's client"
+
+
+async def test_a_name_that_matches_no_client_is_still_set_aside(
+        one_connected_client, agents_on):
+    """The other direction: loosening the match must not make it meaningless."""
+    across_mod = one_connected_client
+    _FakeAgent.used = {"grafison_resend_list_domains":
+                       SimpleNamespace(success_count=1)}
+    _FakeAgent.shaped = _answer(findings=[_finding("Some Other Bakery")],
+                                summary="s")
+
+    answer, discarded = await across_mod.ask(
+        "who?", [ClientRecord(name="grafison")])
+
+    assert answer.findings == []
+    assert [f.client for f in discarded] == ["Some Other Bakery"]

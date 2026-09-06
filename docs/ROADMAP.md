@@ -55,13 +55,27 @@ against a real zone. That is the last claim in this project still resting on
 tests alone.
 
 **Open-ended cross-client reads on providers that do not annotate.** A
-cross-client toolset is default-deny on `readOnlyHint`. Cloudflare's `execute`
-both reads and writes, so it carries no hint and is refused, which leaves
-`ask_across_clients` with documentation search and no access to live account
-data. The filter is right; the gap is that a provider offering one
-read-and-write tool cannot participate in an open cross-client question at all.
-Fixing it properly means a way to prove a call is a read before making it, which
-is a per-provider judgement and not a flag.
+cross-client toolset is default-deny on `readOnlyHint`, and a provider that
+annotates nothing contributes nothing. Counted against the live tool listings:
+
+    cloudflare    3 tools,   1 read-only   (documentation search)
+    vercel       37 tools,  23 read-only
+    resend      103 tools,  43 read-only
+
+So Cloudflare cannot take part in an open cross-client question at all, which
+matters because it is the provider most clients here are connected to. An
+earlier version of this entry said the filter left documentation search, which
+was optimistic in the wrong direction: `docs` is unannotated too, and `search`
+is the one that survives. The filter is right; the gap is that a provider
+offering read-and-write tools cannot participate. Fixing it properly means a way
+to prove a call is a read before making it, which is a per-provider judgement
+and not a flag.
+
+The practical consequence, worth knowing before writing a demo: a cross-client
+question has to be one the annotated providers can answer. "Which clients have
+an unverified sending domain?" is answerable through Resend. "Which domain
+expires this quarter?" is not answerable by any tool at any provider here,
+because registration expiry is not something their MCP servers publish.
 
 **Scopes on the MCP route are the provider's choice, not ours.** Same cause.
 Connecting Supabase grants `database:write`, `storage:write`,

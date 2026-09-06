@@ -60,13 +60,32 @@ def test_a_provider_with_no_mcp_server_is_refused():
 
 def test_two_toolsets_for_one_provider_are_told_apart_by_name():
     """Same server, same process, two clients. The prefix is what a tool call
-    uses to say which account it means."""
+    uses to say which account it means, and the client is its leading segment
+    so `balaji_roofings_*` still means Balaji and nobody else."""
     ring = FakeKeyring()
     a = toolset_for("Balaji Roofings", "cloudflare", keyring=ring)
     b = toolset_for("Kloudfirst", "cloudflare", keyring=ring)
     assert a is not b
-    assert a._prefix == "balaji_roofings"
-    assert b._prefix == "kloudfirst"
+    assert a._prefix == "balaji_roofings_cloudflare"
+    assert b._prefix == "kloudfirst_cloudflare"
+    assert a._prefix.startswith("balaji_roofings")
+
+
+def test_one_client_two_providers_do_not_collide():
+    """Found by running it, not by a test. Vercel and Supabase both publish
+    `list_projects`, so a client connected to both produced the same prefixed
+    name twice and Strands refused to build the agent at all:
+
+        ValueError: Tool name 'balaji_roofings_list_projects' already exists.
+
+    `toolsets_for` guards against two clients colliding. Nothing guarded one
+    client's providers colliding with each other."""
+    ring = FakeKeyring()
+    vercel = toolset_for("Balaji Roofings", "vercel", keyring=ring)
+    supabase = toolset_for("Balaji Roofings", "supabase", keyring=ring)
+
+    assert vercel._prefix != supabase._prefix, \
+        "two providers under one client produced the same tool names"
 
 
 def test_each_client_authenticates_as_itself():
@@ -118,3 +137,99 @@ def test_a_cross_client_toolset_carries_the_filter_and_a_single_client_does_not(
     within = toolset_for("Acme", "cloudflare", keyring=FakeKeyring())
     assert across._tool_filters is not None
     assert within._tool_filters is None
+
+
+# ---- a server is authenticated the way it says it wants to be ------------
+#
+# `toolset_for` built an OAuth provider against `server.url` whatever the server
+# said. Right for the eight that register a client on demand; wrong for the two
+# that do not. Latent until the token-or-endpoint rule in `connected_providers`
+# made a URL-authenticated provider reachable from an agent at all, at which
+# point Zoho got a client pointed at the empty string.
+#
+# MCPClient keeps its url and headers inside a transport closure, so these
+# assert at the seam rather than on the object.
+
+
+class _Made:
+    """Captures how MCPClient was constructed."""
+
+    last = None
+
+    def __init__(self, **kwargs):
+        _Made.last = kwargs
+        self._prefix = kwargs.get("prefix")
+
+
+@pytest.fixture
+def made(monkeypatch):
+    import munim.remote.toolsets as toolsets_mod
+    _Made.last = None
+    monkeypatch.setattr(toolsets_mod, "MCPClient", _Made)
+    return _Made
+
+
+class _Vault(FakeKeyring):
+    """A store holding a Zoho endpoint and a Stitch key, the way connect
+    leaves them: vault-shaped for sessions, backend-shaped for pasted keys."""
+
+    def __init__(self, endpoint="", key=""):
+        super().__init__()
+        self._endpoint = endpoint
+        self._key = key
+
+    def get_password(self, service, account):
+        if self._endpoint and service.endswith(":endpoint"):
+            return self._endpoint
+        return super().get_password(service, account)
+
+    def get(self, client, provider):
+        return self._key or None
+
+    def set(self, client, provider, secret):
+        self._key = secret
+
+
+def test_a_url_authenticated_provider_uses_its_own_endpoint(made):
+    """Zoho's address carries the credential, so it is per client and lives in
+    the store. Its entry in the provider table has no URL at all."""
+    from munim.remote.servers import server_for
+
+    assert server_for("zoho").url == "", \
+        "this test is about a provider whose table entry has no URL"
+
+    endpoint = "https://books-acme.zohomcp.in/mcp/" + "a" * 32
+    toolset_for("c_1", "zoho", keyring=_Vault(endpoint=endpoint))
+
+    assert made.last["url"] == endpoint, \
+        "the agent was pointed at the provider table's empty URL"
+    assert made.last.get("auth_provider") is None, \
+        "a URL-authenticated provider was also given an OAuth client"
+
+
+def test_a_header_authenticated_provider_gets_its_header(made):
+    """Stitch wants an API key in a header. An OAuth provider is not something
+    it can use, and building one starts a flow nobody asked for."""
+    toolset_for("c_1", "stitch", keyring=_Vault(key="sk-test"))
+
+    assert made.last["headers"], "no header was sent"
+    assert made.last.get("auth_provider") is None, \
+        "a header-authenticated provider was given an OAuth client"
+
+
+def test_a_header_provider_with_no_key_is_refused_before_the_agent_runs():
+    """Building a client with no credential turns a sentence before the run
+    into a 401 in the middle of it."""
+    from munim.remote.session import NeedsLogin
+
+    with pytest.raises(NeedsLogin, match="API key"):
+        toolset_for("c_1", "stitch", keyring=_Vault())
+
+
+def test_an_oauth_provider_is_unchanged(made):
+    """The eight that register a client on demand must keep the path they had."""
+    toolset_for("Acme", "cloudflare", keyring=FakeKeyring())
+
+    assert made.last["url"] == "https://mcp.cloudflare.com/mcp"
+    assert made.last["auth_provider"] is not None
+    assert made.last.get("headers") is None

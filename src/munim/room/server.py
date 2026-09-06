@@ -15,6 +15,7 @@ import errno
 import json
 import os
 import socket
+import time
 from pathlib import Path
 
 import uvicorn
@@ -34,6 +35,21 @@ from munim.runlog import RUNS_DIR, RunLog, all_runs, latest_run
 
 POLL_SECONDS = 0.25
 BUILD_DIR = Path(__file__).parent / "static"
+
+
+# How long to hold out for a run that is still going before showing the newest
+# finished one. Long enough to open the room and then start something; short
+# enough that opening it after the fact still shows the last answer.
+WAIT_FOR_FRESH = 20.0
+
+
+def _finished(directory: Path, run: str) -> bool:
+    """Whether this run already ended. A finished run has nothing left to
+    stream, so following it would show a replay and then close."""
+    try:
+        return any(e.kind == "run_done" for e in RunLog(run, directory).read())
+    except Exception:
+        return False
 
 
 def _runs_dir(request: Request) -> Path:
@@ -64,7 +80,20 @@ async def run_events(request: Request) -> Response:
         # launch, and watching nothing happen.
         resolved = run_id
         if follow_latest:
-            while (resolved := latest_run(directory)) is None:
+            # Wait for a run that is still going, not merely for a run to
+            # exist. Resolving the newest finished one meant that opening the
+            # room on a machine with any history replayed yesterday, sent
+            # `done`, closed the stream, and never saw the run that started
+            # afterwards. Which is every rehearsal of the demo.
+            started = time.time()
+            while True:
+                candidate = latest_run(directory)
+                if candidate is not None and (
+                        run_id is not None
+                        or not _finished(directory, candidate)
+                        or time.time() - started >= WAIT_FOR_FRESH):
+                    resolved = candidate
+                    break
                 if await request.is_disconnected():
                     return
                 yield ": waiting-for-run\n\n"
@@ -182,8 +211,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main() -> None:
-    args = parse_args()
+def main(argv: list[str] | None = None) -> None:
+    # Takes argv so `munim room` can forward its own arguments. Calling this
+    # with none left argparse reading `sys.argv`, which still holds the `room`
+    # token the dispatcher already consumed, and the parser rejects it.
+    args = parse_args(argv)
 
     # Bind the socket here rather than letting uvicorn do it. uvicorn catches
     # EADDRINUSE itself, logs `[errno 48] address already in use` and exits, so

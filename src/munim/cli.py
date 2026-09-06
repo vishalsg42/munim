@@ -1430,6 +1430,21 @@ def main(argv: list[str] | None = None) -> int:
     cl.add_argument("--json", action="store_true", dest="as_json",
                     help="wrap the result with the client, tool and run id")
 
+    ev = sub.add_parser("evals", help="whether the agent's advice has drifted")
+    ev.add_argument("--only", default="", metavar="FIXTURE",
+                    help="run one fixture by name")
+    ev.add_argument("--samples", type=int, default=None, metavar="N",
+                    help="times to ask each fixture (default: 3). One sample "
+                         "cannot tell drift from variance")
+
+    rm = sub.add_parser("room", help="watch a run in a browser")
+    rm.add_argument("--port", type=int, default=None,
+                    help="port to serve on (default: 8977)")
+    rm.add_argument("--runs", default=None, metavar="DIR",
+                    help="directory of run logs")
+    rm.add_argument("--reports", default=None, metavar="DIR",
+                    help="directory of launch reports")
+
     dr = sub.add_parser("doctor", help="what is wrong with this installation")
     dr.add_argument("--verbose", "-v", action="store_true",
                     help="also list what is connected")
@@ -1573,6 +1588,26 @@ def main(argv: list[str] | None = None) -> int:
         config("list", None, None)
         print("Agents:", file=sys.stderr)
         return config_ai(None, [])
+
+    if args.command == "evals":
+        from munim.evals import SAMPLES, run as evals_run
+        return evals_run(only=args.only,
+                         samples=args.samples or SAMPLES)
+
+    if args.command == "room":
+        # The room is its own process on purpose (D18): the MCP server owns
+        # stdout and is killed on every reconnect, so an HTTP listener inside it
+        # would go dark mid-demo. This verb only exists because `munim-room` was
+        # a console script nobody was told about.
+        from munim.room.server import main as room_main
+
+        forwarded = []
+        for flag in ("port", "runs", "reports"):
+            value = getattr(args, flag, None)
+            if value is not None:
+                forwarded += [f"--{flag}", str(value)]
+        room_main(forwarded)
+        return 0
 
     if args.command == "doctor":
         from munim.doctor import run as doctor_run

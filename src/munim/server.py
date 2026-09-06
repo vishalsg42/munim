@@ -210,13 +210,29 @@ def build_server(backend=None, registry=None, runs_dir=None,
         records = registry.clients()
         reachable = sorted({c.name for p in SERVERS
                             for c in connected_clients(records, p)})
-        answer = await ask(question, records)
-        return {
+        # A log, like every other agent-bearing tool has. Without one this
+        # answer could not be looked up afterwards and the control room had
+        # nothing to render.
+        log = RunLog(new_run_id(), runs)
+        answer, discarded = await ask(question, records, log=log)
+
+        # Computed here, never asked of the model. A model under-reporting what
+        # it could not check is the exact reason a caller wants this field, so
+        # putting it in the schema would make the answer its own auditor.
+        answered = {f.client for f in answer.findings}
+        shaped = {
             "question": question,
             "clients_read": reachable,
             "clients_registered": len(records),
-            "answer": answer,
+            "findings": [f.model_dump() for f in answer.findings],
+            "answer": answer.summary,
+            "could_not_check": sorted(set(reachable) - answered),
+            "run_id": log.run_id,
         }
+        if discarded:
+            # Surfaced, not swallowed: the agent named an account it never read.
+            shaped["discarded"] = [f.model_dump() for f in discarded]
+        return shaped
 
     @server.tool()
     async def audit_all_clients(dkim_selector: str = "resend") -> dict:
@@ -517,7 +533,13 @@ def build_server(backend=None, registry=None, runs_dir=None,
         # checks itself and return the JSON, so `launch` had no callers and the
         # Strands agent never ran: the architecture diagram promised a
         # diagnosis step that no code path could reach.
+        # Both names go down. `client` is the label, which is what the log, the
+        # report and the control room show; `client_id` is what credentials are
+        # filed under. Passing only the label meant the diagnosis agent looked
+        # up sessions by a name the store does not key on and silently found
+        # none, for every client, since the two were split.
         log, results = await launch(target_domain, client,
+                                    client_id=record.id,
                                     dkim_selector=dkim_selector, runs_dir=runs)
         failures = [r for r in results if r.status == "fail"]
         report = write_report(log, domain=target_domain, business=client,
