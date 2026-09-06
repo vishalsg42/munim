@@ -60,13 +60,32 @@ def test_a_provider_with_no_mcp_server_is_refused():
 
 def test_two_toolsets_for_one_provider_are_told_apart_by_name():
     """Same server, same process, two clients. The prefix is what a tool call
-    uses to say which account it means."""
+    uses to say which account it means, and the client is its leading segment
+    so `balaji_roofings_*` still means Balaji and nobody else."""
     ring = FakeKeyring()
     a = toolset_for("Balaji Roofings", "cloudflare", keyring=ring)
     b = toolset_for("Kloudfirst", "cloudflare", keyring=ring)
     assert a is not b
-    assert a._prefix == "balaji_roofings"
-    assert b._prefix == "kloudfirst"
+    assert a._prefix == "balaji_roofings_cloudflare"
+    assert b._prefix == "kloudfirst_cloudflare"
+    assert a._prefix.startswith("balaji_roofings")
+
+
+def test_one_client_two_providers_do_not_collide():
+    """Found by running it, not by a test. Vercel and Supabase both publish
+    `list_projects`, so a client connected to both produced the same prefixed
+    name twice and Strands refused to build the agent at all:
+
+        ValueError: Tool name 'balaji_roofings_list_projects' already exists.
+
+    `toolsets_for` guards against two clients colliding. Nothing guarded one
+    client's providers colliding with each other."""
+    ring = FakeKeyring()
+    vercel = toolset_for("Balaji Roofings", "vercel", keyring=ring)
+    supabase = toolset_for("Balaji Roofings", "supabase", keyring=ring)
+
+    assert vercel._prefix != supabase._prefix, \
+        "two providers under one client produced the same tool names"
 
 
 def test_each_client_authenticates_as_itself():

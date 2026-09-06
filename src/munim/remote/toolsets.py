@@ -78,7 +78,15 @@ def toolset_for(client: str, provider: str, *, keyring=None,
         # that does want to log a person in calls `session_for` instead.
         auth_provider=auth_for(client, provider, keyring=keyring,
                                allow_login=False),
-        prefix=prefix_for(label or client),
+        # Client **and** provider. The prefix used to be the client alone,
+        # which is enough to keep two accounts apart and not enough to keep one
+        # account's providers apart: Vercel and Supabase both publish
+        # `list_projects`, so a client connected to both produced
+        # `acme_list_projects` twice and Strands refused to build the agent at
+        # all. `toolsets_for` guards against two clients colliding and there was
+        # nothing guarding this. The client is still the leading segment, so
+        # `acme_*` still means Acme and nobody else.
+        prefix=prefix_for(f"{label or client} {provider}"),
         tool_filters={"allowed": [_is_read_only]} if read_only else None,
     )
 
