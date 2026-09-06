@@ -69,6 +69,35 @@ def toolset_for(client: str, provider: str, *, keyring=None,
     server = server_for(provider)
     if server is None:
         raise NoRemoteServer(f"{provider} runs no MCP server")
+    # Four ways in, not one. `toolset_for` used to build an OAuth provider
+    # against `server.url` whatever the server said it wanted, which is right
+    # for the eight that register a client on demand and wrong for the rest:
+    # Zoho's URL carries the credential and is empty in the table, so an agent
+    # got a client pointed at "", and Stitch wants a header, so it got an OAuth
+    # flow it has no use for. Latent until the token-or-endpoint rule made a
+    # URL-authenticated provider reachable from an agent at all.
+    if server.auth == "url":
+        from munim.remote.session import endpoint_for
+
+        return MCPClient(
+            url=endpoint_for(client, provider, keyring=keyring),
+            prefix=prefix_for(f"{label or client} {provider}"),
+            tool_filters={"allowed": [_is_read_only]} if read_only else None,
+        )
+
+    if server.auth == "header":
+        from munim.remote.session import headers_for
+
+        # `headers_for` already refuses with the command to run when no key is
+        # stored, and that refusal is better than any second one written here.
+        headers = headers_for(client, provider, keys=keyring)
+        return MCPClient(
+            url=server.url,
+            headers=headers,
+            prefix=prefix_for(f"{label or client} {provider}"),
+            tool_filters={"allowed": [_is_read_only]} if read_only else None,
+        )
+
     return MCPClient(
         url=server.url,
         # `allow_login=False`, and not as a parameter, because every caller of
