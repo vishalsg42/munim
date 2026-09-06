@@ -213,6 +213,24 @@ class _RemembersExpiry(OAuthClientProvider):
             if held is not None and held.access_token:
                 self.context.current_tokens = held
                 self._adopt_expiry()
+        else:
+            # Loaded here rather than left to `super()` so the question below
+            # can be asked at all: with no tokens in hand there is no way to
+            # tell that a refresh is about to fire. `super()` then skips its own
+            # call. Outside its lock, which acquires nothing here, so the worst
+            # case is one repeated read of the store.
+            await self._initialize()
+
+        # Decided here rather than in `_refresh_token`, because by the time the
+        # SDK calls that it has already committed to refreshing: the check it
+        # makes is one line earlier. Waiting for another process and then asking
+        # for a rotation anyway is a second rotation seconds after the first,
+        # and providers answer that with 429. Observed against Cloudflare,
+        # Vercel and Supabase, on three of six sessions, with the lock working
+        # exactly as intended.
+        if (not self.context.is_token_valid()
+                and self.context.can_refresh_token()):
+            await self._wait_our_turn()
 
         # Proxied with asend, not `async for`. httpx's auth flow is a two-way
         # generator: it yields a request and expects the response sent back in.
@@ -247,10 +265,44 @@ class _RemembersExpiry(OAuthClientProvider):
             return None
         return vault.Single(f"refresh-{provider}-{client}")
 
+    # The refresh lock, when one is held. A class attribute so it exists from
+    # the first line of the flow: a session that never needs a refresh never
+    # reaches the code that would create it.
+    _holding = None
+
+    async def _wait_our_turn(self) -> None:
+        """Take this session's refresh lock, and see if it is still needed.
+
+        These providers rotate: spending a refresh token invalidates it. Munim
+        runs as a long-lived MCP server *and* as a CLI over one store, so two of
+        them can read the same token and both post it. The provider accepts one
+        and rejects the other, and the SDK answers a rejected refresh with a
+        browser login. That is the "authorise again, and again".
+
+        Whoever we waited for has written newer tokens by the time we get in, so
+        the first thing to do is read them. Usually that settles it: their token
+        is ours now and no refresh is needed, which is why the lock is handed
+        straight back. Only a session still expired after that goes on to
+        refresh, holding the lock until the answer is written.
+        """
+        if self._holding is not None:
+            return
+        holder = self._single()
+        if holder is None or not await holder.hold(REFRESH_WAIT):
+            # Nobody to wait for, or waited long enough. Carrying on unlocked is
+            # what happened before this existed.
+            return
+        self._holding = holder
+        held = await self.context.storage.get_tokens()
+        if held is not None and held.access_token:
+            self.context.current_tokens = held
+            self._adopt_expiry()
+        if self.context.is_token_valid():
+            self._let_go()
+
     def _let_go(self) -> None:
-        holder = getattr(self, "_holding", None)
-        if holder is not None:
-            holder.release()
+        if self._holding is not None:
+            self._holding.release()
             self._holding = None
 
     async def _refresh_token(self):
@@ -275,34 +327,10 @@ class _RemembersExpiry(OAuthClientProvider):
         unset and `super()` builds exactly the request it builds today, so a
         provider that publishes no metadata is no worse off than it is now.
         """
-        # One refresher at a time for this session, across processes. These
-        # providers rotate: spending a refresh token invalidates it, and munim
-        # runs as a long-lived MCP server *and* as a CLI over one store. Two of
-        # them reading the same token and both posting it means the provider
-        # accepts one and rejects the other, and a rejected refresh is answered
-        # with a browser login. That is the "authorise again, and again" the
-        # operator sees.
-        #
-        # Held from here until the response has been handled, so it spans the
-        # POST and the write that follows it, and nothing longer: the real
-        # request underneath is not serialised behind other processes.
-        #
-        # Until this commit the collision was theoretical, because no refresh
-        # ever succeeded, so nothing ever rotated. Making them work is what
-        # makes them collide.
-        self._holding = None
-        holder = self._single()
-        if holder is not None and await holder.hold(REFRESH_WAIT):
-            self._holding = holder
-            # Whoever we waited for has written newer tokens by now. Refresh
-            # with those rather than with the one they have already spent.
-            # Cheaper than deciding whether to skip the refresh: the SDK has
-            # already committed to one by calling this, and a needless rotation
-            # costs a round trip where a spent token costs a login.
-            held = await self.context.storage.get_tokens()
-            if held is not None and held.access_token:
-                self.context.current_tokens = held
-                self._adopt_expiry()
+        # Normally already held: `async_auth_flow` takes it before the SDK
+        # decides to refresh, which is the only place the decision can still be
+        # unmade. This covers a caller that reaches the refresh another way.
+        await self._wait_our_turn()
         try:
             if self.context.oauth_metadata is None:
                 await self._find_token_endpoint()

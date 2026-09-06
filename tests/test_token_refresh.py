@@ -620,3 +620,59 @@ async def test_the_refresh_uses_the_token_the_other_process_left_behind(
 
     assert b"refresh_token=fresh" in request.content, \
         "the refresh spent a token another process had already invalidated"
+
+
+async def test_the_second_process_does_not_refresh_what_the_first_just_did(
+        monkeypatch, tmp_path):
+    """The bug the lock alone did not fix.
+
+    Serialising two refreshers is not enough: the one that waits then asks for
+    its own rotation seconds after the first, and providers answer that with
+    429. Observed live against Cloudflare, Vercel and Supabase, on three of six
+    sessions, with the lock working exactly as intended. So the wait has to end
+    in a question, not in a refresh.
+    """
+    from munim.remote.session import auth_for
+
+    monkeypatch.setenv("MUNIM_CREDENTIALS", str(tmp_path / "credentials.json"))
+    ring = Ring()
+    expired(ring)
+    asked = answering(monkeypatch, FOUND)
+    auth = auth_for("c_1", "resend", keyring=ring, allow_login=False)
+
+    # What the process ahead of us leaves behind: a live token, freshly issued.
+    store = KeychainTokenStorage("c_1", "resend", ring)
+    await store.set_tokens(token(access_token="theirs", refresh_token="r2"))
+
+    flow = auth.async_auth_flow(
+        httpx.Request("GET", "https://mcp.resend.com/mcp"))
+    first = await flow.__anext__()
+    await flow.aclose()
+
+    assert str(first.url) == "https://mcp.resend.com/mcp", \
+        "it refreshed a token another process had renewed a moment earlier"
+    assert first.headers["authorization"] == "Bearer theirs"
+    assert asked.asked == [], "it looked up an endpoint it had no need of"
+    assert auth._holding is None, "the lock was kept for a refresh never made"
+
+
+async def test_a_session_still_expired_after_waiting_does_refresh(
+        monkeypatch, tmp_path):
+    """The other half. Skipping whenever we had to wait would mean a session
+    that genuinely expired never renews."""
+    from munim.remote.session import auth_for
+
+    monkeypatch.setenv("MUNIM_CREDENTIALS", str(tmp_path / "credentials.json"))
+    ring = Ring()
+    expired(ring)
+    answering(monkeypatch, FOUND)
+    auth = auth_for("c_1", "resend", keyring=ring, allow_login=False)
+
+    flow = auth.async_auth_flow(
+        httpx.Request("GET", "https://mcp.resend.com/mcp"))
+    first = await flow.__anext__()
+
+    assert str(first.url) == "https://api.resend.com/oauth/token"
+    assert auth._holding is not None, "the refresh went out unserialised"
+    await flow.aclose()
+    assert auth._holding is None, "an abandoned flow stranded the lock"
