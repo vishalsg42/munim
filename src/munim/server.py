@@ -458,10 +458,20 @@ def build_server(backend=None, registry=None, runs_dir=None,
         a plan is made of until it exists. That adds nothing to anyone's DNS.
         """
         from munim.agent.mailplan import plan as make_plan
+        from munim.container import UnknownCredential
 
         record = registry.get(client)
         log = RunLog(new_run_id(), runs)
-        made = await make_plan(container_for(record.name), record.domain or domain, log)
+        try:
+            made = await make_plan(container_for(record.name),
+                                   record.domain or domain, log)
+        except UnknownCredential as missing:
+            # Returned rather than raised, like every other refusal here that
+            # has a next step. A caller reading "Error executing tool" has to
+            # decide whether something broke; a `fix` field says it did not.
+            return {"client": record.name, "domain": record.domain or domain,
+                    "error": str(missing),
+                    "fix": f'munim connect "{record.name}" resend --token'}
         return {**made.to_dict(), "run_id": log.run_id}
 
     @server.tool()
