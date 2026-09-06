@@ -522,23 +522,45 @@ def test_reconnecting_updates_the_mark_behind_it(estate, monkeypatch, capsys):
         "the reconnected provider still showed as expired"
 
 
-def test_a_client_with_nothing_connected_reports_inside_the_frame(
+def test_a_client_with_nothing_connected_offers_to_connect_one(
         estate, monkeypatch, capsys):
-    """Printed into the frame, the next redraw erased it, so choosing the row
-    did nothing visible. Same bug as the two already fixed."""
+    """The row used to print `munim connect ...` and return, which left the one
+    client needing an action as the only one that could not take one."""
     probed(monkeypatch)      # nothing connected anywhere
-    headers = []
+    titles = []
     real = browse.menu
 
     def spy(title, rows, **kwargs):
-        headers.append(kwargs.get("header", ()))
+        titles.append(title)
         return real(title, rows, **kwargs)
 
     monkeypatch.setattr(browse, "menu", spy)
-    browse.walk(estate, keys=[pick.ENTER, pick.ESC])
+    browse.walk(estate, keys=[pick.ENTER, pick.ESC, pick.ESC])
 
-    assert any("munim connect" in "".join(h) for h in headers), \
-        "the instruction never reached a frame"
+    assert any(t.startswith("Connect a provider") for t in titles), \
+        "choosing the row never opened a provider picker"
+
+
+def test_backing_out_of_the_provider_picker_returns_to_the_clients(
+        estate, monkeypatch):
+    """Esc there is one level up, not out of the command. Nothing is connected
+    on the way, so no browser opens."""
+    probed(monkeypatch)
+    opened = []
+    monkeypatch.setattr("munim.cli.connect_via_mcp",
+                        lambda *a, **k: opened.append(a) or 0)
+    titles = []
+    real = browse.menu
+
+    def spy(title, rows, **kwargs):
+        titles.append(title)
+        return real(title, rows, **kwargs)
+
+    monkeypatch.setattr(browse, "menu", spy)
+    browse.walk(estate, keys=[pick.ENTER, pick.ESC, pick.ESC])
+
+    assert opened == [], "backing out still opened a browser"
+    assert titles[-1] == "Clients", "Esc left the command instead of going up"
 
 
 def test_a_settled_stream_is_not_polled(estate, monkeypatch):

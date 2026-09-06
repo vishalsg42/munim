@@ -192,3 +192,61 @@ async def test_the_session_store_is_the_one_that_reaches_session_for(
     await health.check("c_1", "Acme", "cloudflare", keyring=sentinel)
 
     assert seen["keyring"] is sentinel
+
+
+def test_a_row_removed_mid_probe_does_not_crash_the_pump(two, monkeypatch):
+    """`browse` edits `statuses` while probes are in flight: disconnecting drops
+    a row. Results were keyed by position, so the list going short raised
+    IndexError out of the menu's idle path and killed `munim clients`."""
+    answers(monkeypatch, cloudflare=0.3, vercel=0.3)
+    stream = health.Stream(two)
+    stream.pump(0.0)                     # start the probes
+
+    stream.statuses = [s for s in stream.statuses if s.provider != "cloudflare"]
+    for _ in range(40):
+        if stream.pump(0.05):
+            break
+
+    assert [s.provider for s in stream.statuses] == ["vercel"]
+    assert stream.statuses[0].state == health.LIVE, \
+        "the surviving row never received its own result"
+    stream.close()
+
+
+def test_a_result_lands_on_its_own_row_after_the_list_is_reordered(
+        tmp_path, monkeypatch):
+    """Reconnect removes a row and appends it, so position stops naming the
+    same probe. Keyed by position, one provider's answer landed on another."""
+    reg = Registry(tmp_path / "r.json")
+    reg.add(ClientRecord(name="Acme"))
+    monkeypatch.setattr(
+        health, "connections",
+        lambda cid, backend=None: ([], ["cloudflare", "resend", "vercel"]))
+
+    async def fake(client_id, name, provider, keyring=None):
+        await asyncio.sleep(0.2)
+        return health.Status(name, provider, health.LIVE, provider)
+    monkeypatch.setattr(health, "check", fake)
+
+    stream = health.Stream(reg)
+    stream.pump(0.0)                     # start all three
+
+    # What a reconnect of the first one leaves behind: dropped from the front
+    # and appended to the back, so every remaining row shifts down one.
+    moved = [s for s in stream.statuses if s.provider != "cloudflare"]
+    settled = health.Status("Acme", "cloudflare", health.EXPIRED, "reconnect me")
+    stream.statuses = [*moved, settled]
+
+    for _ in range(60):
+        stream.pump(0.05)
+        if all(s.settled for s in stream.statuses):
+            break
+
+    assert [s.provider for s in stream.statuses] == [
+        "resend", "vercel", "cloudflare"], \
+        "a probe wrote its result onto another provider's row"
+    assert stream.statuses[-1] is settled, \
+        "a late probe overwrote the answer a reconnect had already given"
+    for status in stream.statuses[:-1]:
+        assert status.detail == status.provider
+    stream.close()
