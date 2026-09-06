@@ -1,0 +1,17 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/vishalsg42/munim/security/advisories/new
+    about: >-
+      Anything that could let one client's credential reach another account.
+      Report it privately, not here. See SECURITY.md.
+  - name: Questions and ideas
+    url: https://github.com/vishalsg42/munim/discussions
+    about: >-
+      Anything that is not a defect: how to use it, whether it should do
+      something, or what a provider does that Munim has not met yet.
+  - name: Known gaps and limitations
+    url: https://github.com/vishalsg42/munim/blob/main/docs/ROADMAP.md
+    about: >-
+      Platforms, providers and capabilities that are deliberately not done yet,
+      with the reasons. Worth a look before filing a bug.

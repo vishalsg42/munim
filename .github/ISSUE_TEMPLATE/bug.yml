@@ -1,0 +1,69 @@
+name: Something is broken
+description: A tool, a command or a check that does not do what it says
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        **Never paste a real credential, client name, domain or account id.**
+        Redact them first: the examples in this project are `Acme Ltd` and
+        `acme.example`.
+
+
+        If this could let one client's credential reach another account, close
+        this and [report it privately](https://github.com/vishalsg42/munim/security/advisories/new)
+        instead.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: >-
+        The command or tool call, and what came back. Redacted output is much
+        better than no output.
+      placeholder: |
+        munim tools "Acme Ltd" vercel
+        -> ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `munim doctor`
+      description: >-
+        It reports versions, which providers are connected and what is wrong
+        with the install. It never prints a credential.
+      render: text
+    validations:
+      required: false
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "`munim --version`, and your OS"
+      placeholder: "0.4.0, macOS 15"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: agents
+    attributes:
+      label: Were agents on?
+      description: >-
+        They are off by default. `munim config ai` says. Several tools behave
+        differently either way, so this narrows it a lot.
+      options:
+        - "Off (the default)"
+        - "On"
+        - "Not sure"
+    validations:
+      required: true

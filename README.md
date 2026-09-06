@@ -133,3 +133,16 @@ submission period.
 ## Licence
 
 MIT. See [LICENSE](LICENSE).
+
+## Contributing
+
+`CONTRIBUTING.md` says how to run the two suites and what a good change looks
+like here, which is mostly about writing down why. `docs/DECISIONS.md` is the
+numbered log those reasons live in, and several of its entries reverse an
+earlier one.
+
+Security issues go in a [private advisory][advisory] rather than an issue.
+`SECURITY.md` says what is in scope, and lists what is already known and
+deliberate so a report can skip it.
+
+[advisory]: https://github.com/vishalsg42/munim/security/advisories/new
