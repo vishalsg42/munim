@@ -249,3 +249,254 @@ async def test_nothing_is_re_read_before_the_first_initialize():
     auth = auth_for("c_1", "cloudflare", keyring=ring, allow_login=False)
     assert auth._initialized is False
     assert auth.context.current_tokens is None
+
+
+# ---- where to refresh, which the SDK only learns from a 401 --------------
+#
+# Recording the expiry made the refresh branch reachable. It reaches a URL no
+# provider serves: `_refresh_token` reads `context.oauth_metadata`, and the only
+# place in the SDK that assigns it is the branch that runs *after* a 401. So on
+# any stored-token path it is None and the refresh falls back to
+# `<mcp host>/token`. Resend answers that with 404 and its real endpoint is
+# `api.resend.com/oauth/token`, which is one browser login per expiry.
+
+import json
+
+
+RESOURCE = json.dumps({"resource": "https://mcp.resend.com/mcp",
+                       "authorization_servers": ["https://api.resend.com"]})
+
+SERVER = json.dumps({
+    "issuer": "https://api.resend.com",
+    "authorization_endpoint": "https://api.resend.com/oauth/authorize",
+    "token_endpoint": "https://api.resend.com/oauth/token",
+    "response_types_supported": ["code"],
+})
+
+
+def expired(ring, provider="resend", **over):
+    """A stored session whose access token died an hour ago."""
+    store = KeychainTokenStorage("c_1", provider, ring)
+    fields = {"expires_in": 3600, "refresh_token": "r"}
+    fields.update(over)
+    raw = {"access_token": "a", "token_type": "Bearer",
+           ISSUED_AT: time.time() - 7200, **fields}
+    ring.set_password(f"munim-mcp:{provider}:tokens", "c_1", json.dumps(raw))
+    store.seed_client_info("id", "secret", "http://127.0.0.1:8976/callback")
+    return store
+
+
+class Answers(httpx.AsyncBaseTransport):
+    """A transport that replies from a table and records what was asked."""
+
+    def __init__(self, table):
+        self.table = table
+        self.asked = []
+
+    async def handle_async_request(self, request):
+        self.asked.append(request)
+        body, status = self.table.get(str(request.url), ("", 404))
+        return httpx.Response(status, content=body,
+                              headers={"content-type": "application/json"})
+
+
+def answering(monkeypatch, table):
+    """Point the discovery client at `table` without touching the auth flow."""
+    transport = Answers(table)
+    real = httpx.AsyncClient
+
+    def client(*args, **kwargs):
+        kwargs["transport"] = transport
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", client)
+    return transport
+
+
+PRM_ROOT = "https://mcp.resend.com/.well-known/oauth-protected-resource"
+PRM_PATH = PRM_ROOT + "/mcp"
+ASM = "https://api.resend.com/.well-known/oauth-authorization-server"
+FOUND = {PRM_PATH: (RESOURCE, 200), ASM: (SERVER, 200)}
+
+
+async def test_the_refresh_goes_where_discovery_said(monkeypatch):
+    """The bug, in one assertion. Today this posts to mcp.resend.com/token,
+    which is a 404, and a rejected refresh means a browser."""
+    from munim.remote.session import auth_for
+
+    ring = Ring()
+    expired(ring)
+    answering(monkeypatch, FOUND)
+    auth = auth_for("c_1", "resend", keyring=ring, allow_login=False)
+    await auth._initialize()
+
+    request = await auth._refresh_token()
+
+    assert str(request.url) == "https://api.resend.com/oauth/token", \
+        "the refresh went to the MCP host, which does not serve that endpoint"
+    assert b"grant_type=refresh_token" in request.content
+
+
+async def test_the_lookup_happens_once_not_once_per_refresh(monkeypatch):
+    """`oauth_metadata is None` is the memo. Without it every expired request
+    pays for the same two documents again."""
+    from munim.remote.session import auth_for
+
+    ring = Ring()
+    expired(ring)
+    asked = answering(monkeypatch, FOUND)
+    auth = auth_for("c_1", "resend", keyring=ring, allow_login=False)
+    await auth._initialize()
+
+    await auth._refresh_token()
+    spent = len(asked.asked)
+    await auth._refresh_token()
+
+    assert len(asked.asked) == spent, "the second refresh looked it up again"
+
+
+async def test_the_path_based_document_is_tried_before_the_root(monkeypatch):
+    """Supabase publishes only the path-based one. Root-first would find
+    nothing there and the refresh would stay broken for it."""
+    from munim.remote.session import auth_for
+
+    ring = Ring()
+    expired(ring)
+    asked = answering(monkeypatch, FOUND)
+    auth = auth_for("c_1", "resend", keyring=ring, allow_login=False)
+    await auth._initialize()
+
+    await auth._refresh_token()
+
+    assert str(asked.asked[0].url) == PRM_PATH
+
+
+async def test_a_lookup_that_finds_nothing_leaves_the_refresh_as_it_was(
+        monkeypatch):
+    """A provider that publishes no metadata must be no worse off than today,
+    and must not raise out of the auth flow."""
+    from munim.remote.session import auth_for
+
+    ring = Ring()
+    expired(ring)
+    answering(monkeypatch, {})            # every well-known 404s
+    auth = auth_for("c_1", "resend", keyring=ring, allow_login=False)
+    await auth._initialize()
+
+    request = await auth._refresh_token()
+
+    assert str(request.url) == "https://mcp.resend.com/token", \
+        "a failed lookup should fall back, not invent an endpoint"
+
+
+async def test_junk_metadata_is_ignored_rather_than_fatal(monkeypatch):
+    from munim.remote.session import auth_for
+
+    ring = Ring()
+    expired(ring)
+    answering(monkeypatch, {PRM_PATH: ("not json at all", 200),
+                            ASM: ("{}", 200)})
+    auth = auth_for("c_1", "resend", keyring=ring, allow_login=False)
+    await auth._initialize()
+
+    request = await auth._refresh_token()
+
+    assert str(request.url) == "https://mcp.resend.com/token"
+
+
+async def test_a_resource_speaking_for_another_server_is_not_adopted(
+        monkeypatch):
+    """The refresh carries the refresh token, and for a confidential client the
+    secret too. Whatever `authorization_servers` names is where those go, so a
+    document claiming another resource is refused rather than followed."""
+    from munim.remote.session import auth_for
+
+    ring = Ring()
+    expired(ring)
+    elsewhere = json.dumps({"resource": "https://evil.test/",
+                            "authorization_servers": ["https://evil.test"]})
+    answering(monkeypatch, {PRM_PATH: (elsewhere, 200), ASM: (SERVER, 200)})
+    auth = auth_for("c_1", "resend", keyring=ring, allow_login=False)
+    await auth._initialize()
+
+    request = await auth._refresh_token()
+
+    assert "evil.test" not in str(request.url), \
+        "a refresh token was about to be sent to a host that just asked for it"
+
+
+async def test_the_lookup_carries_no_bearer_token(monkeypatch):
+    """These go to a different host than the access token was minted for."""
+    from munim.remote.session import auth_for
+
+    ring = Ring()
+    expired(ring)
+    asked = answering(monkeypatch, FOUND)
+    auth = auth_for("c_1", "resend", keyring=ring, allow_login=False)
+    await auth._initialize()
+
+    await auth._refresh_token()
+
+    for request in asked.asked:
+        assert "authorization" not in request.headers, \
+            f"{request.url} was sent an access token it has no business seeing"
+
+
+async def test_a_confidential_client_still_sends_its_secret(monkeypatch):
+    """Supabase is confidential. Changing where the refresh goes must not
+    change what it proves, and losing the secret would fail silently."""
+    from munim.remote.session import auth_for
+
+    ring = Ring()
+    store = expired(ring, provider="supabase")
+    store.seed_client_info("id", "secret", "http://127.0.0.1:8976/callback")
+    supa_prm = "https://mcp.supabase.com/.well-known/oauth-protected-resource/mcp"
+    resource = json.dumps({"resource": "https://mcp.supabase.com/mcp",
+                           "authorization_servers": ["https://api.supabase.com"]})
+    server = SERVER.replace("api.resend.com", "api.supabase.com")
+    answering(monkeypatch, {
+        supa_prm: (resource, 200),
+        "https://api.supabase.com/.well-known/oauth-authorization-server":
+            (server, 200)})
+    auth = auth_for("c_1", "supabase", keyring=ring, allow_login=False)
+    await auth._initialize()
+
+    request = await auth._refresh_token()
+
+    assert str(request.url) == "https://api.supabase.com/oauth/token"
+    assert b"client_secret" in request.content, \
+        "the refresh moved host and left its proof of identity behind"
+
+
+async def test_a_valid_token_is_never_looked_up(monkeypatch):
+    """The gate is `super()`'s, not ours: a fresh token never reaches a
+    refresh, so it must never reach a lookup either."""
+    from munim.remote.session import auth_for
+
+    ring = Ring()
+    store = KeychainTokenStorage("c_1", "resend", ring)
+    await store.set_tokens(token())
+    store.seed_client_info("id", "secret", "http://127.0.0.1:8976/callback")
+    asked = answering(monkeypatch, FOUND)
+    auth = auth_for("c_1", "resend", keyring=ring, allow_login=False)
+    await auth._initialize()
+
+    flow = auth.async_auth_flow(httpx.Request("GET", "https://mcp.resend.com/mcp"))
+    await flow.__anext__()
+    await flow.aclose()
+
+    assert asked.asked == [], "a live session paid for a lookup it did not need"
+
+
+async def test_a_first_connection_looks_nothing_up(monkeypatch):
+    """No tokens means `can_refresh_token()` is False, so connecting is
+    untouched by any of this."""
+    from munim.remote.session import auth_for
+
+    ring = Ring()
+    asked = answering(monkeypatch, FOUND)
+    auth = auth_for("c_1", "resend", keyring=ring, allow_login=False)
+    await auth._initialize()
+
+    assert auth.context.can_refresh_token() is False
+    assert asked.asked == []

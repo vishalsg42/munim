@@ -35,6 +35,13 @@ from munim.remote.storage import (
 # rather than undercutting it.
 LOGIN_TIMEOUT = 300.0
 
+# How long one well-known document gets. Short because the answer is a small
+# static file, and because this now sits in front of every refresh: `doctor` and
+# `clients` probe every provider concurrently under an eight second budget, and
+# a lookup that outlives it would turn "needs authentication", which names its
+# own fix, into "could not be reached", which does not.
+DISCOVERY_TIMEOUT = 5.0
+
 
 class NeedsLogin(Exception):
     """Opening this session would mean authorising, and the caller said no.
@@ -148,6 +155,22 @@ class _RemembersExpiry(OAuthClientProvider):
     So the one-hour token behaved like a one-hour *account*: reconnect, work,
     come back tomorrow, sign in again. Filling in the expiry the store recorded
     is what lets the refresh branch fire instead.
+
+    And then fire at the wrong address, which is the second half of this class.
+    The SDK learns where a provider's token endpoint is only from the discovery
+    chain it runs *after* a 401. `_initialize` sets `current_tokens` and
+    `client_info` and nothing else, and the 401 branch is the only place in the
+    whole package that assigns `context.oauth_metadata`, so on any stored-token
+    path it is provably None by the time `_refresh_token` reads it. That sends
+    the refresh to the fallback, `<mcp host>/token`, which for Resend is a 404
+    against a real endpoint at `api.resend.com/oauth/token`. A rejected refresh
+    is answered with a browser login, so the operator never sees the 404, only
+    the consent screen, again.
+
+    Cloudflare, Linear and Notion were unharmed because their authorization
+    server *is* their MCP host, so the wrong URL happened to be right. Resend,
+    Vercel, Netlify and Supabase all answer that URL with a 404. Hence
+    `_refresh_token` below: find out where to refresh before refreshing.
     """
 
     async def _initialize(self) -> None:
@@ -197,6 +220,101 @@ class _RemembersExpiry(OAuthClientProvider):
             return
         finally:
             await inner.aclose()
+
+    async def _refresh_token(self):
+        """Look up where the refresh goes, then let the SDK build it.
+
+        Overridden rather than done in `async_auth_flow` because this is called
+        from inside `context.lock` (the SDK's own flow holds it across the
+        refresh), so there is no second critical section to reason about, no
+        question of a non-reentrant lock, and no reordering of the flow proxy.
+
+        The lookup uses its own client rather than yielding requests through the
+        auth flow. Yielding would be closer to what the SDK does on a 401, and
+        it cannot report failure: httpx sends a yielded request outside its own
+        try block, so a DNS failure or a timeout on a well-known document
+        escapes the whole `send()` and is never thrown back into the generator.
+        There would be no way to fall back. A separate client costs a connection
+        pool that is thrown away, and nothing else: `streamablehttp_client` is
+        called with defaults, so there is no transport, proxy or timeout
+        configuration here to inherit.
+
+        Best effort throughout. Anything that fails leaves `oauth_metadata`
+        unset and `super()` builds exactly the request it builds today, so a
+        provider that publishes no metadata is no worse off than it is now.
+        """
+        if self.context.oauth_metadata is None:
+            await self._find_token_endpoint()
+        return await super()._refresh_token()
+
+    async def _find_token_endpoint(self) -> None:
+        """The discovery chain, out of band, for the sake of the refresh.
+
+        Only `oauth_metadata` is adopted. Setting `protected_resource_metadata`
+        as well would be more faithful to the 401 path and would also flip
+        `should_include_resource_param`, which starts sending RFC 8707
+        `resource` in the refresh body where today it is absent. That is a
+        change to what is *asked for*, not to where the asking goes, and this
+        is the fix for where.
+        """
+        import httpx
+        from mcp.client.auth.exceptions import OAuthFlowError
+        from mcp.client.auth.utils import (
+            build_oauth_authorization_server_metadata_discovery_urls,
+            build_protected_resource_metadata_discovery_urls,
+            create_oauth_metadata_request,
+            handle_auth_metadata_response,
+            handle_protected_resource_response,
+        )
+
+        server_url = self.context.server_url
+        found = None
+        try:
+            # A short leash. The MCP client reads with a 300 second timeout,
+            # which is right for a tool call and wrong for a well-known
+            # document: a host that accepts the connection and then hangs would
+            # stall every command for five minutes without saying why. `doctor`
+            # and `clients` probe under an eight second budget.
+            async with httpx.AsyncClient(
+                    timeout=httpx.Timeout(DISCOVERY_TIMEOUT),
+                    follow_redirects=True) as http:
+                for url in build_protected_resource_metadata_discovery_urls(
+                        None, server_url):
+                    resource = await handle_protected_resource_response(
+                        await http.send(create_oauth_metadata_request(url)))
+                    if resource is None:
+                        continue
+                    try:
+                        # The one safety check on this path, and the reason the
+                        # SDK's own discovery runs it: the refresh carries the
+                        # refresh token, and for a confidential client the
+                        # client secret too. Whatever `authorization_servers`
+                        # names is where those go. A document that claims to
+                        # speak for another resource is not adopted.
+                        await self._validate_resource_match(resource)
+                    except OAuthFlowError:
+                        continue
+                    if not str(resource.authorization_servers[0]).startswith(
+                            "https://"):
+                        continue
+                    found = str(resource.authorization_servers[0])
+                    break
+
+                for url in build_oauth_authorization_server_metadata_discovery_urls(
+                        found, server_url):
+                    ok, metadata = await handle_auth_metadata_response(
+                        await http.send(create_oauth_metadata_request(url)))
+                    if not ok:
+                        return
+                    if metadata is not None:
+                        self.context.oauth_metadata = metadata
+                        return
+        except Exception:
+            # Deliberately everything, and deliberately silent. The worst this
+            # can do is leave the refresh where it already was, and turning a
+            # failed lookup into a traceback out of a menu's idle path would be
+            # a worse trade than the bug being fixed.
+            return
 
 
 def auth_for(client: str, provider: str, *, keyring=None,
