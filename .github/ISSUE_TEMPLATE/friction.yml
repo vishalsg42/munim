@@ -1,0 +1,35 @@
+name: This was harder than it should have been
+description: It works, but using it cost you more than it needed to
+labels: ["friction"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        The most useful report this project has had was not a crash. It was
+        somebody listing seven places the tool made them work too hard, with
+        the evidence for each. Six were real and four became changes.
+
+
+        So this template exists. **Redact real client names, domains and
+        credentials.**
+
+  - type: textarea
+    id: friction
+    attributes:
+      label: What you were trying to do, and where it got in the way
+      description: >-
+        Specifics beat adjectives. "The tool list was 158KB and exceeded my
+        limit, so I wrote it to a file and parsed it" is worth more than "the
+        output is too big".
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you reached for that was not there
+      description: >-
+        Including the thing you would have used if it existed. That is often
+        the whole answer.
+    validations:
+      required: false
