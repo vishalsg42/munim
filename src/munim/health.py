@@ -56,8 +56,16 @@ class Status:
                 if self.state == EXPIRED else "")
 
 
-async def check(client_id: str, name: str, provider: str) -> Status:
-    """Open one session and close it, reporting what happened."""
+async def check(client_id: str, name: str, provider: str,
+                backend=None) -> Status:
+    """Open one session and close it, reporting what happened.
+
+    `backend` is threaded through rather than defaulted here. Without it
+    `session_for` builds its own store against the real credentials, so a
+    caller that injected one enumerated from theirs and probed the operator's,
+    which makes the injection seam a lie.
+    """
+    from munim.remote.servers import server_for
     from munim.remote.session import NeedsLogin, NoRemoteServer, session_for
 
     try:
@@ -65,15 +73,22 @@ async def check(client_id: str, name: str, provider: str) -> Status:
             # verify=False because this asks whether the session opens, not
             # whether it is bound to the account it was bound to before. The
             # drift check belongs to real work, not to a health report.
-            async with session_for(client_id, provider, allow_login=False,
-                                   verify=False) as session:
+            async with session_for(client_id, provider, backend=backend,
+                                   allow_login=False, verify=False) as session:
                 listing = await session.list_tools()
         return Status(name, provider, LIVE, tools=len(listing.tools))
     except NeedsLogin:
         return Status(name, provider, EXPIRED, "the session expired")
-    except NoRemoteServer:
-        # Nothing to probe rather than something broken.
-        return Status(name, provider, LIVE)
+    except NoRemoteServer as absent:
+        # Two very different things raise this. `session_for` raises it when a
+        # provider runs no MCP server at all, which is a non-answer. `auth_for`
+        # raises it when a provider that will not register a client on demand
+        # has no application registered by hand, and that is a session which
+        # cannot be opened at all. Gmail is the second, and it was being
+        # reported as connected.
+        if server_for(provider) is None:
+            return Status(name, provider, LIVE)
+        return Status(name, provider, EXPIRED, str(absent))
     except (TimeoutError, asyncio.TimeoutError):
         return Status(name, provider, UNREACHABLE, f"no answer in {TIMEOUT:.0f}s")
     except Exception as other:
@@ -103,10 +118,12 @@ async def check_all_async(registry, backend=None) -> list[Status]:
 
     The async entry point, for the MCP server, which is already inside a loop.
     """
-    work = _stored(registry, backend or KeychainBackend())
+    backend = backend or KeychainBackend()
+    work = _stored(registry, backend)
     if not work:
         return []
-    return list(await asyncio.gather(*(check(*item) for item in work)))
+    return list(await asyncio.gather(
+        *(check(*item, backend=backend) for item in work)))
 
 
 def check_all_for(record, provider: str, backend=None) -> Status:
@@ -117,7 +134,8 @@ def check_all_for(record, provider: str, backend=None) -> Status:
     estate on every action.
     """
     try:
-        return asyncio.run(check(record.id, record.name, provider))
+        return asyncio.run(check(record.id, record.name, provider,
+                                 backend=backend))
     except RuntimeError:
         return Status(record.name, provider, UNREACHABLE, "could not be checked")
 

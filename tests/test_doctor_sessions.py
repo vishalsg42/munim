@@ -101,13 +101,33 @@ def test_being_offline_is_not_reported_as_an_expired_session(
 
 
 def test_a_provider_with_no_mcp_server_is_not_a_problem(two_clients, monkeypatch):
-    sessions_are(monkeypatch, ["cloudflare"],
+    """Named after a provider munim genuinely has no server for.
+
+    This used to say `cloudflare`, which has one, so it was really asserting
+    that any NoRemoteServer meant fine. It does not: `auth_for` raises the same
+    exception when a provider that will not register a client on demand has no
+    application registered by hand, and that session cannot be opened at all.
+    """
+    sessions_are(monkeypatch, ["not-a-real-provider"],
                  lambda c, p: NoRemoteServer("no server"))
 
     found = doctor._sessions(two_clients)
 
     assert len(found) == 1
     assert found[0].status == doctor.OK
+
+
+def test_a_provider_needing_an_application_is_a_problem(two_clients, monkeypatch):
+    """The half that was being reported as connected. Gmail is this case."""
+    sessions_are(monkeypatch, ["gmail"],
+                 lambda c, p: NoRemoteServer("needs an application registered "
+                                             "by hand"))
+
+    found = doctor._sessions(two_clients)
+
+    assert all(f.status == doctor.WARN for f in found)
+    assert any("application" in f.detail for f in found)
+    assert all("munim connect" in f.fix for f in found)
 
 
 def test_nothing_connected_means_nothing_to_say(tmp_path, monkeypatch):

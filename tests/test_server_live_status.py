@@ -48,19 +48,61 @@ def result(returned):
                       else content.text)
 
 
-def stored(monkeypatch, providers):
+def stored(monkeypatch, providers, keys=()):
+    """What is filed, split the way the real code splits it.
+
+    `reachable()` is API keys **plus** MCP sessions; `health._stored` walks the
+    sessions half only. The first version of this helper handed both the same
+    list, so the two universes could never diverge and the bug where a pasted
+    API key vanished from every answer was invisible to every test here.
+    """
+    keys = list(keys)
     monkeypatch.setattr(server_module, "reachable",
-                        lambda cid, backend=None: list(providers))
+                        lambda cid, backend=None: sorted({*providers, *keys}))
     monkeypatch.setattr(health, "connections",
-                        lambda cid, backend=None: ([], list(providers)))
+                        lambda cid, backend=None: (keys, list(providers)))
 
 
 def probed(monkeypatch, **states):
-    async def fake(client_id, name, provider):
+    async def fake(client_id, name, provider, backend=None):
         return health.Status(name, provider, states[provider],
                              "the session expired"
                              if states[provider] == health.EXPIRED else "")
     monkeypatch.setattr(health, "check", fake)
+
+
+async def test_an_api_key_is_not_reported_as_connected_to_nothing(
+        estate, monkeypatch):
+    """A pasted key has no session to open, so no probe covers it.
+
+    It used to fall out of `connected`, `needs_login` and `unreachable` alike
+    while `checked: true` claimed the answer had been verified, which is a
+    worse lie than the one this whole surface was changed to fix.
+    """
+    built, _ = estate
+    stored(monkeypatch, [], keys=["resend"])
+
+    row = result(await built.call_tool("list_clients", {}))[0]
+
+    assert row["stored"] == ["resend"]
+    assert "resend" in row["not_checked"], \
+        "a credential nothing probed must be named, not silently dropped"
+    assert row["connected"] == []
+    covered = set(row["connected"]) | set(row["needs_login"]) \
+        | set(row["unreachable"]) | set(row["not_checked"])
+    assert covered == set(row["stored"]), "a stored credential vanished"
+
+
+async def test_a_key_and_a_session_are_reported_side_by_side(
+        estate, monkeypatch):
+    built, _ = estate
+    stored(monkeypatch, ["cloudflare"], keys=["resend"])
+    probed(monkeypatch, cloudflare=health.LIVE)
+
+    row = result(await built.call_tool("list_clients", {}))[0]
+
+    assert row["connected"] == ["cloudflare"]
+    assert row["not_checked"] == ["resend"]
 
 
 async def test_a_stored_but_dead_session_is_not_reported_connected(

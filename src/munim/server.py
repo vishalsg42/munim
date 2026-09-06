@@ -74,6 +74,13 @@ def _shaped(record, stored: list[str], found) -> dict:
                               and mine[p].state == health.EXPIRED),
         "unreachable": sorted(p for p in stored if p in mine
                               and mine[p].state == health.UNREACHABLE),
+        # Everything stored that no probe covered. `stored` is API keys plus
+        # MCP sessions; only the sessions half can be opened and therefore
+        # probed. Without this bucket a pasted key fell out of all three
+        # answers while `checked: true` claimed otherwise, which is a worse
+        # lie than the one this surface was changed to fix. The four buckets
+        # partition `stored`, and a test asserts that.
+        "not_checked": sorted(p for p in stored if p not in mine),
     }
 
 
