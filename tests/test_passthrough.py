@@ -523,9 +523,9 @@ async def test_a_failure_keeps_the_detailed_message_beside_the_structured_one(
         "the message naming the scope and the fix was thrown away"
 
 
-async def test_a_success_is_not_given_a_second_copy_of_itself(monkeypatch):
-    """Only failures carry both. Doubling every successful result would make
-    the common case bigger for nothing, and the run log holds these."""
+async def test_a_result_is_not_given_a_second_copy_of_itself(monkeypatch):
+    """Both halves are kept only when they differ. Doubling a result whose two
+    halves say the same thing would make the common case bigger for nothing."""
     opened = []
 
     class Fine:
@@ -630,3 +630,34 @@ def test_neither_flag_changes_the_listing():
     from munim.remote.passthrough import narrow
 
     assert narrow(_many()) == _many()
+
+
+async def test_the_extra_half_does_not_depend_on_the_provider_flagging_an_error(
+        monkeypatch):
+    """Checked against Vercel: a call returning
+    `{"error": "Failed to list projects."}` comes back with `isError: False`.
+    A provider that does not flag its own failures makes any condition resting
+    on that flag unreliable, so this asks whether information would be lost."""
+    opened = []
+
+    class QuietFailure:
+        isError = False                      # Vercel really does this
+        structuredContent = {"error": "Failed."}
+
+        def __init__(self):
+            self.content = [SimpleNamespace(
+                type="text", text='{"detail": "scope read:project is missing"}')]
+
+    @asynccontextmanager
+    async def fake(client, provider, **kwargs):
+        opened.append(client)
+        yield SimpleNamespace(
+            list_tools=lambda: _listing([tool("list_projects")]),
+            call_tool=lambda name, arguments: _answer(QuietFailure()))
+
+    monkeypatch.setattr(passthrough, "session_for", fake)
+    result = await call_tool("c_acme", "vercel", "list_projects", {})
+
+    assert result["failed"] is False, "the provider did not flag it, and we say so"
+    assert "read:project" in json.dumps(result["said"]), \
+        "the detail was dropped because the provider did not call it an error"

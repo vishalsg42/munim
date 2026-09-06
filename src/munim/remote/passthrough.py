@@ -187,20 +187,29 @@ def _flatten(result) -> dict:
     else:
         out["result"] = parts
 
-    # On a failure, keep both. `structuredContent` wins above because a caller
-    # that parses a result wants the shaped one, and for a success that is the
-    # right trade. For an error it is not: a provider can return a generic
-    # structured error beside a text block carrying the whole story, and
-    # preferring the structured one silently threw the story away.
+    # Keep both halves when they are not the same thing. `structuredContent`
+    # wins above because a caller that parses a result wants the shaped one,
+    # and dropping the text alongside it loses whatever the provider only said
+    # in prose.
     #
-    # That is what an operator hit. Vercel's `create_git_project` returned the
-    # real 403, naming the missing scope, the team and the fix; `list_projects`
-    # returned `{"error": "Failed to list projects."}` for a real id, a slug and
-    # a deliberately bogus one alike. Same credential, same underlying problem,
-    # and the tool that could have said what was wrong said nothing, because
-    # this function had already dropped the half that knew.
-    if failed and structured is not None and parts:
-        out["said"] = parts[0] if len(parts) == 1 else parts
+    # Not gated on `isError`, and that is the lesson rather than an oversight.
+    # Checked against Vercel: a call that returns
+    # `{"error": "Failed to list projects."}` comes back with `isError: False`.
+    # A provider that does not flag its own failures makes any condition
+    # resting on that flag unreliable, so this asks whether information would
+    # be lost, which is a question about the payload rather than about a claim
+    # the provider may not have made.
+    #
+    # Honesty about scope: an operator reported one Vercel tool naming a
+    # missing scope and the fix while another said only "Failed to list
+    # projects." I first said munim swallowed nothing, then found this discard
+    # and said it was their bug. It is a real discard and it is *not* their
+    # case: reproduced live, that call returns one text block, no structured
+    # half, and nothing to lose. Their symptom is Vercel's own terseness.
+    if structured is not None and parts:
+        said = parts[0] if len(parts) == 1 else parts
+        if said != structured:
+            out["said"] = said
     return out
 
 
