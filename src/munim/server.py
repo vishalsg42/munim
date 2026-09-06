@@ -443,6 +443,58 @@ def build_server(backend=None, registry=None, runs_dir=None,
         # under, and handing an id back would be Munim's bookkeeping leaking.
         return {**result, "client": record.name, "run_id": log.run_id}
 
+    @server.tool()
+    async def call_provider_api(client: str, provider: str, path: str,
+                                method: str = "GET", query: dict | None = None,
+                                body: dict | None = None) -> dict:
+        """One HTTP call to a provider's own API, with one client's credential.
+
+        The way down a layer when a provider's MCP server does not publish what
+        you need. Vercel's publishes no environment-variable write and no way to
+        attach a domain to a project, so those are reachable through no tool at
+        any layer; this is how they become reachable.
+
+        `path` is a path, not a URL, and that is enforced rather than assumed:
+        an absolute URL would send this client's credential to whatever host it
+        named. The provider's host is asserted before anything is sent.
+
+        Every call is recorded as a mutation whatever the method, because an
+        HTTP verb is a convention and not an annotation, and this will not claim
+        a read on the strength of one. The response body is deliberately **not**
+        logged: a raw environment endpoint returns secret values.
+
+        Works for cloudflare, vercel and resend, the three whose REST base URL
+        and header shape Munim knows. It is not a universal escape hatch.
+        """
+        from munim.container import UnknownCredential, UnsupportedProvider
+        from munim.remote.rawcall import UnsafePath, call as raw, providers
+        from munim.remote.session import freshen
+
+        record = registry.get(client)
+        log = RunLog(new_run_id(), runs)
+        # Before the container reads anything: where a REST call rides the MCP
+        # session's token, only an async session can renew it, and `Container`
+        # is synchronous.
+        await freshen(record.id, provider)
+        try:
+            result = await raw(container_for(record.name), provider, path,
+                               method=method, query=query, body=body, log=log)
+        except UnsupportedProvider as unknown:
+            return {"client": record.name, "provider": provider,
+                    "error": str(unknown), "providers": providers()}
+        except UnsafePath as unsafe:
+            return {"client": record.name, "provider": provider,
+                    "error": str(unsafe),
+                    "fix": "pass a path beginning with '/', not a URL"}
+        except UnknownCredential as missing:
+            return {"client": record.name, "provider": provider,
+                    "error": str(missing),
+                    "fix": f'munim connect "{record.name}" {provider} --token'}
+        except ValueError as bad:
+            return {"client": record.name, "provider": provider,
+                    "error": str(bad)}
+        return {**result, "client": record.name, "run_id": log.run_id}
+
     # ---- repair ----------------------------------------------------------
 
     @server.tool()

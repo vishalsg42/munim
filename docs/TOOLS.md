@@ -71,7 +71,43 @@ needs no flag, and `--args-file` or `--args -` feed it from a file or a pipe.
 | `apply_mail_setup` | carry out a plan, with approval required to replace a record |
 | `list_provider_tools` | what one client's provider account can be asked to do |
 | `call_provider_tool` | call one of those tools with that client's credentials |
+| `call_provider_api` | one HTTP call to the provider's own API, when its MCP server publishes no tool for the job |
 | `launch_status` | read a run back |
+
+## `call_provider_api`, and why it is the sharpest tool here
+
+Every other tool is bounded by a schema somebody else wrote. This one sends a
+client's live credential at a path you choose, so its boundary is three checks
+in `remote/rawcall.py` and a run-log entry.
+
+`Container.http` sets an httpx `base_url`, and it would be reasonable to assume
+that pins the request. It does not:
+
+```
+'/v9/projects'          -> https://api.vercel.com/v9/projects
+'https://evil.test/x'   -> https://evil.test/x        escapes entirely
+'//evil.test/x'         -> https://api.vercel.com/x   absorbed
+'/v9/../../x'           -> https://api.vercel.com/x   normalised
+```
+
+An absolute URL wins, and the `Authorization` header goes with it. So the path
+is validated before the request is built and the built request's host is
+compared with the provider's before anything is sent.
+
+Two more choices worth knowing:
+
+**Every call is logged as a mutation, whatever the method.** "Read-only by
+default" would really mean "GET by default", and an HTTP verb is a convention,
+not an annotation. `call_provider_tool` only records an observation when the
+provider itself said `readOnlyHint`, and this will not claim more on less.
+
+**The response body is never logged.** A raw environment endpoint returns the
+secret values the Vercel adapter deliberately drops (D6). The log records what
+was asked and what status came back.
+
+It works for cloudflare, vercel and resend: the three whose REST base URL and
+header shape Munim knows. It is not a universal escape hatch, and inventing base
+URLs for the other eight would be guessing.
 
 **Two of these need agents turned on, and they are off by default.**
 `ask_across_clients` and `work_on_client` are agent loops end to end: with agents

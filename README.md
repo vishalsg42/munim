@@ -74,6 +74,13 @@ Your coding agent gets the same two as `list_provider_tools` and
 off, and every call is written to the run log with the tool and its arguments.
 A call names one client and resolves that client's credentials alone.
 
+When a provider's own MCP server does not publish what you need,
+`call_provider_api` goes a layer down and makes one HTTP call to that provider's
+API with the same client's credential. Vercel publishes no environment-variable
+write and no way to attach a domain to a project, which is what this is for. It
+takes a path and never a URL, and refuses anything that would send the
+credential to another host.
+
 **Munim is local by default.** The checks, the audit and the mail plan are
 deterministic: they never needed a model and never call one, and neither does
 the passthrough above. Three tools can also reason about what they find

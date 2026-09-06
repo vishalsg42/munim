@@ -14,6 +14,7 @@ a session for a client that is not registered.
 
 import asyncio
 import logging
+import time
 import urllib.parse
 from contextlib import asynccontextmanager, contextmanager
 
@@ -523,6 +524,38 @@ def auth_for(client: str, provider: str, *, keyring=None,
         redirect_handler=redirect,
         callback_handler=callback,
     )
+
+
+async def freshen(client: str, provider: str, *, keyring=None) -> None:
+    """Renew a stored access token if it has aged out, quietly.
+
+    A session's token is only ever refreshed inside `async_auth_flow`, which
+    runs when a request goes through the MCP transport. `Container` is
+    synchronous and opens no session, so code reading a stored token outside one
+    can tell that it has expired and can never do anything about it. Refusing
+    there would send somebody through a browser login for a token a single
+    refresh would have fixed.
+
+    So: open a session and close it. That is enough to make the SDK refresh and
+    write the new token back, and it is a no-op when the token is still good.
+    Best effort throughout, because this exists to improve the odds for the call
+    that follows, and that call reports its own failure perfectly well.
+    """
+    from munim.remote.storage import KeychainTokenStorage
+
+    try:
+        store = KeychainTokenStorage(client, provider, keyring)
+        expires = store.expires_at()
+        # `None` means unknown, which is true of tokens stored before that
+        # bookkeeping existed. Refresh those too: an unnecessary round trip
+        # costs a second, and an unrefreshed dead token costs a browser login.
+        if expires is not None and expires > time.time() + 60:
+            return
+        async with session_for(client, provider, keyring=keyring,
+                               allow_login=False, verify=False):
+            pass
+    except Exception:
+        return
 
 
 def headers_for(client: str, provider: str, keys=None) -> dict | None:

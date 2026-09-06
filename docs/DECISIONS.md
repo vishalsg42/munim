@@ -1123,3 +1123,52 @@ publish `list_projects`, so a client on both produced the same prefixed name
 twice and Strands refused to build the agent. Found by running it; no test could
 have, because a stubbed toolset has no tool names.
 
+
+## D33: A way down a layer, and the three things that pay for it
+
+An operator using Munim from another agent put the problem exactly: *the ceiling
+on what munim can do for a provider is set by whoever wrote that provider's MCP
+server.* Cloudflare publishes `execute`, so anything its API allows is reachable.
+Vercel publishes a curated 37 tools, and there is no environment-variable write
+and no way to attach a domain to a project, so those were reachable through no
+tool at any layer. Munim was already holding the credential.
+
+`call_provider_api` makes one HTTP call to the provider's own API. Two
+independent reviews argued against building it a week before judging, and their
+objections are the reason it is shaped the way it is rather than reasons it does
+not exist.
+
+**The host is asserted, because nothing else contains it.** `Container.http`
+sets an httpx `base_url` and it is natural to read that as pinning the request.
+Measured, it does not: an absolute URL wins outright and the client's
+`Authorization: Bearer` goes with it, in cleartext if the scheme is `http`.
+Without a refusal this tool is a way to send any client's credential to any
+host. So the path is validated before the request is built and the built
+request's host is compared with the provider's before anything is sent. The
+first draft of the plan claimed the containment was inherited; it is entirely
+new code, and saying otherwise in a docstring would have been worse than the
+bug.
+
+**Every call is a mutation in the log, whatever the method.** "Read-only by
+default" would really mean "GET by default". `call_provider_tool` records an
+observation only when the provider itself said `readOnlyHint` (D31), and
+claiming the same from an HTTP verb is exactly the guess this codebase refuses
+elsewhere.
+
+**The response body is never logged.** `adapters/vercel.py` deliberately drops
+environment variable values on the floor (D6) so a coding agent's context never
+holds a client's secrets. A raw call to the same endpoint returns them, and
+writing that to the run log would undo D6 through the back door. The log holds
+the request and the status.
+
+It works for cloudflare, vercel and resend, the three with an auth profile. It
+is not the universal escape hatch the report asked for, and inventing base URLs
+for the other eight would be guessing.
+
+**And one credential is borrowed, on evidence.** Sending each stored MCP session
+token at its provider's REST API gave Resend 403, Cloudflare 400, and Vercel
+200. So `RemoteServer.rest_takes_session` is set for Vercel alone, defaulting
+False, and a REST call there rides the session rather than asking for a second
+credential. Refresh belongs to the SDK and only happens inside a session, and
+`Container` is synchronous, so `session.freshen` opens and closes one first.
+

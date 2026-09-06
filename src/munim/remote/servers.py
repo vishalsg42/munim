@@ -44,6 +44,17 @@ class RemoteServer:
     auth: str = "registers"
     # Set for `app` providers: what has to be registered, and where.
     register_at: str = ""
+    # Whether this provider's REST API accepts the access token its MCP server
+    # issued. Not a guess: each of these was measured by sending a stored
+    # session token at the provider's own API.
+    #
+    #     resend      403
+    #     cloudflare  400  invalid Authorization header format
+    #     vercel      200
+    #
+    # False by default, so a provider that has not been measured behaves as
+    # though the two credentials are separate, which they usually are.
+    rest_takes_session: bool = False
     # What to ask this provider for, on the routes where the ask is ours to
     # make. That is the application route in connect/oauth.py, which builds its
     # own authorize URL.
@@ -87,6 +98,10 @@ SERVERS: dict[str, RemoteServer] = {
         provider="vercel",
         url="https://mcp.vercel.com",
         public_client=True,
+        # Measured 2026-09-07: a stored session token returned 200 from
+        # `GET https://api.vercel.com/v9/projects`. Cloudflare and Resend
+        # refuse the same treatment, which is why this is per provider.
+        rest_takes_session=True,
         # Public, and the metadata says otherwise twice over. Vercel serves two
         # authorization server documents that disagree with each other:
         #

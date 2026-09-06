@@ -148,6 +148,28 @@ class Container:
             # ever called to make a refusal more useful.
             return False
 
+    def _session_token(self, provider: str) -> str | None:
+        """The MCP session's access token, where that provider's REST API takes
+        it. None everywhere else, which is the default.
+
+        Whoever calls this is responsible for the token being fresh: nothing
+        synchronous can refresh one. `remote/session.freshen` is the async step
+        that does, and the tools that reach a REST path call it first.
+        """
+        from munim.remote.servers import server_for
+        from munim.remote.storage import KeychainTokenStorage
+
+        server = server_for(provider)
+        if server is None or not getattr(server, "rest_takes_session", False):
+            return None
+        try:
+            held = KeychainTokenStorage(
+                self._client, provider, self._keyring)._read("tokens") or {}
+        except Exception:
+            return None
+        token = held.get("access_token")
+        return token if token else None
+
     def _credential(self, provider: str) -> str:
         """Private. Adapters use .http(); nothing else should reach a secret."""
         secret = self._backend.get(self._client, provider)
@@ -162,6 +184,14 @@ class Container:
             # connected by `client_status` and not connected by
             # `plan_mail_setup`, in the same minute, both truthfully. The
             # difference is what this needs to say.
+            # Where the provider's own REST API accepts the token its MCP
+            # server issued, the session *is* the credential and asking for a
+            # second one would be bureaucracy. Measured per provider, defaulting
+            # to no, because it is false for two of the three: see
+            # `RemoteServer.rest_takes_session`.
+            borrowed = self._session_token(provider)
+            if borrowed is not None:
+                return borrowed
             if self._has_session(provider):
                 raise UnknownCredential(
                     f"{provider} is connected for {self.label!r} as an MCP "
