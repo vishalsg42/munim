@@ -17,13 +17,15 @@ its own token and its own namespace in the tool list, so one agent can **read
 across every client and write inside the one you named**.
 
 ```
-Kloudfirst       -> Kloudfirst@gmail.com's Account          (3 tools)
-Balaji Roofings  -> Tech.bajajiroofing@gmail.com's Account  (3 tools)
+Kloudfirst       -> Kloudfirst@gmail.com's Account   (3 tools)
+Ivy & Fern       -> ivy@example.com's Account        (3 tools)
 
 both sessions opened concurrently, one process, no logout
 ```
 
-That is a real run against two real Cloudflare accounts, not a diagram.
+That is a real run against two real Cloudflare accounts, not a diagram. The
+second account is a client's and their address is replaced here: they did not
+consent to a public repository, and this file is also the PyPI page.
 Reproduce it with your own two:
 [`scripts/cross_account_probe.py`](scripts/cross_account_probe.py).
 

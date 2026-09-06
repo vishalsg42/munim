@@ -62,10 +62,10 @@ def test_two_clients_never_share_a_record(store):
 def test_a_client_name_with_spaces_is_not_ambiguous(store):
     """Accounts are not always `c_` hex: sessions are filed under the operator's
     own label during a rename, and the provisional key is "…connecting"."""
-    vault.set_password("munim-mcp:vercel", "Balaji Roofings", "a")
+    vault.set_password("munim-mcp:vercel", "Acme Ltd", "a")
     vault.set_password("munim-mcp:vercel", "…connecting", "b")
 
-    assert vault.get_password("munim-mcp:vercel", "Balaji Roofings") == "a"
+    assert vault.get_password("munim-mcp:vercel", "Acme Ltd") == "a"
     assert vault.get_password("munim-mcp:vercel", "…connecting") == "b"
 
 

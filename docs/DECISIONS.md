@@ -525,7 +525,7 @@ whole submission rests on, resting in turn on nothing.
 apart, both grants held at once in the OS keychain under `(client, provider)`:
 
 ```
-Balaji Roofings: 2 projects   (balajiroofings-quote, balajiroofings-fe-webapp)
+Acme Ltd: 2 projects   (acme-quote, acme-fe-webapp)
 Kloudfirst:     15 projects   (kf-webapp, khatalens, lpg-inventory, …)
 
 read concurrently in 0.94s, no logout between them
@@ -906,7 +906,7 @@ Two separate processes, nothing clicked, five credentials in the keychain:
 
 ```
 $ munim clients
-BalajiRoofing                    -        cloudflare (mcp), vercel (mcp)
+AcmeLtd                    -        cloudflare (mcp), vercel (mcp)
 exit: 0
 $ munim clients
 exit: 0

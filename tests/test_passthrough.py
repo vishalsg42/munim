@@ -83,21 +83,21 @@ async def test_a_call_reaches_only_the_named_clients_session(monkeypatch):
     physically holds one client's tools", so it is asserted rather than assumed.
     """
     opened = []
-    balaji = FakeSession([tool("execute")], "c_balaji", answer={"zone": "balaji"})
+    acme = FakeSession([tool("execute")], "c_acme", answer={"zone": "acme"})
     kloud = FakeSession([tool("execute")], "c_kloud", answer={"zone": "kloud"})
-    fake_sessions(monkeypatch, {"c_balaji": balaji, "c_kloud": kloud}, opened)
+    fake_sessions(monkeypatch, {"c_acme": acme, "c_kloud": kloud}, opened)
 
-    result = await call_tool("c_balaji", "cloudflare", "execute", {"code": "x"})
+    result = await call_tool("c_acme", "cloudflare", "execute", {"code": "x"})
 
-    assert opened == [("c_balaji", "cloudflare")]
-    assert result["result"] == {"zone": "balaji"}
-    assert balaji.called == [("execute", {"code": "x"})]
+    assert opened == [("c_acme", "cloudflare")]
+    assert result["result"] == {"zone": "acme"}
+    assert acme.called == [("execute", {"code": "x"})]
     assert kloud.called == [], "the other client's session was opened"
 
 
 async def test_an_unconnected_client_refuses_rather_than_falling_through(monkeypatch):
     opened = []
-    fake_sessions(monkeypatch, {"c_balaji": FakeSession([tool("execute")], "x")},
+    fake_sessions(monkeypatch, {"c_acme": FakeSession([tool("execute")], "x")},
                   opened)
 
     with pytest.raises(NeedsLogin):
@@ -107,7 +107,7 @@ async def test_an_unconnected_client_refuses_rather_than_falling_through(monkeyp
 async def test_an_unknown_provider_is_refused_before_any_session_opens():
     """No session, no credential lookup, and the message names the real ones."""
     with pytest.raises(NoRemoteServer) as caught:
-        await call_tool("c_balaji", "cloudfare", "execute", {})
+        await call_tool("c_acme", "cloudfare", "execute", {})
 
     assert "cloudflare" in str(caught.value), "the message should name what exists"
 
@@ -145,7 +145,7 @@ async def test_session_for_is_asked_not_to_allow_a_login(monkeypatch):
         yield FakeSession([tool("execute")], client)
 
     monkeypatch.setattr(passthrough, "session_for", fake)
-    await call_tool("c_balaji", "cloudflare", "execute", {})
+    await call_tool("c_acme", "cloudflare", "execute", {})
 
     assert seen["allow_login"] is False
 
@@ -155,11 +155,11 @@ async def test_session_for_is_asked_not_to_allow_a_login(monkeypatch):
 
 async def test_a_tool_that_does_not_exist_names_the_ones_that_do(monkeypatch):
     opened = []
-    fake_sessions(monkeypatch, {"c_balaji": FakeSession(
-        [tool("docs"), tool("search"), tool("execute")], "c_balaji")}, opened)
+    fake_sessions(monkeypatch, {"c_acme": FakeSession(
+        [tool("docs"), tool("search"), tool("execute")], "c_acme")}, opened)
 
     with pytest.raises(UnknownTool) as caught:
-        await call_tool("c_balaji", "cloudflare", "exec", {})
+        await call_tool("c_acme", "cloudflare", "exec", {})
 
     message = str(caught.value)
     assert "exec" in message
@@ -178,23 +178,23 @@ async def test_arguments_pass_through_untouched(monkeypatch):
     would put Munim back in the business of knowing each provider's schema.
     """
     opened = []
-    session = FakeSession([tool("deploy_to_vercel")], "c_balaji")
-    fake_sessions(monkeypatch, {"c_balaji": session}, opened)
+    session = FakeSession([tool("deploy_to_vercel")], "c_acme")
+    fake_sessions(monkeypatch, {"c_acme": session}, opened)
 
     arguments = {"project": {"name": "site", "env": [{"k": "A", "v": "1"}]},
                  "code": "await fetch('https://api')", "force": True,
                  "count": 3, "nothing": None}
-    await call_tool("c_balaji", "vercel", "deploy_to_vercel", dict(arguments))
+    await call_tool("c_acme", "vercel", "deploy_to_vercel", dict(arguments))
 
     assert session.called == [("deploy_to_vercel", arguments)]
 
 
 async def test_no_arguments_is_an_empty_object_not_none(monkeypatch):
     opened = []
-    session = FakeSession([tool("list_projects")], "c_balaji")
-    fake_sessions(monkeypatch, {"c_balaji": session}, opened)
+    session = FakeSession([tool("list_projects")], "c_acme")
+    fake_sessions(monkeypatch, {"c_acme": session}, opened)
 
-    await call_tool("c_balaji", "vercel", "list_projects")
+    await call_tool("c_acme", "vercel", "list_projects")
 
     assert session.called == [("list_projects", {})]
 
@@ -209,17 +209,17 @@ async def test_every_call_lands_in_the_run_log(tmp_path, monkeypatch):
     is the only place a person can see that one call touched one account.
     """
     opened = []
-    fake_sessions(monkeypatch, {"c_balaji": FakeSession(
-        [tool("execute")], "c_balaji", answer={"changed": 1})}, opened)
+    fake_sessions(monkeypatch, {"c_acme": FakeSession(
+        [tool("execute")], "c_acme", answer={"changed": 1})}, opened)
 
     log = RunLog(new_run_id(), tmp_path)
-    await call_tool("c_balaji", "cloudflare", "execute",
+    await call_tool("c_acme", "cloudflare", "execute",
                     {"code": "zones.update()"}, log=log)
 
     events = list(log.read())
     assert len(events) == 1
     event = events[0]
-    assert event.client == "c_balaji"
+    assert event.client == "c_acme"
     assert event.detail["provider"] == "cloudflare"
     assert event.detail["tool"] == "execute"
     assert event.detail["arguments"] == {"code": "zones.update()"}
@@ -235,15 +235,15 @@ async def test_a_read_only_tool_is_an_observation_and_anything_else_a_mutation(
     can write, so it carries no read-only hint.
     """
     opened = []
-    fake_sessions(monkeypatch, {"c_balaji": FakeSession([
+    fake_sessions(monkeypatch, {"c_acme": FakeSession([
         tool("search", read_only=True),
         tool("execute"),
         tool("delete_zone", read_only=True, destructive=True),
-    ], "c_balaji")}, opened)
+    ], "c_acme")}, opened)
 
     log = RunLog(new_run_id(), tmp_path)
     for name in ("search", "execute", "delete_zone"):
-        await call_tool("c_balaji", "cloudflare", name, {}, log=log)
+        await call_tool("c_acme", "cloudflare", name, {}, log=log)
 
     kinds = [e.kind for e in log.read()]
     assert kinds == ["observation", "mutation", "mutation"]
@@ -252,12 +252,12 @@ async def test_a_read_only_tool_is_an_observation_and_anything_else_a_mutation(
 async def test_a_failed_call_is_still_recorded(tmp_path, monkeypatch):
     """An attempt that was refused is a thing that happened to the account."""
     opened = []
-    fake_sessions(monkeypatch, {"c_balaji": FakeSession(
-        [tool("execute")], "c_balaji", answer={"error": "no"}, fails=True)},
+    fake_sessions(monkeypatch, {"c_acme": FakeSession(
+        [tool("execute")], "c_acme", answer={"error": "no"}, fails=True)},
         opened)
 
     log = RunLog(new_run_id(), tmp_path)
-    result = await call_tool("c_balaji", "cloudflare", "execute", {"code": "x"},
+    result = await call_tool("c_acme", "cloudflare", "execute", {"code": "x"},
                              log=log)
 
     assert result["failed"] is True, "a refusal comes back, it does not raise"
@@ -271,11 +271,11 @@ async def test_a_huge_result_is_clipped_in_the_log_but_not_in_the_answer(
     """The log is an audit trail, not a copy of the provider's database."""
     opened = []
     big = {"rows": ["x" * 100 for _ in range(200)]}
-    fake_sessions(monkeypatch, {"c_balaji": FakeSession(
-        [tool("execute")], "c_balaji", answer=big)}, opened)
+    fake_sessions(monkeypatch, {"c_acme": FakeSession(
+        [tool("execute")], "c_acme", answer=big)}, opened)
 
     log = RunLog(new_run_id(), tmp_path)
-    result = await call_tool("c_balaji", "cloudflare", "execute", {}, log=log)
+    result = await call_tool("c_acme", "cloudflare", "execute", {}, log=log)
 
     assert result["result"] == big, "the caller gets the whole thing"
     logged = list(log.read())[0].detail["result"]
@@ -286,10 +286,10 @@ async def test_a_huge_result_is_clipped_in_the_log_but_not_in_the_answer(
 async def test_a_call_without_a_log_still_works(monkeypatch):
     """The CLI always passes one; a direct caller need not be forced to."""
     opened = []
-    fake_sessions(monkeypatch, {"c_balaji": FakeSession([tool("docs")], "x")},
+    fake_sessions(monkeypatch, {"c_acme": FakeSession([tool("docs")], "x")},
                   opened)
 
-    result = await call_tool("c_balaji", "cloudflare", "docs", {})
+    result = await call_tool("c_acme", "cloudflare", "docs", {})
     assert result["tool"] == "docs"
 
 
@@ -298,14 +298,14 @@ async def test_a_call_without_a_log_still_works(monkeypatch):
 
 async def test_listing_reports_what_the_provider_says_about_each_tool(monkeypatch):
     opened = []
-    fake_sessions(monkeypatch, {"c_balaji": FakeSession([
+    fake_sessions(monkeypatch, {"c_acme": FakeSession([
         tool("search", read_only=True, does="Search the docs"),
         tool("execute", does="Run JavaScript",
              schema={"type": "object", "properties": {"code": {"type": "string"}}}),
         tool("delete_zone", read_only=True, destructive=True),
-    ], "c_balaji")}, opened)
+    ], "c_acme")}, opened)
 
-    listed = await tools_for("c_balaji", "cloudflare")
+    listed = await tools_for("c_acme", "cloudflare")
 
     by_name = {t["tool"]: t for t in listed}
     assert by_name["search"]["read_only"] is True
@@ -325,16 +325,16 @@ async def test_an_unannotated_tool_reports_null_not_false(monkeypatch):
     Nothing is being decided here, so the unknown stays visible.
     """
     opened = []
-    fake_sessions(monkeypatch, {"c_balaji": FakeSession(
-        [tool("execute")], "c_balaji")}, opened)
+    fake_sessions(monkeypatch, {"c_acme": FakeSession(
+        [tool("execute")], "c_acme")}, opened)
 
-    listed = await tools_for("c_balaji", "cloudflare")
+    listed = await tools_for("c_acme", "cloudflare")
     assert listed[0]["read_only"] is None
 
 
 async def test_listing_an_unknown_provider_names_the_real_ones():
     with pytest.raises(NoRemoteServer, match="cloudflare"):
-        await tools_for("c_balaji", "not-a-provider")
+        await tools_for("c_acme", "not-a-provider")
 
 
 def test_known_providers_is_more_than_the_three_the_mail_tools_use():

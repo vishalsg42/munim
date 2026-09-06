@@ -173,7 +173,7 @@ def test_mail_checks_do_not_fire_on_a_platform_domain(monkeypatch):
     mail from a vercel.app address, and a check that cries wolf on a preview URL
     is one people learn to ignore."""
     monkeypatch.setattr(checks, "query", _answers({}))
-    results = checks.run_all("balajiroofings-quote.vercel.app")
+    results = checks.run_all("acme-quote.vercel.app")
     mail = {"spf_single", "spf_lookups", "dkim_present", "dkim_chunking",
             "dmarc_present", "dmarc_policy", "mx_present", "ns_delegated"}
     for result in results:

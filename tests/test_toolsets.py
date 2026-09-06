@@ -23,7 +23,7 @@ class FakeKeyring:
 
 
 @pytest.mark.parametrize("name,expected", [
-    ("Balaji Roofings", "balaji_roofings"),
+    ("Acme Ltd", "acme_ltd"),
     ("Ivy & Fern Studio", "ivy_fern_studio"),
     ("  Kloudfirst  ", "kloudfirst"),
     ("acme-uk", "acme_uk"),
@@ -38,7 +38,7 @@ def test_a_name_that_leaves_nothing_is_refused():
 
 
 def test_each_client_gets_its_own_prefix():
-    sets = toolsets_for(["Balaji Roofings", "Kloudfirst"], "cloudflare",
+    sets = toolsets_for(["Acme Ltd", "Kloudfirst"], "cloudflare",
                         keyring=FakeKeyring())
     assert len(sets) == 2
 
@@ -61,14 +61,14 @@ def test_a_provider_with_no_mcp_server_is_refused():
 def test_two_toolsets_for_one_provider_are_told_apart_by_name():
     """Same server, same process, two clients. The prefix is what a tool call
     uses to say which account it means, and the client is its leading segment
-    so `balaji_roofings_*` still means Balaji and nobody else."""
+    so `acme_ltd_*` still means Acme and nobody else."""
     ring = FakeKeyring()
-    a = toolset_for("Balaji Roofings", "cloudflare", keyring=ring)
+    a = toolset_for("Acme Ltd", "cloudflare", keyring=ring)
     b = toolset_for("Kloudfirst", "cloudflare", keyring=ring)
     assert a is not b
-    assert a._prefix == "balaji_roofings_cloudflare"
+    assert a._prefix == "acme_ltd_cloudflare"
     assert b._prefix == "kloudfirst_cloudflare"
-    assert a._prefix.startswith("balaji_roofings")
+    assert a._prefix.startswith("acme_ltd")
 
 
 def test_one_client_two_providers_do_not_collide():
@@ -76,13 +76,13 @@ def test_one_client_two_providers_do_not_collide():
     `list_projects`, so a client connected to both produced the same prefixed
     name twice and Strands refused to build the agent at all:
 
-        ValueError: Tool name 'balaji_roofings_list_projects' already exists.
+        ValueError: Tool name 'acme_ltd_list_projects' already exists.
 
     `toolsets_for` guards against two clients colliding. Nothing guarded one
     client's providers colliding with each other."""
     ring = FakeKeyring()
-    vercel = toolset_for("Balaji Roofings", "vercel", keyring=ring)
-    supabase = toolset_for("Balaji Roofings", "supabase", keyring=ring)
+    vercel = toolset_for("Acme Ltd", "vercel", keyring=ring)
+    supabase = toolset_for("Acme Ltd", "supabase", keyring=ring)
 
     assert vercel._prefix != supabase._prefix, \
         "two providers under one client produced the same tool names"
@@ -94,10 +94,10 @@ def test_each_client_authenticates_as_itself():
     from munim.remote.session import auth_for
 
     ring = FakeKeyring()
-    a = auth_for("Balaji Roofings", "cloudflare", keyring=ring)
+    a = auth_for("Acme Ltd", "cloudflare", keyring=ring)
     b = auth_for("Kloudfirst", "cloudflare", keyring=ring)
     assert a is not b
-    assert a.context.client_metadata.client_name == "Munim (Balaji Roofings)"
+    assert a.context.client_metadata.client_name == "Munim (Acme Ltd)"
     assert b.context.client_metadata.client_name == "Munim (Kloudfirst)"
     # and their stores do not share a key
     assert a.context.storage._client != b.context.storage._client

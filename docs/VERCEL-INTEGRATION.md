@@ -92,7 +92,7 @@ Then:
 
 ```bash
 munim doctor                                  # should show the app registered
-munim connect "Balaji Roofings" vercel        # browser opens; log in as that client
+munim connect "Acme Ltd" vercel        # browser opens; log in as that client
 ```
 
 It prints which account was authorised. Check it. That is the one moment where

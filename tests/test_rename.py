@@ -14,14 +14,14 @@ from munim.registry import ClientRecord, Registry, UnknownClient
 def test_a_client_keeps_its_domain_through_a_rename(tmp_path):
     registry = Registry(tmp_path / "r.json")
     registry.add(ClientRecord(name="Tech.x@gmail.com's Account",
-                              domain="balajiroofings-quote.vercel.app"))
+                              domain="acme-quote.vercel.app"))
 
-    record = registry.rename("Tech.x@gmail.com's Account", "Balaji Roofings")
+    record = registry.rename("Tech.x@gmail.com's Account", "Acme Ltd")
 
-    assert record.name == "Balaji Roofings"
-    assert record.domain == "balajiroofings-quote.vercel.app"
-    assert Registry(tmp_path / "r.json").get("Balaji Roofings").domain == \
-        "balajiroofings-quote.vercel.app"
+    assert record.name == "Acme Ltd"
+    assert record.domain == "acme-quote.vercel.app"
+    assert Registry(tmp_path / "r.json").get("Acme Ltd").domain == \
+        "acme-quote.vercel.app"
 
 
 def test_the_old_name_is_gone(tmp_path):

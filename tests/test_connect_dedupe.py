@@ -43,8 +43,8 @@ def _connected(ring, client_id, provider, account):
 
 def test_the_holder_of_an_account_is_findable(world):
     registry, ring = world
-    registry.add(ClientRecord(name="Balaji Roofings"))
-    record = registry.get("Balaji Roofings")
+    registry.add(ClientRecord(name="Acme Ltd"))
+    record = registry.get("Acme Ltd")
     _connected(ring, record.id, "cloudflare", "acct@example's Account")
 
     found = holder_of(registry, "cloudflare", "acct@example's Account")
@@ -55,8 +55,8 @@ def test_a_client_does_not_report_itself(world):
     """Re-connecting a client to the account it already has is a refresh, not
     a clash."""
     registry, ring = world
-    registry.add(ClientRecord(name="Balaji Roofings"))
-    record = registry.get("Balaji Roofings")
+    registry.add(ClientRecord(name="Acme Ltd"))
+    record = registry.get("Acme Ltd")
     _connected(ring, record.id, "cloudflare", "acct@example's Account")
 
     assert holder_of(registry, "cloudflare", "acct@example's Account",
@@ -65,7 +65,7 @@ def test_a_client_does_not_report_itself(world):
 
 def test_an_unknown_account_has_no_holder(world):
     registry, ring = world
-    registry.add(ClientRecord(name="Balaji Roofings"))
+    registry.add(ClientRecord(name="Acme Ltd"))
     assert holder_of(registry, "cloudflare", "somebody-else") is None
 
 
@@ -81,14 +81,14 @@ def test_accounts_do_not_leak_across_providers(world):
 def test_naming_a_second_client_for_a_held_account_is_refused(world, monkeypatch):
     """The case that actually happened, from the other direction."""
     registry, ring = world
-    registry.add(ClientRecord(name="Balaji Roofings"))
-    registry.add(ClientRecord(name="Balaji Roofings Duplicate"))
-    held = registry.get("Balaji Roofings")
+    registry.add(ClientRecord(name="Acme Ltd"))
+    registry.add(ClientRecord(name="Acme Ltd Duplicate"))
+    held = registry.get("Acme Ltd")
     _connected(ring, held.id, "cloudflare", "acct@example's Account")
 
     async def pretend(client, provider, **kwargs):
         return ["docs", "search", "execute"], "acct@example's Account"
     monkeypatch.setattr("munim.remote.session.connect_and_identify", pretend)
 
-    code = cli.connect_via_mcp("Balaji Roofings Duplicate", "cloudflare")
+    code = cli.connect_via_mcp("Acme Ltd Duplicate", "cloudflare")
     assert code == 2, "a second client was allowed to hold one account"

@@ -7,7 +7,7 @@ client against the same provider and tell them apart by name.
 
 That is the cross-account capability stated as configuration rather than as
 adapter code: `find_across_clients` becomes an agent that can see
-`balaji_roofings_*` and `kloudfirst_*` at once and was never able to see either
+`acme_ltd_*` and `kloudfirst_*` at once and was never able to see either
 without being told which.
 
 The prefix is not cosmetic. It is the only thing standing between "update this

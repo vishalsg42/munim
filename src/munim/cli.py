@@ -1749,8 +1749,7 @@ def main(argv: list[str] | None = None) -> int:
                 return set_domain(*args.names)
             if len(args.names) == 1:
                 parser.error('clients domain takes a client and a site: '
-                             'munim clients domain "Balaji Roofings" '
-                             'balajiroofingindustries.com')
+                             'munim clients domain "Acme Ltd" acme.example')
             from munim import pick as _pick
 
             with _pick.full_screen():

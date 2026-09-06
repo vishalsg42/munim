@@ -15,8 +15,8 @@ and `call_provider_tool` invokes one of those tools with that client's
 credentials.
 
 ```
-list_provider_tools(client="Balaji Roofings", provider="cloudflare")
-call_provider_tool(client="Balaji Roofings", provider="cloudflare",
+list_provider_tools(client="Acme Ltd", provider="cloudflare")
+call_provider_tool(client="Acme Ltd", provider="cloudflare",
                    tool="execute", arguments={"code": "..."})
 ```
 
@@ -48,8 +48,8 @@ The same two are CLI verbs, and they are the first operational verbs Munim has
 had:
 
 ```
-munim tools "Balaji Roofings" cloudflare
-munim call  "Balaji Roofings" cloudflare execute --args '{"code": "..."}'
+munim tools "Acme Ltd" cloudflare
+munim call  "Acme Ltd" cloudflare execute --args '{"code": "..."}'
 ```
 
 Omit any argument and you get the picker, and `munim clients` navigates the

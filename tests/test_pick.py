@@ -16,7 +16,7 @@ import pytest
 
 from munim import pick
 
-OPTIONS = [("Acme", "acme.test"), ("Ivy & Fern", ""), ("Balaji", "balaji.test")]
+OPTIONS = [("Acme", "acme.test"), ("Ivy & Fern", ""), ("Thistle", "thistle.test")]
 
 
 def test_a_number_picks_that_row():
@@ -25,7 +25,7 @@ def test_a_number_picks_that_row():
 
 def test_a_label_typed_in_full_picks_it():
     """For anyone who knows what they want and does not want to read a list."""
-    assert pick.choose("Which?", OPTIONS, ask=lambda: "Balaji") == 2
+    assert pick.choose("Which?", OPTIONS, ask=lambda: "Thistle") == 2
 
 
 def test_a_label_is_matched_regardless_of_case():
@@ -187,10 +187,10 @@ def test_a_client_can_be_picked_for_a_command_that_was_given_none(tmp_path):
 
     reg = Registry(tmp_path / "r.json")
     reg.add(ClientRecord(name="Acme", domain="acme.test"))
-    reg.add(ClientRecord(name="Balaji Roofings"))
+    reg.add(ClientRecord(name="Acme Ltd"))
 
     assert cli._pick_client(reg, ask=lambda: "1") == "Acme"
-    assert cli._pick_client(reg, ask=lambda: "2") == "Balaji Roofings"
+    assert cli._pick_client(reg, ask=lambda: "2") == "Acme Ltd"
 
 
 def test_picking_a_client_when_there_are_none_says_so(tmp_path, capsys):

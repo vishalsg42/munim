@@ -46,7 +46,7 @@ def _capture(monkeypatch):
 def test_with_clients_and_a_terminal_it_offers_them(world, monkeypatch):
     """The regression: it never asked, and made a third client."""
     world.add(ClientRecord(name="Kloudfirst", domain="kloudfirst.com"))
-    world.add(ClientRecord(name="Balaji Roofings"))
+    world.add(ClientRecord(name="Acme Ltd"))
     chosen = world.get("Kloudfirst")
 
     seen = _capture(monkeypatch)

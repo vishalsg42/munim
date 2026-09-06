@@ -11,7 +11,7 @@ Nothing here is production code. It writes its tokens to a scratch directory,
 not the keychain, and it never touches a client's records: it lists tools and
 stops.
 
-    uv run python scripts/probe_mcp_wrapper.py "Balaji Roofings" "Kloudfirst"
+    uv run python scripts/probe_mcp_wrapper.py "Acme Ltd" "Kloudfirst"
 
 Each name opens a browser once. Sign in as a *different* account each time,
 which is the entire point.
