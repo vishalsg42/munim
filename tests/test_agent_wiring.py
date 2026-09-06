@@ -186,14 +186,24 @@ async def test_the_agent_gets_provider_tools_for_connected_providers(tmp_path, m
     import munim.remote.storage as storage_mod
     import munim.remote.toolsets as toolsets_mod
 
-    connected = {("acme", "cloudflare")}
+    # Keyed by the client **id**, which is what sessions are filed under. This
+    # fixture used to key on the name, so it asserted the bug: `launch` was
+    # handed a label, looked it up in a store keyed by identity, matched
+    # nothing for every real client, and reported no error at all.
+    # Built first so the id below is the one this server will actually use;
+    # `_server` makes a fresh registry per call.
+    server, registry = _server(tmp_path)
+    record = registry.clients()[0]
+    connected = {(record.id, "cloudflare")}
     monkeypatch.setattr(
         storage_mod.KeychainTokenStorage, "_read",
         lambda self, kind: {"access_token": "t"} if (self._client, self._provider) in connected else None)
+    monkeypatch.setattr(storage_mod.KeychainTokenStorage, "endpoint",
+                        lambda self: "")
 
     built = []
     monkeypatch.setattr(toolsets_mod, "toolset_for",
-                        lambda c, p, **k: built.append((c, p)) or _Stub(p))
+                        lambda c, p, **k: built.append((c, p, k)) or _Stub(p))
     monkeypatch.setattr(agent_module, "build_model", lambda *a, **k: (object(), "fake"))
 
     captured = {}
@@ -205,11 +215,15 @@ async def test_the_agent_gets_provider_tools_for_connected_providers(tmp_path, m
 
     monkeypatch.setattr(agent_module, "Agent", Recording)
 
-    server, _ = _server(tmp_path)
     await server.call_tool("check", {"target": "acme"})
 
-    assert built == [("acme", "cloudflare")], \
-        "only the connected provider should have a toolset built"
+    assert [(c, p) for c, p, _ in built] == [(record.id, "cloudflare")], \
+        "the session was looked up by something other than the client id"
+    kwargs = built[0][2]
+    assert kwargs.get("label") == record.name, \
+        "without a label every tool prefix becomes the opaque client id"
+    assert kwargs.get("read_only") is True, \
+        "a diagnosis agent was handed unfiltered write tools"
     names = [getattr(t, "_prefix", None) for t in captured["tools"]]
     assert "cloudflare" in names, f"the agent did not receive it: {names}"
 
@@ -292,3 +306,174 @@ async def test_working_on_one_client_is_declared_mutating(tmp_path):
     assert "client" in tools["work_on_client"].inputSchema.get("required", [])
     assert "work_on_client" not in CROSS_CLIENT, \
         "a tool that can write must never be allowed to span clients"
+
+
+# ---- through the real toolset helpers, not around them -------------------
+#
+# Every test above replaces `toolsets_for` / `toolset_for` with a `**k` stub,
+# which is exactly why three faults lived here unseen: the real signatures were
+# never called. `across` and `within` passed `backend=` to functions that take
+# `keyring=`, so both raised TypeError the moment agents were on; `launch`
+# looked sessions up by label in a store keyed by identity and silently found
+# none; and nothing passed `allow_login=False`, so a question could have opened
+# a browser and blocked for five minutes.
+#
+# So these fake one level deeper, at MCPClient.
+
+
+class _Client:
+    """Stands in for strands' MCPClient, recording how it was constructed."""
+
+    made = []
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+        self._prefix = kwargs.get("prefix")
+        _Client.made.append(kwargs)
+
+    def list_tools_sync(self):
+        return []
+
+
+@pytest.fixture
+def real_toolsets(monkeypatch):
+    import munim.remote.toolsets as toolsets_mod
+    _Client.made = []
+    monkeypatch.setattr(toolsets_mod, "MCPClient", _Client)
+    return _Client
+
+
+async def test_asking_across_clients_reaches_a_client(
+        tmp_path, monkeypatch, agents_on, real_toolsets):
+    """The TypeError. `across` called `toolsets_for(..., backend=...)` and the
+    helper takes `keyring=`, so this raised for every real caller."""
+    import munim.agent.across as across_mod
+    import munim.remote.storage as storage_mod
+
+    monkeypatch.setattr(storage_mod.KeychainTokenStorage, "_read",
+                        lambda self, kind: {"access_token": "t"}
+                        if self._provider == "resend" else None)
+    monkeypatch.setattr(across_mod, "build_model",
+                        lambda *a, **k: (object(), "fake"))
+    monkeypatch.setattr(across_mod, "Agent", _FakeAgent)
+
+    await across_mod.ask("who?", [ClientRecord(name="acme")])
+
+    assert real_toolsets.made, "no toolset was built through the real helper"
+
+
+async def test_working_on_one_client_reaches_it(
+        tmp_path, monkeypatch, agents_on, real_toolsets):
+    """The same fault in `within`, which nothing exercised either."""
+    import munim.agent.within as within_mod
+    import munim.remote.storage as storage_mod
+
+    monkeypatch.setattr(storage_mod.KeychainTokenStorage, "_read",
+                        lambda self, kind: {"access_token": "t"}
+                        if self._provider == "resend" else None)
+    monkeypatch.setattr(storage_mod.KeychainTokenStorage, "endpoint",
+                        lambda self: "")
+    monkeypatch.setattr(within_mod, "build_model",
+                        lambda *a, **k: (object(), "fake"))
+    monkeypatch.setattr(within_mod, "Agent", _FakeAgent)
+
+    class Log:
+        def append(self, **k): pass
+
+    await within_mod.work_on("c_1", "Acme Ltd", "do a thing", Log())
+
+    assert real_toolsets.made, "no toolset was built through the real helper"
+
+
+async def test_no_agent_path_may_open_a_browser(
+        tmp_path, monkeypatch, agents_on, real_toolsets):
+    """The one that turns a crash into something worse.
+
+    `toolset_for` built its auth provider with the default `allow_login=True`,
+    so once the TypeError above was fixed an unattended cross-client question
+    could open a browser and block for five minutes waiting for a callback
+    nobody is there to complete."""
+    import munim.agent.across as across_mod
+    import munim.remote.session as session_mod
+    import munim.remote.storage as storage_mod
+
+    asked = []
+    real = session_mod.auth_for
+    monkeypatch.setattr(
+        "munim.remote.toolsets.auth_for",
+        lambda c, p, **k: asked.append(k) or real(c, p, **k))
+    monkeypatch.setattr(storage_mod.KeychainTokenStorage, "_read",
+                        lambda self, kind: {"access_token": "t"}
+                        if self._provider == "resend" else None)
+    monkeypatch.setattr(across_mod, "build_model",
+                        lambda *a, **k: (object(), "fake"))
+    monkeypatch.setattr(across_mod, "Agent", _FakeAgent)
+
+    await across_mod.ask("who?", [ClientRecord(name="acme")])
+
+    assert asked, "the real auth path was never reached"
+    for kwargs in asked:
+        assert kwargs.get("allow_login") is False, \
+            "an agent path was built with a browser login still allowed"
+
+
+async def test_a_provider_that_will_not_open_does_not_take_the_others_with_it(
+        tmp_path, monkeypatch, agents_on):
+    """MCPClient connects and lists tools while the Agent is constructed, so a
+    single expired provider could abort the whole diagnosis."""
+    import munim.agent.launch as launch_mod
+    import munim.remote.storage as storage_mod
+    import munim.remote.toolsets as toolsets_mod
+
+    monkeypatch.setattr(storage_mod.KeychainTokenStorage, "_read",
+                        lambda self, kind: {"access_token": "t"})
+    monkeypatch.setattr(storage_mod.KeychainTokenStorage, "endpoint",
+                        lambda self: "")
+
+    def sometimes(client, provider, **k):
+        if provider == "cloudflare":
+            raise RuntimeError("session will not open")
+        return _Stub(provider)
+
+    monkeypatch.setattr(toolsets_mod, "toolset_for", sometimes)
+
+    written = []
+
+    class Log:
+        def append(self, **k): written.append(k)
+
+    ready = launch_mod._connected_toolsets("c_1", "Acme Ltd", Log())
+
+    assert ready, "one bad provider took every other provider with it"
+    assert any("cloudflare" in (e.get("human_text") or "") for e in written), \
+        "the provider that failed was dropped without saying so"
+
+
+async def test_a_toolset_with_no_tools_is_not_counted_as_one(
+        tmp_path, monkeypatch, agents_on):
+    """Cloudflare annotates nothing, so a read-only filter leaves it empty. The
+    log said "1 provider toolset(s) available" while the agent held nothing,
+    which is the bug wearing a reassuring number."""
+    import munim.agent.launch as launch_mod
+    import munim.remote.storage as storage_mod
+    import munim.remote.toolsets as toolsets_mod
+
+    monkeypatch.setattr(storage_mod.KeychainTokenStorage, "_read",
+                        lambda self, kind: {"access_token": "t"}
+                        if self._provider == "cloudflare" else None)
+    monkeypatch.setattr(storage_mod.KeychainTokenStorage, "endpoint",
+                        lambda self: "")
+    monkeypatch.setattr(toolsets_mod, "toolset_for",
+                        lambda c, p, **k: _Stub(p))
+
+    written = []
+
+    class Log:
+        def append(self, **k): written.append(k)
+
+    launch_mod._connected_toolsets("c_1", "Acme Ltd", Log())
+
+    counted = [e for e in written if "available" in (e.get("human_text") or "")]
+    assert counted, "nothing was reported at all"
+    assert "0 provider tool(s)" in counted[0]["human_text"], \
+        f"an empty toolset was counted as available: {counted[0]['human_text']}"

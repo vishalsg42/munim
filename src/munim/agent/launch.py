@@ -69,16 +69,29 @@ def _tools(domain: str, log: RunLog, client: str):
     return [look_up]
 
 
-def _connected_toolsets(client: str, log: RunLog) -> list:
+def _connected_toolsets(client_id: str, label: str, log: RunLog) -> list:
     """This client's provider tools, from the providers' own MCP servers.
 
-    Only where a session already exists. Building a toolset for a provider the
-    client has not connected would open a browser in the middle of a diagnosis,
-    which is not a thing an agent gets to decide to do.
+    **Two names, and they are not interchangeable.** `client_id` is what
+    credentials are filed under; `label` is what a person reads and what the
+    tool prefix is built from. This function used to take one string and use it
+    for both, and the string it got was the label, so the lookup asked a store
+    keyed by identity for a name it does not hold. It matched nothing, for every
+    client, and reported no error: the agent simply diagnosed without any
+    provider tools and nobody could see why.
 
-    Failures here are logged and dropped rather than raised: the checks have
-    already run and the findings stand, so losing a provider's tools costs the
-    agent some evidence, not the operator their answer.
+    Token **or** endpoint, matching `within.connected_providers`. A
+    URL-authenticated provider stores an endpoint and no tokens, and asking only
+    about tokens makes it invisible.
+
+    Read-only, because this agent explains rather than repairs. A provider that
+    annotates nothing therefore contributes nothing, which is a real cost and is
+    why the count below is of tools rather than of toolsets.
+
+    Failures are logged and dropped rather than raised, and that has to cover
+    the *construction* as well: an MCPClient connects and lists its tools while
+    the Agent is being built, so one expired provider could otherwise abort the
+    whole diagnosis.
     """
     from munim.remote.servers import SERVERS
     from munim.remote.storage import KeychainTokenStorage
@@ -87,19 +100,31 @@ def _connected_toolsets(client: str, log: RunLog) -> list:
     ready = []
     for provider in sorted(SERVERS):
         try:
-            if KeychainTokenStorage(client, provider)._read("tokens") is None:
+            store = KeychainTokenStorage(client_id, provider)
+            if store._read("tokens") is None and not store.endpoint():
                 continue
-            ready.append(toolset_for(client, provider))
+            ready.append(toolset_for(client_id, provider, label=label,
+                                     read_only=True))
         except Exception as exc:  # a provider being unreachable is not fatal
-            log.append(client=client, stage="diagnose", kind="observation",
+            log.append(client=label, stage="diagnose", kind="observation",
                        human_text=f"{provider} tools unavailable this run",
                        detail={"provider": provider,
                                "error": f"{type(exc).__name__}: {exc}"})
     if ready:
-        log.append(client=client, stage="diagnose", kind="observation",
-                   human_text=f"{len(ready)} provider toolset(s) available "
-                              f"for {client}",
-                   detail={"providers": [t._prefix for t in ready]})
+        # Tools, not toolsets. A toolset whose every tool was filtered out is
+        # still one toolset, so counting those reported "1 available" while the
+        # agent held nothing, which is the shape of the bug above wearing a
+        # reassuring number.
+        held = 0
+        for toolset in ready:
+            try:
+                held += len(toolset.list_tools_sync())
+            except Exception:
+                pass
+        log.append(client=label, stage="diagnose", kind="observation",
+                   human_text=f"{held} provider tool(s) available for {label}",
+                   detail={"providers": [t._prefix for t in ready],
+                           "tools": held})
     return ready
 
 
@@ -127,7 +152,7 @@ async def run_checks(domain: str, client: str, log: RunLog,
 
 
 async def explain(domain: str, client: str, failures: list[CheckResult],
-                  log: RunLog) -> str:
+                  log: RunLog, *, client_id: str | None = None) -> str:
     """The model's part: diagnose and write for the owner."""
     if not failures:
         return "Everything checked out."
@@ -164,7 +189,8 @@ async def explain(domain: str, client: str, failures: list[CheckResult],
         # no redirect in between. Left at the default this agent interleaves
         # prose with the protocol and the coding agent's connection dies. It
         # did not, in the first run over stdio, purely on timing.
-        tools = _tools(domain, log, client) + _connected_toolsets(client, log)
+        tools = _tools(domain, log, client) + _connected_toolsets(
+            client_id or client, client, log)
         agent = Agent(model=model, tools=tools,
                       system_prompt=SYSTEM, callback_handler=None)
         log.append(client=client, stage="diagnose", kind="stage_start",
@@ -197,7 +223,8 @@ async def explain(domain: str, client: str, failures: list[CheckResult],
     return text
 
 
-async def launch(domain: str, client: str, *, dkim_selector: str = "resend",
+async def launch(domain: str, client: str, *, client_id: str | None = None,
+                 dkim_selector: str = "resend",
                  runs_dir=None) -> tuple[RunLog, list[CheckResult]]:
     """Check a domain, then have the agent explain whatever failed.
 
@@ -208,7 +235,8 @@ async def launch(domain: str, client: str, *, dkim_selector: str = "resend",
     results = await run_checks(domain, client, log, dkim_selector)
     failures = [r for r in results if r.status == "fail"]
     if failures:
-        await explain(domain, client, failures, log)
+        await explain(domain, client, failures, log,
+                      client_id=client_id)
     log.append(client=client, stage="verify", kind="run_done",
                human_text=f"Finished checking {domain}.",
                detail={"failures": [asdict(f)["check"] for f in failures]})

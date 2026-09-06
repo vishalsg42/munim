@@ -517,7 +517,13 @@ def build_server(backend=None, registry=None, runs_dir=None,
         # checks itself and return the JSON, so `launch` had no callers and the
         # Strands agent never ran: the architecture diagram promised a
         # diagnosis step that no code path could reach.
+        # Both names go down. `client` is the label, which is what the log, the
+        # report and the control room show; `client_id` is what credentials are
+        # filed under. Passing only the label meant the diagnosis agent looked
+        # up sessions by a name the store does not key on and silently found
+        # none, for every client, since the two were split.
         log, results = await launch(target_domain, client,
+                                    client_id=record.id,
                                     dkim_selector=dkim_selector, runs_dir=runs)
         failures = [r for r in results if r.status == "fail"]
         report = write_report(log, domain=target_domain, business=client,

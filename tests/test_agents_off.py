@@ -97,15 +97,26 @@ async def test_the_refusals_come_before_any_credential_is_read():
     from munim.agent.within import work_on
 
     class Explode:
-        def get(self, *a, **k): raise AssertionError("read the keychain")
-        def set(self, *a, **k): raise AssertionError("wrote to the keychain")
+        # Vault-shaped, because that is what the session store is. This used to
+        # define get/set, a CredentialBackend, and pass it where a keyring goes:
+        # `get_password` would have raised AttributeError rather than the
+        # assertion, so the test only worked as a sentinel by accident. Two
+        # shapes, two names, and the parameter is now the one it always was.
+        def get_password(self, *a, **k):
+            raise AssertionError("read the credential store")
+
+        def set_password(self, *a, **k):
+            raise AssertionError("wrote to the credential store")
+
+        def delete_password(self, *a, **k):
+            raise AssertionError("deleted from the credential store")
 
     class Log:
         def append(self, **k): raise AssertionError("wrote to the run log")
 
-    got = await work_on("c_1", "acme", "do a thing", Log(), backend=Explode())
+    got = await work_on("c_1", "acme", "do a thing", Log(), keyring=Explode())
     assert got["agents"] == "off"
-    assert "munim config ai on" in await ask("who?", [], backend=Explode())
+    assert "munim config ai on" in await ask("who?", [], keyring=Explode())
 
 
 async def test_the_tools_are_still_listed(server):

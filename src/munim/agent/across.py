@@ -34,7 +34,7 @@ useless to someone who looks after a dozen of them.
 Be brief. No preamble."""
 
 
-def connected_clients(clients, provider: str, backend=None) -> list:
+def connected_clients(clients, provider: str, keyring=None) -> list:
     """Those with a session for this provider. Asking about the rest would open
     a browser, which is not a thing a question gets to do.
 
@@ -43,14 +43,14 @@ def connected_clients(clients, provider: str, backend=None) -> list:
     """
     def has_session(client) -> bool:
         key = getattr(client, "id", client)
-        store = (KeychainTokenStorage(key, provider, backend) if backend
+        store = (KeychainTokenStorage(key, provider, keyring) if keyring
                  else KeychainTokenStorage(key, provider))
         return store._read("tokens") is not None
 
     return [c for c in clients if has_session(c)]
 
 
-async def ask(question: str, clients: list[str], *, backend=None) -> str:
+async def ask(question: str, clients: list[str], *, keyring=None) -> str:
     """Answer `question` using every connected client's read-only tools."""
     # Ahead of the per-provider keychain reads below, for the same reason as
     # within.work_on: this is importable, and refusing after doing the work
@@ -64,19 +64,24 @@ async def ask(question: str, clients: list[str], *, backend=None) -> str:
     toolsets = []
     reached: dict[str, list[str]] = {}
     for provider in sorted(SERVERS):
-        present = connected_clients(clients, provider, backend)
+        present = connected_clients(clients, provider, keyring)
         if not present:
             continue
         reached[provider] = present
-        toolsets += toolsets_for(present, provider, backend=backend,
-                                 read_only=True)
+        toolsets += toolsets_for(present, provider, keyring=keyring,
+                                  read_only=True)
 
     if not toolsets:
         return ("No client has a session with a provider yet, so there is "
                 "nothing to read across. Connect one with "
                 "`munim connect \"<client>\" cloudflare`.")
 
-    model, _ = build_model(backend)
+    # No argument. `keyring` is the session store, vault-shaped; `build_model`
+    # wants a CredentialBackend and reads a model key from it. Threading one
+    # object into both is how this parameter came to be passed to a function
+    # that has never accepted it: two shapes, one name, third time in this
+    # repository.
+    model, _ = build_model()
     agent = Agent(model=model, tools=toolsets, system_prompt=SYSTEM,
                   callback_handler=None)
 

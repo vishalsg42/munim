@@ -71,7 +71,13 @@ def toolset_for(client: str, provider: str, *, keyring=None,
         raise NoRemoteServer(f"{provider} runs no MCP server")
     return MCPClient(
         url=server.url,
-        auth_provider=auth_for(client, provider, keyring=keyring),
+        # `allow_login=False`, and not as a parameter, because every caller of
+        # this module is an agent path. A question that opens a browser and
+        # blocks for five minutes waiting for a callback nobody is there to
+        # complete is not a question, and `NeedsLogin` exists to say so. Code
+        # that does want to log a person in calls `session_for` instead.
+        auth_provider=auth_for(client, provider, keyring=keyring,
+                               allow_login=False),
         prefix=prefix_for(label or client),
         tool_filters={"allowed": [_is_read_only]} if read_only else None,
     )

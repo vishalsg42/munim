@@ -39,15 +39,19 @@ who does not know the provider's vocabulary has to be able to check your work.
 Be brief. No preamble."""
 
 
-def connected_providers(client_id: str, backend=None) -> list[str]:
-    """Providers this client has a session with. Nothing else is reachable."""
+def connected_providers(client_id: str, keyring=None) -> list[str]:
+    """Providers this client has a session with. Nothing else is reachable.
+
+    Token **or** endpoint: a URL-authenticated provider like Zoho stores an
+    endpoint and no tokens, so asking only about tokens makes it invisible.
+    """
     return [p for p in sorted(SERVERS)
-            if KeychainTokenStorage(client_id, p, backend)._read("tokens")
-            or KeychainTokenStorage(client_id, p, backend).endpoint()]
+            if KeychainTokenStorage(client_id, p, keyring)._read("tokens")
+            or KeychainTokenStorage(client_id, p, keyring).endpoint()]
 
 
 async def work_on(client_id: str, label: str, request: str, log: RunLog, *,
-                  backend=None) -> dict:
+                  keyring=None) -> dict:
     """Carry out `request` inside one client's accounts."""
     # Before the keychain is touched and before any MCPClient is built. This
     # function is importable, so a guard living only in the MCP tool would miss
@@ -57,7 +61,7 @@ async def work_on(client_id: str, label: str, request: str, log: RunLog, *,
     if off is not None:
         return {"client": label, "did": None, **off}
 
-    providers = connected_providers(client_id, backend)
+    providers = connected_providers(client_id, keyring)
     if not providers:
         return {
             "client": label, "did": None,
@@ -65,10 +69,12 @@ async def work_on(client_id: str, label: str, request: str, log: RunLog, *,
                    f"work with. Connect one: munim connect {label!r} cloudflare",
         }
 
-    toolsets = [toolset_for(client_id, provider, backend=backend, label=label)
+    toolsets = [toolset_for(client_id, provider, keyring=keyring, label=label)
                 for provider in providers]
 
-    model, model_label = build_model(backend)
+    # No argument: see the note in across.ask. `keyring` is the session store
+    # and `build_model` wants a CredentialBackend.
+    model, model_label = build_model()
     log.append(client=label, stage="work", kind="stage_start",
                human_text=f"Working on {label}",
                detail={"providers": providers, "model": model_label,
