@@ -167,6 +167,36 @@ def confirm(planned, ask=None) -> bool:
         return False
 
 
+def _record_removal(records, removed: list[str], everything: bool) -> None:
+    """Write a credential removal to the run log.
+
+    Everything else that changes an account is recorded, and this was the one
+    thing that changed one and left nothing behind. When a machine's Cloudflare
+    and Vercel credentials turned out to be gone, there was no way to tell what
+    had removed them or when, and the honest answer to "what happened" was that
+    nobody could know.
+
+    Best effort on purpose. A log that cannot be written must not stop a
+    credential being removed, because the operator asked for the removal and
+    the audit trail is the lesser promise.
+    """
+    from munim.runlog import RunLog, new_run_id
+
+    try:
+        log = RunLog(new_run_id())
+        log.append(
+            client=(records[0].name if len(records) == 1 and not everything
+                    else "every client"),
+            stage="disconnect",
+            kind="mutation",
+            human_text=f"{len(removed)} credential(s) removed",
+            detail={"removed": removed, "everything": everything,
+                    "clients": [r.name for r in records]},
+        )
+    except Exception:
+        pass
+
+
 def disconnect(client: str | None, provider: str | None, everything: bool,
                assume_yes: bool = False, dry_run: bool = False,
                ask=None) -> int:
@@ -218,6 +248,8 @@ def disconnect(client: str | None, provider: str | None, everything: bool,
     if not removed:
         print("Nothing was stored.", file=sys.stderr)
         return 0
+
+    _record_removal(records, removed, everything)
 
     for line in removed:
         print(f"  removed {line}", file=sys.stderr)

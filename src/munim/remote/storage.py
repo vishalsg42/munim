@@ -35,21 +35,26 @@ class KeychainTokenStorage(TokenStorage):
     be, and the failure is silent.
     """
 
-    def __init__(self, client: str, provider: str, backend=None) -> None:
+    def __init__(self, client: str, provider: str, keyring=None) -> None:
         self._client = client
         self._provider = provider
         # Resolved here, not as a default argument. A default is bound when the
         # module is imported, so the store could never be substituted after
         # that: a caller passing nothing always reached the real one, including
         # from a test that had replaced it.
-        self._backend = backend if backend is not None else vault
+        # Named `keyring`, not `backend`. A CredentialBackend is a different
+        # object with different methods, and calling both of them "backend" put
+        # the wrong one in here twice: once in health.py and once in the MCP
+        # server, where every OAuth provider raised AttributeError on
+        # get_password while the identical CLI command worked.
+        self._keyring = keyring if keyring is not None else vault
 
     def _service(self, kind: str) -> str:
         return f"{SERVICE}:{self._provider}:{kind}"
 
     def _read(self, kind: str) -> dict | None:
         try:
-            raw = self._backend.get_password(self._service(kind), self._client)
+            raw = self._keyring.get_password(self._service(kind), self._client)
         except vault.StoreUnavailable:
             # Nowhere to store means nothing stored. See KeychainBackend.get.
             return None
@@ -62,7 +67,7 @@ class KeychainTokenStorage(TokenStorage):
         # defined is touched and no model needs an extra field.
         record = payload.model_dump(mode="json")
         record.update(extra)
-        self._backend.set_password(self._service(kind), self._client,
+        self._keyring.set_password(self._service(kind), self._client,
                                    json.dumps(record))
 
     async def get_tokens(self) -> OAuthToken | None:
@@ -122,7 +127,7 @@ class KeychainTokenStorage(TokenStorage):
         existing = self._read("client")
         if existing and not existing.get("_seeded"):
             return
-        self._backend.set_password(self._service("client"), self._client,
+        self._keyring.set_password(self._service("client"), self._client,
                                    json.dumps({
                                        "client_id": client_id,
                                        "client_secret": client_secret or None,
@@ -144,11 +149,11 @@ class KeychainTokenStorage(TokenStorage):
         servers.json, because that file is a list of servers and this is a
         credential belonging to one client.
         """
-        self._backend.set_password(self._service("endpoint"), self._client, url)
+        self._keyring.set_password(self._service("endpoint"), self._client, url)
 
     def endpoint(self) -> str | None:
         try:
-            return self._backend.get_password(self._service("endpoint"), self._client)
+            return self._keyring.get_password(self._service("endpoint"), self._client)
         except vault.StoreUnavailable:
             return None
 
@@ -160,11 +165,11 @@ class KeychainTokenStorage(TokenStorage):
         maintains. Two copies of a fact one of them can never update is how
         `ClientRecord.providers` came to be wrong about everything.
         """
-        self._backend.set_password(self._service("account"), self._client, account)
+        self._keyring.set_password(self._service("account"), self._client, account)
 
     def account(self) -> str | None:
         try:
-            return self._backend.get_password(self._service("account"), self._client)
+            return self._keyring.get_password(self._service("account"), self._client)
         except vault.StoreUnavailable:
             return None
 
@@ -181,7 +186,7 @@ class KeychainTokenStorage(TokenStorage):
         found = []
         for kind in ("client", "tokens", "account", "endpoint"):
             try:
-                if self._backend.get_password(self._service(kind), self._client):
+                if self._keyring.get_password(self._service(kind), self._client):
                     found.append(kind)
             except vault.StoreUnavailable:
                 return []
@@ -196,9 +201,9 @@ class KeychainTokenStorage(TokenStorage):
         """
         gone = []
         for kind in ("client", "tokens", "account", "endpoint"):
-            if self._backend.get_password(self._service(kind), self._client):
+            if self._keyring.get_password(self._service(kind), self._client):
                 try:
-                    self._backend.delete_password(self._service(kind), self._client)
+                    self._keyring.delete_password(self._service(kind), self._client)
                     gone.append(kind)
                 except Exception:
                     pass
@@ -213,14 +218,14 @@ class KeychainTokenStorage(TokenStorage):
         delete that fails after a successful copy costs a stale entry, and one
         that fails before costs the session.
         """
-        moved = KeychainTokenStorage(client, self._provider, self._backend)
+        moved = KeychainTokenStorage(client, self._provider, self._keyring)
         for kind in ("client", "tokens", "account", "endpoint"):
-            raw = self._backend.get_password(self._service(kind), self._client)
+            raw = self._keyring.get_password(self._service(kind), self._client)
             if raw is not None:
-                self._backend.set_password(moved._service(kind), client, raw)
+                self._keyring.set_password(moved._service(kind), client, raw)
         for kind in ("client", "tokens", "account", "endpoint"):
             try:
-                self._backend.delete_password(self._service(kind), self._client)
+                self._keyring.delete_password(self._service(kind), self._client)
             except Exception:
                 pass  # a leftover provisional entry is harmless
         return moved

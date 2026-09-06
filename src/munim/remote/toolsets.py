@@ -57,7 +57,7 @@ def _is_read_only(tool, **_) -> bool:
     return bool(annotations.readOnlyHint) and not annotations.destructiveHint
 
 
-def toolset_for(client: str, provider: str, *, backend=None,
+def toolset_for(client: str, provider: str, *, keyring=None,
                 read_only: bool = False, label: str | None = None) -> MCPClient:
     """One client's tools from one provider, ready to hand to an Agent.
 
@@ -71,13 +71,13 @@ def toolset_for(client: str, provider: str, *, backend=None,
         raise NoRemoteServer(f"{provider} runs no MCP server")
     return MCPClient(
         url=server.url,
-        auth_provider=auth_for(client, provider, backend=backend),
+        auth_provider=auth_for(client, provider, keyring=keyring),
         prefix=prefix_for(label or client),
         tool_filters={"allowed": [_is_read_only]} if read_only else None,
     )
 
 
-def toolsets_for(clients, provider: str, *, backend=None,
+def toolsets_for(clients, provider: str, *, keyring=None,
                  read_only: bool = False) -> list[MCPClient]:
     """Every client's tools from one provider, for a single agent.
 
@@ -99,6 +99,6 @@ def toolsets_for(clients, provider: str, *, backend=None,
                 "tool call could not say which account it meant. Rename one."
             )
         seen[prefix] = label
-    return [toolset_for(cid, provider, backend=backend, read_only=read_only,
+    return [toolset_for(cid, provider, keyring=keyring, read_only=read_only,
                         label=label)
             for cid, label in pairs]

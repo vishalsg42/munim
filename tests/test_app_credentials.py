@@ -114,7 +114,7 @@ def test_the_session_uses_it(monkeypatch):
     monkeypatch.setattr("munim.appcreds.default_backend", lambda: backend)
 
     ring = Ring()
-    auth_for("c_x", "gmail", label="Acme", backend=ring)
+    auth_for("c_x", "gmail", label="Acme", keyring=ring)
 
     seeded = KeychainTokenStorage("c_x", "gmail", ring)._read("client")
     assert seeded["client_id"] == "an-id.apps.googleusercontent.com"
@@ -129,4 +129,4 @@ def test_the_refusal_names_the_command_that_fixes_it(monkeypatch):
     monkeypatch.setattr("munim.appcreds.default_backend", lambda: Backend())
 
     with pytest.raises(NoRemoteServer, match="munim config set"):
-        auth_for("c_x", "gmail", label="Acme", backend=Ring())
+        auth_for("c_x", "gmail", label="Acme", keyring=Ring())

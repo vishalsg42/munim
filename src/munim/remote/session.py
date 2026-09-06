@@ -199,7 +199,7 @@ class _RemembersExpiry(OAuthClientProvider):
             await inner.aclose()
 
 
-def auth_for(client: str, provider: str, *, backend=None,
+def auth_for(client: str, provider: str, *, keyring=None,
              on_url=None, label: str | None = None,
              allow_login: bool = True) -> OAuthClientProvider:
     """The OAuth client for one (client, provider), storing to the keychain.
@@ -221,7 +221,7 @@ def auth_for(client: str, provider: str, *, backend=None,
             "Providers that do: " + ", ".join(sorted(SERVERS))
         )
 
-    storage = (KeychainTokenStorage(client, provider, backend) if backend
+    storage = (KeychainTokenStorage(client, provider, keyring) if keyring
                else KeychainTokenStorage(client, provider))
 
     # The state the SDK put on the authorization request. The listener waits for
@@ -307,7 +307,7 @@ def auth_for(client: str, provider: str, *, backend=None,
     )
 
 
-def headers_for(client: str, provider: str, backend=None) -> dict | None:
+def headers_for(client: str, provider: str, keys=None) -> dict | None:
     """The header this client authenticates to this provider with, if any.
 
     A fourth way in beside registering a client, registering an application and
@@ -322,8 +322,12 @@ def headers_for(client: str, provider: str, backend=None) -> dict | None:
         return None
 
     from munim.container import KeychainBackend
-    backend = backend or KeychainBackend()
-    key = backend.get(client, provider)
+
+    # `keys`, and a CredentialBackend, because this is the pasted-API-key half.
+    # The other half of this module wants a vault-shaped `keyring`. Two names
+    # for two objects, since one name for both shipped a bug twice.
+    keys = keys or KeychainBackend()
+    key = keys.get(client, provider)
     if not key:
         raise NeedsLogin(
             f"{provider} authenticates with an API key and none is stored for "
@@ -332,7 +336,7 @@ def headers_for(client: str, provider: str, backend=None) -> dict | None:
     return {server.header: key}
 
 
-def endpoint_for(client: str, provider: str, backend=None) -> str:
+def endpoint_for(client: str, provider: str, keyring=None) -> str:
     """Where this client's server is.
 
     Usually the provider's one address for everybody. For a provider whose URL
@@ -346,7 +350,7 @@ def endpoint_for(client: str, provider: str, backend=None) -> str:
     if server.auth != "url":
         return server.url
 
-    stored = KeychainTokenStorage(client, provider, backend).endpoint()
+    stored = KeychainTokenStorage(client, provider, keyring).endpoint()
     if not stored:
         raise NoRemoteServer(
             f"{provider} identifies a client by their own endpoint URL, and "
@@ -359,7 +363,8 @@ class WrongAccount(Exception):
     """The session opened, and it is not the account this client was bound to."""
 
 
-async def _verify_account(session, client: str, provider: str, backend=None) -> None:
+async def _verify_account(session, client: str, provider: str,
+                          keyring=None) -> None:
     """Refuse a session that has drifted to another account.
 
     Access tokens expire, and a refresh that fails becomes a fresh
@@ -374,7 +379,7 @@ async def _verify_account(session, client: str, provider: str, backend=None) -> 
     """
     from munim.remote.identity import identity_of
 
-    store = KeychainTokenStorage(client, provider, backend)
+    store = KeychainTokenStorage(client, provider, keyring)
     expected = store.account()
     if not expected:
         # Never recorded, so there is nothing to compare against. Record it now
@@ -461,7 +466,7 @@ async def session_for(client: str, provider: str, *, keyring=None, keys=None,
                 yield session
         return  # neither kind has an account that can drift
 
-    auth = auth_for(client, provider, backend=keyring, on_url=on_url,
+    auth = auth_for(client, provider, keyring=keyring, on_url=on_url,
                     label=label, allow_login=allow_login)
     try:
         with _quiet_refusals(not allow_login):

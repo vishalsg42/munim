@@ -242,3 +242,68 @@ def test_json_is_refused_where_it_would_do_nothing(estate):
     with pytest.raises(SystemExit) as raised:
         cli.main(["clients", "add", "Other", "--json"])
     assert raised.value.code == 2
+
+
+# ---- a credential removal leaves a record -----------------------------
+
+
+def test_disconnect_is_written_to_the_run_log(estate, tmp_path, monkeypatch):
+    """It was the one thing that changed an account and left nothing behind.
+
+    When this machine's Cloudflare and Vercel credentials turned out to be
+    gone, there was no way to tell what had removed them or when, and the
+    honest answer to "what happened" was that nobody could know.
+    """
+    import json
+
+    reg, ring = estate
+    monkeypatch.setattr("munim.runlog.RUNS_DIR", tmp_path / "runs")
+    ring.set_password("munim-mcp:cloudflare:tokens",
+                      reg.clients()[0].id, '{"access_token": "x"}')
+
+    assert cli.disconnect("Acme", "cloudflare", False, assume_yes=True,
+                          dry_run=False) == 0
+
+    logs = list((tmp_path / "runs").glob("*.jsonl"))
+    assert logs, "a credential was removed and nothing recorded it"
+    event = json.loads(logs[0].read_text().splitlines()[0])
+    assert event["kind"] == "mutation"
+    assert event["client"] == "Acme"
+    assert event["detail"]["removed"], "the record does not say what went"
+
+
+def test_a_dry_run_records_nothing(estate, tmp_path, monkeypatch):
+    """It removes nothing, so it is not a mutation."""
+    reg, ring = estate
+    monkeypatch.setattr("munim.runlog.RUNS_DIR", tmp_path / "runs")
+    ring.set_password("munim-mcp:cloudflare:tokens",
+                      reg.clients()[0].id, '{"access_token": "x"}')
+
+    cli.disconnect("Acme", "cloudflare", False, dry_run=True)
+
+    assert not list((tmp_path / "runs").glob("*.jsonl"))
+
+
+def test_removing_nothing_records_nothing(estate, tmp_path, monkeypatch):
+    monkeypatch.setattr("munim.runlog.RUNS_DIR", tmp_path / "runs")
+
+    cli.disconnect("Acme", "cloudflare", False, assume_yes=True)
+
+    assert not list((tmp_path / "runs").glob("*.jsonl"))
+
+
+def test_an_unwritable_log_does_not_block_the_removal(estate, monkeypatch):
+    """The operator asked for the removal; the audit trail is the lesser
+    promise, and a log that cannot be written must not veto it."""
+    reg, ring = estate
+    ring.set_password("munim-mcp:cloudflare:tokens",
+                      reg.clients()[0].id, '{"access_token": "x"}')
+
+    def explode(*a, **k):
+        raise OSError("read-only filesystem")
+
+    monkeypatch.setattr("munim.runlog.RunLog", explode)
+
+    assert cli.disconnect("Acme", "cloudflare", False, assume_yes=True) == 0
+    assert ring.get_password("munim-mcp:cloudflare:tokens",
+                             reg.clients()[0].id) is None

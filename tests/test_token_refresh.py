@@ -109,7 +109,7 @@ async def test_loading_tokens_restores_the_expiry_the_sdk_forgets():
     store = KeychainTokenStorage("c_1", "cloudflare", ring)
     await store.set_tokens(token(expires_in=3600))
 
-    auth = auth_for("c_1", "cloudflare", backend=ring, allow_login=False)
+    auth = auth_for("c_1", "cloudflare", keyring=ring, allow_login=False)
     await auth._initialize()
 
     assert auth.context.token_expiry_time is not None, \
@@ -139,7 +139,7 @@ async def test_an_expired_token_is_reported_invalid_so_the_refresh_can_fire():
     # requires it alongside the refresh token itself.
     store.seed_client_info("id", "secret", "http://127.0.0.1:8976/callback")
 
-    auth = auth_for("c_1", "cloudflare", backend=ring, allow_login=False)
+    auth = auth_for("c_1", "cloudflare", keyring=ring, allow_login=False)
     await auth._initialize()
 
     assert auth.context.is_token_valid() is False
@@ -154,7 +154,7 @@ async def test_a_fresh_token_is_still_valid_and_is_not_refreshed_needlessly():
     store = KeychainTokenStorage("c_1", "cloudflare", ring)
     await store.set_tokens(token(expires_in=3600))
 
-    auth = auth_for("c_1", "cloudflare", backend=ring, allow_login=False)
+    auth = auth_for("c_1", "cloudflare", keyring=ring, allow_login=False)
     await auth._initialize()
 
     assert auth.context.is_token_valid() is True
@@ -171,7 +171,7 @@ async def test_an_unknown_age_keeps_the_old_optimistic_behaviour():
     raw.pop(ISSUED_AT)
     ring.set_password("munim-mcp:cloudflare:tokens", "c_1", __import__("json").dumps(raw))
 
-    auth = auth_for("c_1", "cloudflare", backend=ring, allow_login=False)
+    auth = auth_for("c_1", "cloudflare", keyring=ring, allow_login=False)
     await auth._initialize()
 
     assert auth.context.token_expiry_time is None
@@ -197,7 +197,7 @@ async def test_a_request_re_reads_tokens_another_process_may_have_rotated():
     await store.set_tokens(token(access_token="first", refresh_token="r1"))
     store.seed_client_info("id", "secret", "http://127.0.0.1:8976/callback")
 
-    auth = auth_for("c_1", "cloudflare", backend=ring, allow_login=False)
+    auth = auth_for("c_1", "cloudflare", keyring=ring, allow_login=False)
     await auth._initialize()
     assert auth.context.current_tokens.access_token == "first"
 
@@ -224,7 +224,7 @@ async def test_the_expiry_is_re_read_along_with_the_tokens():
     await store.set_tokens(token())
     store.seed_client_info("id", "secret", "http://127.0.0.1:8976/callback")
 
-    auth = auth_for("c_1", "cloudflare", backend=ring, allow_login=False)
+    auth = auth_for("c_1", "cloudflare", keyring=ring, allow_login=False)
     await auth._initialize()
     aged = time.time() - 86400
     raw = store._read("tokens")
@@ -246,6 +246,6 @@ async def test_nothing_is_re_read_before_the_first_initialize():
     from munim.remote.session import auth_for
 
     ring = Ring()
-    auth = auth_for("c_1", "cloudflare", backend=ring, allow_login=False)
+    auth = auth_for("c_1", "cloudflare", keyring=ring, allow_login=False)
     assert auth._initialized is False
     assert auth.context.current_tokens is None

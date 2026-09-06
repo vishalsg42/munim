@@ -128,7 +128,7 @@ async def test_the_consent_screen_shows_the_label_not_the_id():
     from munim.remote.session import auth_for
 
     auth = auth_for("c_6d7900c3e0e99c16", "cloudflare",
-                    label="Balaji Roofings", backend=Ring())
+                    label="Balaji Roofings", keyring=Ring())
 
     assert auth.context.client_metadata.client_name == "Munim (Balaji Roofings)"
 
@@ -137,6 +137,6 @@ async def test_without_a_label_the_key_is_used():
     """Callers that never had a separate label keep working."""
     from munim.remote.session import auth_for
 
-    auth = auth_for("Acme", "cloudflare", backend=Ring())
+    auth = auth_for("Acme", "cloudflare", keyring=Ring())
 
     assert auth.context.client_metadata.client_name == "Munim (Acme)"
