@@ -500,3 +500,123 @@ async def test_a_first_connection_looks_nothing_up(monkeypatch):
 
     assert auth.context.can_refresh_token() is False
     assert asked.asked == []
+
+
+# ---- one refresher at a time, across processes ---------------------------
+#
+# These providers rotate: spending a refresh token invalidates it. Munim runs as
+# a long-lived MCP server and as a CLI over one store, so two of them reading
+# the same token and both posting it means one is accepted and one is rejected,
+# and a rejected refresh is answered with a browser login.
+#
+# Theoretical until the endpoint fix above, because no refresh ever succeeded,
+# so nothing ever rotated. Making them work is what makes them collide.
+
+import asyncio as _asyncio
+
+
+async def test_a_second_process_waits_rather_than_spending_the_same_token(
+        monkeypatch, tmp_path):
+    """The lock is a file, so this holds it the way another process would:
+    from a separate open file description that knows nothing about ours."""
+    from munim import vault
+
+    monkeypatch.setenv("MUNIM_CREDENTIALS", str(tmp_path / "credentials.json"))
+    theirs, ours = vault.Single("refresh-resend-c_1"), vault.Single("refresh-resend-c_1")
+
+    assert await theirs.hold(0.2) is True
+    assert await ours.hold(0.2) is False, \
+        "two refreshers held the same session at once"
+
+    theirs.release()
+    assert await ours.hold(0.5) is True, "the lock was never handed back"
+    ours.release()
+
+
+async def test_waiting_does_not_block_the_probes_running_beside_it(
+        monkeypatch, tmp_path):
+    """`check_all` gathers every provider on one loop. A synchronous flock
+    would stall all of them into their own timeouts while one waited."""
+    from munim import vault
+
+    monkeypatch.setenv("MUNIM_CREDENTIALS", str(tmp_path / "credentials.json"))
+    theirs = vault.Single("refresh-resend-c_1")
+    await theirs.hold(0.2)
+
+    ticks = 0
+
+    async def beside():
+        nonlocal ticks
+        while True:
+            await _asyncio.sleep(0.01)
+            ticks += 1
+
+    other = _asyncio.ensure_future(beside())
+    await vault.Single("refresh-resend-c_1").hold(0.3)
+    other.cancel()
+    theirs.release()
+
+    assert ticks > 5, f"the loop was blocked while waiting: {ticks} ticks"
+
+
+async def test_the_refresh_takes_the_lock_and_gives_it_back(monkeypatch):
+    """Held across the POST and the write that follows it, and no longer."""
+    from munim.remote.session import auth_for
+
+    ring = Ring()
+    expired(ring)
+    answering(monkeypatch, FOUND)
+    auth = auth_for("c_1", "resend", keyring=ring, allow_login=False)
+    await auth._initialize()
+
+    await auth._refresh_token()
+    assert auth._holding is not None, "the refresh went out unserialised"
+
+    await auth._handle_refresh_response(
+        httpx.Response(200, json={"access_token": "b", "token_type": "Bearer",
+                                  "expires_in": 900, "refresh_token": "r2"},
+                       request=httpx.Request("POST", "https://api.resend.com/oauth/token")))
+    assert auth._holding is None, "the next process would wait forever"
+
+
+async def test_a_rejected_refresh_still_gives_the_lock_back(monkeypatch):
+    """The failure path is the one that matters: a refresh that fails is
+    followed by a browser login, and holding the lock through that would stop
+    every other process renewing until this one finished signing in."""
+    from munim.remote.session import auth_for
+
+    ring = Ring()
+    expired(ring)
+    answering(monkeypatch, FOUND)
+    auth = auth_for("c_1", "resend", keyring=ring, allow_login=False)
+    await auth._initialize()
+
+    await auth._refresh_token()
+    await auth._handle_refresh_response(
+        httpx.Response(400, json={"error": "invalid_grant"},
+                       request=httpx.Request("POST", "https://api.resend.com/oauth/token")))
+
+    assert auth._holding is None
+
+
+async def test_the_refresh_uses_the_token_the_other_process_left_behind(
+        monkeypatch):
+    """The whole point. Waiting and then spending the token we read before the
+    wait would rotate one the provider has already invalidated."""
+    from munim.remote.session import auth_for
+
+    ring = Ring()
+    expired(ring, refresh_token="spent")
+    answering(monkeypatch, FOUND)
+    auth = auth_for("c_1", "resend", keyring=ring, allow_login=False)
+    await auth._initialize()
+    assert auth.context.current_tokens.refresh_token == "spent"
+
+    # What the process we are waiting behind writes before it lets go.
+    store = KeychainTokenStorage("c_1", "resend", ring)
+    await store.set_tokens(token(access_token="theirs", refresh_token="fresh"))
+
+    request = await auth._refresh_token()
+
+    assert b"refresh_token=fresh" in request.content, \
+        "the refresh spent a token another process had already invalidated"

@@ -42,6 +42,13 @@ LOGIN_TIMEOUT = 300.0
 # own fix, into "could not be reached", which does not.
 DISCOVERY_TIMEOUT = 5.0
 
+# How long to wait for another process that is already refreshing this same
+# session. Short on purpose: `doctor` and `clients` probe every provider inside
+# eight seconds, and a refresh POST is well under a second, so anything past
+# this is a process that is stuck rather than busy. Giving up means carrying on
+# unlocked, which is what happened before the lock existed.
+REFRESH_WAIT = 5.0
+
 
 class NeedsLogin(Exception):
     """Opening this session would mean authorising, and the caller said no.
@@ -219,7 +226,32 @@ class _RemembersExpiry(OAuthClientProvider):
         except StopAsyncIteration:
             return
         finally:
+            # A flow abandoned between building the refresh and handling its
+            # response would otherwise hold this until the process exits.
+            self._let_go()
             await inner.aclose()
+
+    def _single(self):
+        """The cross-process lock for this one session's refresh, or None.
+
+        Named per (client, provider): one client's Cloudflare refresh has no
+        reason to wait behind another client's, and a provider that hangs must
+        not stop every other provider renewing.
+        """
+        from munim import vault
+
+        store = self.context.storage
+        client = getattr(store, "client", None)
+        provider = getattr(store, "provider", None)
+        if client is None or provider is None:
+            return None
+        return vault.Single(f"refresh-{provider}-{client}")
+
+    def _let_go(self) -> None:
+        holder = getattr(self, "_holding", None)
+        if holder is not None:
+            holder.release()
+            self._holding = None
 
     async def _refresh_token(self):
         """Look up where the refresh goes, then let the SDK build it.
@@ -243,9 +275,49 @@ class _RemembersExpiry(OAuthClientProvider):
         unset and `super()` builds exactly the request it builds today, so a
         provider that publishes no metadata is no worse off than it is now.
         """
-        if self.context.oauth_metadata is None:
-            await self._find_token_endpoint()
-        return await super()._refresh_token()
+        # One refresher at a time for this session, across processes. These
+        # providers rotate: spending a refresh token invalidates it, and munim
+        # runs as a long-lived MCP server *and* as a CLI over one store. Two of
+        # them reading the same token and both posting it means the provider
+        # accepts one and rejects the other, and a rejected refresh is answered
+        # with a browser login. That is the "authorise again, and again" the
+        # operator sees.
+        #
+        # Held from here until the response has been handled, so it spans the
+        # POST and the write that follows it, and nothing longer: the real
+        # request underneath is not serialised behind other processes.
+        #
+        # Until this commit the collision was theoretical, because no refresh
+        # ever succeeded, so nothing ever rotated. Making them work is what
+        # makes them collide.
+        self._holding = None
+        holder = self._single()
+        if holder is not None and await holder.hold(REFRESH_WAIT):
+            self._holding = holder
+            # Whoever we waited for has written newer tokens by now. Refresh
+            # with those rather than with the one they have already spent.
+            # Cheaper than deciding whether to skip the refresh: the SDK has
+            # already committed to one by calling this, and a needless rotation
+            # costs a round trip where a spent token costs a login.
+            held = await self.context.storage.get_tokens()
+            if held is not None and held.access_token:
+                self.context.current_tokens = held
+                self._adopt_expiry()
+        try:
+            if self.context.oauth_metadata is None:
+                await self._find_token_endpoint()
+            return await super()._refresh_token()
+        except BaseException:
+            # Nothing will be sent, so nothing will hand the lock back.
+            self._let_go()
+            raise
+
+    async def _handle_refresh_response(self, response):
+        """Release once the outcome is written, whatever the outcome was."""
+        try:
+            return await super()._handle_refresh_response(response)
+        finally:
+            self._let_go()
 
     async def _find_token_endpoint(self) -> None:
         """The discovery chain, out of band, for the sake of the refresh.
