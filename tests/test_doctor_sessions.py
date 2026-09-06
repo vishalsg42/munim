@@ -165,7 +165,7 @@ def test_the_probes_run_together_rather_than_one_after_another(
 
         class Session:
             async def list_tools(self):
-                return []
+                return SimpleNamespace(tools=[])
         yield Session()
 
     monkeypatch.setattr("munim.remote.session.session_for", slow)

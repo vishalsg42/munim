@@ -192,10 +192,16 @@ def _walk(registry, records, stream, keys) -> int:
         header = ["", f"  {pending_note}"] if pending_note else []
         pending_note = ""
         def moved():
-            """One slice of probing, and the rows it changed."""
-            if not stream.pump(0.05):
-                return None if stream.settled else (rows, subtitle())
-            return _clients_screen(registry, stream.statuses), subtitle()
+            """One slice of probing, and the rows it changed.
+
+            Three answers, not two. Returning the enclosing `rows` for "nothing
+            changed" handed back a frame built before the last update, so the
+            screen flickered back to all-connecting between results.
+            """
+            changed = stream.pump(0.05)
+            if changed:
+                return _clients_screen(registry, stream.statuses), subtitle()
+            return None if stream.settled else False
 
         def subtitle():
             waiting = sum(1 for s in stream.statuses if not s.settled)

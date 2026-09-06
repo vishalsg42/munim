@@ -423,10 +423,16 @@ def menu(title: str, rows: list, *, subtitle: str = "", header=(),
     is what lets position carry across screens.
 
     `refresh` makes the menu able to change without a keypress. It is called
-    from the idle path every `tick` seconds and returns `(rows, subtitle)` when
-    something moved, or None when nothing did. Returning None costs one
-    redraw's worth of nothing. Once it stops being called the menu blocks
-    again, so an idle screen is free.
+    from the idle path every `tick` seconds and answers one of three things:
+
+        (rows, subtitle)  something moved, redraw
+        False             nothing moved, keep waiting, do not redraw
+        None              nothing left to wait for, stop asking
+
+    Three and not two, because "nothing moved" and "nothing left" are
+    different, and a two-valued version made the caller hand back whatever rows
+    it had captured in its closure, which reverted the screen to a frame from
+    before the last update.
     """
     order = _selectable(rows)
     if not order:
@@ -450,20 +456,27 @@ def menu(title: str, rows: list, *, subtitle: str = "", header=(),
         return order, numbered, footer, height
 
     order, numbered, footer, height = shape()
+    # Only paint when something actually changed. A refresh tick that redrew
+    # regardless repainted the whole frame several times a second for the
+    # entire time the probes ran, which is flicker over anything but a local
+    # terminal.
+    dirty = True
 
     saved = termios.tcgetattr(sys.stdin) if scripted is None else None
     try:
         if scripted is None:
             tty.setraw(sys.stdin.fileno(), termios.TCSANOW)
         while True:
-            if scripted is None:
-                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, saved)
-            # Clamped rather than trusted. The row set is meant to be stable
-            # while streaming, and a cursor that outruns it would raise under
-            # the operator's hands rather than merely look wrong.
-            at = min(at, len(order) - 1)
-            drawn = _draw(title, subtitle, rows, order[at], footer,
-                          numbered, drawn, height, header)
+            if dirty:
+                if scripted is None:
+                    termios.tcsetattr(sys.stdin, termios.TCSADRAIN, saved)
+                # Clamped rather than trusted. The row set is meant to be
+                # stable while streaming, and a cursor that outruns it would
+                # raise under the operator's hands rather than look wrong.
+                at = min(at, len(order) - 1)
+                drawn = _draw(title, subtitle, rows, order[at], footer,
+                              numbered, drawn, height, header)
+                dirty = False
             if scripted is None:
                 # TCSANOW, not the TCSAFLUSH tty.setraw defaults to. FLUSH
                 # discards input received but not yet read, and this runs once
@@ -480,8 +493,11 @@ def menu(title: str, rows: list, *, subtitle: str = "", header=(),
                     if moved is None:
                         streaming = False       # settled: block from here on
                         continue
+                    if moved is False:
+                        continue                # nothing new, nothing to draw
                     rows, subtitle = moved
                     order, numbered, footer, height = shape()
+                    dirty = True
                     continue
                 key = _read_key()
             else:
@@ -496,8 +512,10 @@ def menu(title: str, rows: list, *, subtitle: str = "", header=(),
                 return rows[order[at]].value
             if key == UP:
                 at = (at - 1) % len(order)
+                dirty = True
             elif key == DOWN:
                 at = (at + 1) % len(order)
+                dirty = True
             elif numbered and key.isdigit() and key != "0":
                 wanted = int(key) - 1
                 if wanted < len(order):

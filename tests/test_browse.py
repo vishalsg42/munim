@@ -290,7 +290,7 @@ def test_reconnect_runs_the_login_and_re_probes(estate, monkeypatch, capsys):
     monkeypatch.setattr("munim.cli.connect",
                         lambda client, provider: ran.append((client, provider)) or 0)
     monkeypatch.setattr(health, "check_all_for",
-                        lambda record, provider, backend=None:
+                        lambda record, provider, backend=None, keyring=None:
                         status("Balaji Roofings", provider, health.LIVE))
 
     browse._provider_walk(ClientRecord(name="Balaji Roofings"),
@@ -486,7 +486,7 @@ def test_disconnecting_removes_the_row_behind_it(estate, monkeypatch, capsys):
 def test_reconnecting_updates_the_mark_behind_it(estate, monkeypatch, capsys):
     monkeypatch.setattr("munim.cli.connect", lambda client, provider: 0)
     monkeypatch.setattr(health, "check_all_for",
-                        lambda record, provider, backend=None:
+                        lambda record, provider, backend=None, keyring=None:
                         status("Balaji Roofings", provider, health.LIVE))
     probed(monkeypatch, status("Balaji Roofings", "cloudflare", health.EXPIRED,
                                detail="the session expired"))

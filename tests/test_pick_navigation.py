@@ -335,3 +335,39 @@ def test_suspending_gives_the_cursor_back(monkeypatch, capsys):
         with pick.suspended():
             mid = "".join(captured)
     assert pick.CURSOR_ON in mid and pick.ALT_OFF in mid
+
+
+# ---- the refresh path, which streams without a keypress ---------------
+
+
+def test_refresh_answers_three_things_not_two(capsys):
+    """(rows, subtitle) redraws, False waits, None stops.
+
+    Two values forced the caller to hand back whatever rows its closure had
+    captured for "nothing changed", which reverted the screen to a frame from
+    before the last update.
+    """
+    answers = [False, ([Item("b", value=2)], "moved"), None]
+
+    def refresh():
+        return answers.pop(0)
+
+    got = pick.menu("T", [Item("a", value=1)], refresh=refresh,
+                    keys=[pick.ENTER])
+    assert got == 1, "the scripted key path must ignore refresh entirely"
+
+
+def test_a_frame_is_painted_only_when_something_changed(monkeypatch, capsys):
+    """A tick that repainted regardless flickered for the whole probe."""
+    painted = []
+    real = pick._draw
+
+    def count(*a, **k):
+        painted.append(1)
+        return real(*a, **k)
+
+    monkeypatch.setattr(pick, "_draw", count)
+    pick.menu("T", [Item("a", value=1)], keys=[pick.DOWN, pick.ENTER])
+
+    assert len(painted) == 2, \
+        f"expected one paint per change, got {len(painted)}"

@@ -64,13 +64,16 @@ class Status:
 
 
 async def check(client_id: str, name: str, provider: str,
-                backend=None) -> Status:
+                keyring=None) -> Status:
     """Open one session and close it, reporting what happened.
 
-    `backend` is threaded through rather than defaulted here. Without it
-    `session_for` builds its own store against the real credentials, so a
-    caller that injected one enumerated from theirs and probed the operator's,
-    which makes the injection seam a lie.
+    `keyring` is the session store, and it is deliberately not the same thing
+    as the `backend` the enumeration takes. `connections()` wants a
+    CredentialBackend, with get/set/forget; `session_for` wants a vault-like
+    object, with get_password/set_password. Passing the first where the second
+    belongs raised AttributeError on every probe, and the broad except below
+    relabelled it "could not be reached", so `doctor` reported the network as
+    down when nothing had been tried. Two seams, two names.
     """
     from munim.remote.servers import server_for
     from munim.remote.session import NeedsLogin, NoRemoteServer, session_for
@@ -80,7 +83,7 @@ async def check(client_id: str, name: str, provider: str,
             # verify=False because this asks whether the session opens, not
             # whether it is bound to the account it was bound to before. The
             # drift check belongs to real work, not to a health report.
-            async with session_for(client_id, provider, backend=backend,
+            async with session_for(client_id, provider, backend=keyring,
                                    allow_login=False, verify=False) as session:
                 listing = await session.list_tools()
         return Status(name, provider, LIVE, tools=len(listing.tools))
@@ -98,7 +101,11 @@ async def check(client_id: str, name: str, provider: str,
         return Status(name, provider, EXPIRED, str(absent))
     except (TimeoutError, asyncio.TimeoutError):
         return Status(name, provider, UNREACHABLE, f"no answer in {TIMEOUT:.0f}s")
-    except Exception as other:
+    except (OSError, BaseExceptionGroup) as other:
+        # Only transport failures. A TypeError or AttributeError under here is
+        # a bug in Munim, and reporting it as an unreachable provider is how
+        # one hid for a whole afternoon: every session read "could not be
+        # reached" while the real fault was an argument of the wrong type.
         return Status(name, provider, UNREACHABLE,
                       f"could not be reached ({type(other).__name__})")
 
@@ -120,17 +127,16 @@ def _stored(registry, backend) -> list[tuple[str, str, str]]:
     return work
 
 
-async def check_all_async(registry, backend=None) -> list[Status]:
+async def check_all_async(registry, backend=None, keyring=None) -> list[Status]:
     """Every stored session for every client, probed together.
 
     The async entry point, for the MCP server, which is already inside a loop.
     """
-    backend = backend or KeychainBackend()
-    work = _stored(registry, backend)
+    work = _stored(registry, backend or KeychainBackend())
     if not work:
         return []
     return list(await asyncio.gather(
-        *(check(*item, backend=backend) for item in work)))
+        *(check(*item, keyring=keyring) for item in work)))
 
 
 class Stream:
@@ -152,9 +158,9 @@ class Stream:
     shrinks under a moving cursor is how a menu acts on the wrong thing.
     """
 
-    def __init__(self, registry, backend=None):
-        self._backend = backend or KeychainBackend()
-        self._work = _stored(registry, self._backend)
+    def __init__(self, registry, backend=None, keyring=None):
+        self._keyring = keyring
+        self._work = _stored(registry, backend or KeychainBackend())
         self.statuses = [Status(name, provider, PENDING)
                          for _, name, provider in self._work]
         self._loop = None
@@ -169,7 +175,7 @@ class Stream:
         self._loop = asyncio.new_event_loop()
         self._tasks = {
             self._loop.create_task(check(cid, name, provider,
-                                         backend=self._backend)): index
+                                         keyring=self._keyring)): index
             for index, (cid, name, provider) in enumerate(self._work)}
         # A hard stop, because "keep ticking until everything settles" with no
         # ceiling is a menu that polls forever if one probe never reports.
@@ -217,7 +223,7 @@ class Stream:
             self._loop = None
 
 
-def check_all_for(record, provider: str, backend=None) -> Status:
+def check_all_for(record, provider: str, backend=None, keyring=None) -> Status:
     """One client's one provider, probed now.
 
     After a reconnect the cached status is stale by definition, and re-probing
@@ -226,7 +232,7 @@ def check_all_for(record, provider: str, backend=None) -> Status:
     """
     try:
         return asyncio.run(check(record.id, record.name, provider,
-                                 backend=backend))
+                                 keyring=keyring))
     except RuntimeError:
         return Status(record.name, provider, UNREACHABLE, "could not be checked")
 

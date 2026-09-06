@@ -26,7 +26,7 @@ def two(tmp_path, monkeypatch):
 
 def answers(monkeypatch, **timing):
     """Each provider answers after its own delay, so they land separately."""
-    async def fake(client_id, name, provider, backend=None):
+    async def fake(client_id, name, provider, keyring=None):
         await asyncio.sleep(timing.get(provider, 0))
         return health.Status(name, provider, health.LIVE)
     monkeypatch.setattr(health, "check", fake)
@@ -126,3 +126,69 @@ def test_the_settled_helpers_are_unchanged(two, monkeypatch):
     found = health.check_all(two)
     assert [s.state for s in found] == [health.LIVE] * 2
     assert all(s.settled for s in found)
+
+
+# ---- the two seams called "backend" are not the same thing -------------
+
+
+async def test_a_programming_error_is_not_reported_as_an_unreachable_provider(
+        two, monkeypatch):
+    """The bug this narrowing exists for.
+
+    `connections()` takes a CredentialBackend, with get/set/forget.
+    `session_for` takes a vault-like store, with get_password/set_password.
+    Threading the first into the second raised AttributeError on every probe,
+    and a broad `except Exception` relabelled it "could not be reached", so
+    doctor reported the network as down when nothing had been tried.
+    """
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def broken(*a, **k):
+        raise AttributeError("'KeychainBackend' object has no attribute "
+                             "'get_password'")
+        yield
+
+    monkeypatch.setattr("munim.remote.session.session_for", broken)
+
+    with pytest.raises(AttributeError):
+        await health.check("c_1", "Acme", "cloudflare")
+
+
+async def test_a_transport_failure_is_still_reported_rather_than_raised(
+        two, monkeypatch):
+    """Narrowing must not turn a provider being down into a crash."""
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def offline(*a, **k):
+        raise OSError("Name or service not known")
+        yield
+
+    monkeypatch.setattr("munim.remote.session.session_for", offline)
+
+    got = await health.check("c_1", "Acme", "cloudflare")
+    assert got.state == health.UNREACHABLE
+
+
+async def test_the_session_store_is_the_one_that_reaches_session_for(
+        two, monkeypatch):
+    """`keyring` goes to the session; `backend` only ever enumerates."""
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+
+    seen = {}
+
+    @asynccontextmanager
+    async def spy(client, provider, **kwargs):
+        seen.update(kwargs)
+        yield SimpleNamespace(list_tools=_empty)
+
+    async def _empty():
+        return SimpleNamespace(tools=[])
+
+    monkeypatch.setattr("munim.remote.session.session_for", spy)
+    sentinel = object()
+    await health.check("c_1", "Acme", "cloudflare", keyring=sentinel)
+
+    assert seen["backend"] is sentinel

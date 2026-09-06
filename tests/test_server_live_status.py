@@ -64,7 +64,7 @@ def stored(monkeypatch, providers, keys=()):
 
 
 def probed(monkeypatch, **states):
-    async def fake(client_id, name, provider, backend=None):
+    async def fake(client_id, name, provider, keyring=None):
         return health.Status(name, provider, states[provider],
                              "the session expired"
                              if states[provider] == health.EXPIRED else "")
