@@ -54,7 +54,8 @@ either arrives or does not.*
 English, not a command:
 
 ```
-which of my clients has a domain expiring this quarter?
+munim config ai on
+which of my clients has an unverified sending domain?
 ```
 
 Answers span containers.
@@ -62,6 +63,20 @@ Answers span containers.
 > "It is one MCP server, added once to whatever coding agent you already use.
 > Each client is a container. You can read across all of them at once,
 > which is a question she has never been able to ask before."
+
+*The question changed, and the reason is worth knowing before re-scripting it.
+It used to be "which of my clients has a domain expiring this quarter?", which
+reads better and cannot be answered: registration expiry is not published by any
+provider's MCP server, and a cross-client toolset only holds tools the provider
+marks read-only. Resend's `list-domains` and `get-domain` are annotated and do
+answer this one. It is also the better story, because an unverified sending
+domain is the silent invoice failure the rest of the video is about, so the
+opening question and the closing repair become one thread.*
+
+*`munim config ai on` is the first line on purpose. Agents are off in a fresh
+install, because Munim is local by default and the privacy page says so, and a
+tool that needs a model says so and names that command rather than pretending.
+Show it being turned on; do not edit around it.*
 
 *Type a sentence, never a magic word: a command reads as a script and undercuts the MCP claim.*
 

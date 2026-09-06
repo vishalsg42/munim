@@ -19,13 +19,10 @@ from dataclasses import asdict
 
 from strands import Agent, tool
 
-from munim.adapters.cloudflare import Cloudflare
 from munim import settings
 from munim.agent.model import AgentsDisabled, build_model
-from munim.agent.spf import merge_spf, within_lookup_limit
 from munim.checks.dns import (CheckResult, query, run_all_async,
                              run_reachability_async, spf_single)
-from munim.container import Container
 from munim.runlog import RunLog, new_run_id
 
 SYSTEM = """You are Munim, an agent that looks after small businesses' web and email setup.
@@ -243,70 +240,3 @@ async def launch(domain: str, client: str, *, client_id: str | None = None,
     return log, results
 
 
-class NeedsAPerson(Exception):
-    """The agent stopped because a person has to decide."""
-
-
-async def fix_spf(container: Container, domain: str, log: RunLog, *,
-                  approve=None) -> str:
-    """Repair a domain carrying more than one sender policy.
-
-    The shape of this function is the argument for the whole project. A script
-    would add the record it was told to add and leave the domain with three
-    policies instead of two. This reads what is already there, combines it,
-    checks the result is still legal, and stops for a person before touching
-    someone else's live DNS.
-    """
-    client = container.client
-    finding = await asyncio.to_thread(spf_single, domain)
-    if finding.status == "pass":
-        log.append(client=client, stage="mail", kind="observation",
-                   human_text="One sender policy, nothing to combine",
-                   detail={"check": "spf_single"})
-        return "already-correct"
-
-    records = finding.detail.get("records") or []
-    if len(records) < 2:
-        # No SPF at all is a different problem, and adding one is a decision
-        # about which provider sends their mail. Not ours to make.
-        raise NeedsAPerson(
-            f"{domain} has no sender policy. Which provider sends their mail "
-            "is a decision for the business, not for this agent."
-        )
-
-    log.append(client=client, stage="mail", kind="finding",
-               human_text=finding.human_text,
-               detail={"check": "spf_single", "operator_text": finding.operator_text,
-                       "evidence": finding.evidence, "resolver": finding.resolver})
-
-    merge = merge_spf(records)
-    if not within_lookup_limit(merge.merged):
-        raise NeedsAPerson(
-            f"Combining these would need {merge.lookups} DNS lookups and the "
-            "limit is 10, so the merged policy would fail too. Someone has to "
-            "decide which senders to drop."
-        )
-
-    log.append(client=client, stage="mail", kind="awaiting_confirm",
-               human_text=(f"Combine {len(records)} sender policies into one, "
-                           f"keeping all {len(merge.senders)} senders?"),
-               detail={"check": "spf_single", "merged": merge.merged,
-                       "senders": merge.senders, "replacing": records})
-
-    if approve is None or not approve(merge.merged):
-        raise NeedsAPerson("Waiting for approval before changing live DNS.")
-
-    cloudflare = Cloudflare(container, log)
-    zone = await cloudflare.zone_id(domain)
-    await cloudflare.merge_spf(zone, domain, merge.merged)
-
-    after = await asyncio.to_thread(spf_single, domain)
-    log.append(client=client, stage="mail",
-               kind="resolved" if after.status == "pass" else "finding",
-               human_text=("One sender policy now, covering every sender."
-                           if after.status == "pass"
-                           else "The change was written but the domain still "
-                                "reports more than one policy; DNS may not have "
-                                "caught up yet."),
-               detail={"check": "spf_single", "evidence": after.evidence})
-    return "merged"
