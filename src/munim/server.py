@@ -23,7 +23,7 @@ from mcp.server.fastmcp import FastMCP
 from munim.agent.launch import launch
 from munim.checks.dns import run_all_async, run_reachability_async
 from munim.connect.oauth import PROVIDERS as OAUTH_PROVIDERS
-from munim.connected import reachable
+from munim.connected import connections, reachable
 from munim.connect.token import TokenConnector
 from munim.container import Container, KeychainBackend, UnknownClient
 from munim.env import load as load_env
@@ -51,7 +51,7 @@ CROSS_CLIENT = {"find_across_clients", "ask_across_clients",
 PROVIDERS = ("cloudflare", "vercel", "resend")
 
 
-def _shaped(record, stored: list[str], found) -> dict:
+def _shaped(record, stored: list[str], found, kinds=None) -> dict:
     """One client's row: what is stored, and what actually opens.
 
     Both are reported. `connected` answers "can I use this right now", which is
@@ -85,7 +85,7 @@ def _shaped(record, stored: list[str], found) -> dict:
 
 
 def build_server(backend=None, registry=None, runs_dir=None,
-                 reports_dir=None) -> FastMCP:
+                 reports_dir=None, keyring=None) -> FastMCP:
     server = FastMCP("munim")
     backend = backend or KeychainBackend()
     registry = registry or Registry(Path.home() / ".munim" / "registry.json")
@@ -96,7 +96,11 @@ def build_server(backend=None, registry=None, runs_dir=None,
     reports = Path(reports_dir) if reports_dir else None
 
     def container_for(client: str) -> Container:
-        return Container.for_client(registry, client, backend)
+        # Both stores. `backend` holds pasted API keys and `keyring` holds MCP
+        # sessions, and a container needs to know about the second only to
+        # explain a refusal about the first. Threaded rather than defaulted so
+        # a test watches the same store the server does.
+        return Container.for_client(registry, client, backend, keyring=keyring)
 
     def resolve(target: str) -> ClientRecord:
         """Turn whatever the operator said into a client.
@@ -141,18 +145,31 @@ def build_server(backend=None, registry=None, runs_dir=None,
         So this asks each provider, concurrently. Pass `check=false` to skip
         that and report only what is stored, which is instant and was the old
         behaviour.
+
+        `stored` is the union of two different things and says which is which.
+        `api_key` is a pasted key, used by the REST adapters; `mcp_session` is
+        an OAuth session, used by the provider's own tools. A provider can have
+        one and not the other, which is how `plan_mail_setup` refused a client
+        that `client_status` had just called connected. Neither list is a claim
+        that the credential works: it is a claim that one is filed.
         """
         from munim import health
 
         records = registry.clients()
-        stored = {r.name: reachable(r.id, backend) for r in records}
+        stored = {r.name: reachable(r.id, backend, keyring) for r in records}
+        by_kind = {}
+        for r in records:
+            keys, sessions = connections(r.id, backend, keyring)
+            by_kind[r.name] = {"api_key": keys, "mcp_session": sessions}
         if not check:
             return [{"client": r.name, "domain": r.domain,
-                     "stored": stored[r.name], "checked": False}
+                     "stored": stored[r.name], **by_kind[r.name],
+                     "checked": False}
                     for r in records]
 
         found = await health.check_all_async(registry, backend)
-        return [_shaped(r, stored[r.name], found) for r in records]
+        return [_shaped(r, stored[r.name], found, by_kind[r.name])
+                for r in records]
 
     @server.tool()
     async def find_across_clients(need: str) -> list[dict]:
@@ -492,20 +509,25 @@ def build_server(backend=None, registry=None, runs_dir=None,
         """What is known about one client. Never returns a credential.
 
         `connected` is the live answer, for the same reason as `list_clients`.
+        `api_key` and `mcp_session` say which store each entry in `stored` came
+        from, because a client can have one and not the other and the two are
+        not interchangeable.
         """
         from munim import health
 
         record = registry.get(client)
-        stored = reachable(record.id, backend)
+        stored = reachable(record.id, backend, keyring)
+        keys, sessions = connections(record.id, backend, keyring)
+        kinds = {"api_key": keys, "mcp_session": sessions}
         available = [p for p in PROVIDERS if p in OAUTH_PROVIDERS]
         if not check:
             return {"client": record.name, "domain": record.domain,
-                    "stored": stored, "checked": False,
+                    "stored": stored, **kinds, "checked": False,
                     "oauth_available": available}
 
         found = await asyncio.gather(
             *(health.check(record.id, record.name, p) for p in stored))
-        return {**_shaped(record, stored, found),
+        return {**_shaped(record, stored, found, kinds),
                 "oauth_available": available}
 
     # ---- write within ----------------------------------------------------

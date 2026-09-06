@@ -20,6 +20,15 @@ from munim.connected import connections, describe
 from munim.remote.storage import KeychainTokenStorage
 
 
+def _payload(result):
+    """A FastMCP tool result, as the dict the tool returned."""
+    import json
+    content = result.content if hasattr(result, "content") else result[0]
+    if isinstance(content, list):
+        content = content[0]
+    return json.loads(content.text)
+
+
 class FakeKeyring:
     """Stands in for the OS keychain, for both kinds of entry."""
 
@@ -107,3 +116,65 @@ async def test_one_clients_session_is_not_another_clients():
     await _log_in(ring, "c_one", "cloudflare")
 
     assert connections("c_two", FakeBackend(ring), ring) == ([], [])
+
+
+# ---- which store a credential came from, reported rather than unioned ----
+
+
+async def test_a_status_says_which_store_each_provider_came_from(tmp_path):
+    """`stored` unions API keys and MCP sessions, and a caller cannot act on
+    the union: the REST adapters need the first and the provider's own tools
+    need the second. An operator was told resend was connected by
+    `client_status` and had no resend credential by `plan_mail_setup`, in the
+    same minute, and both were reading a different half of this."""
+    from munim.registry import ClientRecord, Registry
+    from munim.server import build_server
+
+    reg = Registry(tmp_path / "r.json")
+    reg.add(ClientRecord(name="Acme Ltd"))
+    record = reg.clients()[0]
+
+    ring = FakeKeyring()
+    ring.set_password("munim:cloudflare", record.id, "cf-key")
+    ring.set_password("munim-mcp:resend:tokens", record.id, '{"a": 1}')
+    keys = FakeBackend(ring)
+
+    server = build_server(backend=keys, registry=reg,
+                          runs_dir=tmp_path / "runs",
+                          reports_dir=tmp_path / "reports", keyring=ring)
+    result = await server.call_tool("client_status",
+                                    {"client": "Acme Ltd", "check": False})
+    shaped = _payload(result)
+
+    assert shaped["api_key"] == ["cloudflare"]
+    assert shaped["mcp_session"] == ["resend"]
+    assert sorted(shaped["stored"]) == ["cloudflare", "resend"], \
+        "the union is still reported, because disconnect acts on it"
+
+
+async def test_the_two_kinds_partition_what_is_stored(tmp_path):
+    """A provider in neither list but in `stored` would be a credential nobody
+    can act on, which is the shape of the bug this replaces."""
+    from munim.registry import ClientRecord, Registry
+    from munim.server import build_server
+
+    reg = Registry(tmp_path / "r.json")
+    reg.add(ClientRecord(name="Acme Ltd"))
+    record = reg.clients()[0]
+
+    ring = FakeKeyring()
+    ring.set_password("munim:resend", record.id, "key")
+    ring.set_password("munim-mcp:resend:tokens", record.id, '{"a": 1}')
+    keys = FakeBackend(ring)
+
+    server = build_server(backend=keys, registry=reg,
+                          runs_dir=tmp_path / "runs",
+                          reports_dir=tmp_path / "reports", keyring=ring)
+    shaped = _payload(await server.call_tool(
+        "client_status", {"client": "Acme Ltd", "check": False}))
+
+    both = set(shaped["api_key"]) | set(shaped["mcp_session"])
+    assert set(shaped["stored"]) == both
+    # And a provider connected both ways appears in both, which is the case
+    # where the two credentials genuinely coexist.
+    assert "resend" in shaped["api_key"] and "resend" in shaped["mcp_session"]
