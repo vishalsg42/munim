@@ -58,6 +58,32 @@ def _missing(tool, arguments: dict) -> list[str]:
     return [name for name in required if name not in arguments]
 
 
+def narrow(described: list[dict], *, names_only: bool = False,
+           matching: str = "") -> list[dict]:
+    """A listing small enough to hold, and the one the caller asked for.
+
+    Resend publishes 103 tools and their schemas are 122KB; the names alone are
+    2.1KB. An operator hit the second number as a hard limit, had to write the
+    response to a file and parse it, and the question they wanted answered was
+    "which of these take a teamId".
+
+    So `matching` searches the **argument schema** as well as the name and the
+    description. `teamId` appears in neither of the first two for any Vercel
+    tool: a filter over name and description would have returned nothing for
+    the exact example that justifies having a filter.
+    """
+    wanted = matching.strip().lower()
+    if wanted:
+        described = [t for t in described
+                     if wanted in t["tool"].lower()
+                     or wanted in (t.get("does") or "").lower()
+                     or wanted in json.dumps(t.get("arguments") or {}).lower()]
+    if names_only:
+        return [{"tool": t["tool"], "read_only": t["read_only"]}
+                for t in described]
+    return described
+
+
 def known_providers() -> list[str]:
     return sorted(all_servers())
 

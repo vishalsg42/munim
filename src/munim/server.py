@@ -331,7 +331,9 @@ def build_server(backend=None, registry=None, runs_dir=None,
     # ---- the provider's own tools ----------------------------------------
 
     @server.tool()
-    async def list_provider_tools(client: str, provider: str) -> dict:
+    async def list_provider_tools(client: str, provider: str,
+                                  names_only: bool = False,
+                                  matching: str = "") -> dict:
         """What this client's account with this provider can actually be asked to do.
 
         Every provider here runs its own MCP server with its own tools, and
@@ -347,8 +349,14 @@ def build_server(backend=None, registry=None, runs_dir=None,
         `read_only` is what the provider says about its own tool, and null means
         it said nothing. It is reported, not enforced; naming a client is what
         unlocks writing (D5).
+
+        `names_only` returns the name and `read_only` and nothing else, which
+        for Resend is 2KB against 122KB. Use it first: the full listing has
+        exceeded a caller's response limit outright. `matching` filters on the
+        name, the description **and** the argument schema, so "which tools take
+        a teamId" is answerable, which it is not by name and description alone.
         """
-        from munim.remote.passthrough import known_providers, tools_for
+        from munim.remote.passthrough import known_providers, narrow, tools_for
 
         record = registry.get(client)
         try:
@@ -364,8 +372,13 @@ def build_server(backend=None, registry=None, runs_dir=None,
         except NoRemoteServer as unknown:
             return {"client": record.name, "provider": provider,
                     "error": str(unknown), "providers": known_providers()}
-        return {"client": record.name, "provider": provider,
-                "count": len(tools), "tools": tools}
+        shown = narrow(tools, names_only=names_only, matching=matching)
+        listed = {"client": record.name, "provider": provider,
+                  "count": len(shown), "tools": shown}
+        if len(shown) != len(tools):
+            # So a filtered listing cannot be mistaken for the whole surface.
+            listed["of"] = len(tools)
+        return listed
 
     @server.tool()
     async def call_provider_tool(client: str, provider: str, tool: str,

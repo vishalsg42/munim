@@ -290,3 +290,48 @@ def test_a_missing_args_file_is_refused_before_anything_is_called(
 
     assert "cannot read" in capsys.readouterr().err
     assert estate.session.called == []
+
+
+# ---- the same two flags on the CLI, because that is where an operator is --
+
+
+def test_names_only_prints_the_names_without_the_descriptions(estate, capsys):
+    assert cli.main(["tools", "Acme", "cloudflare", "--names-only"]) == 0
+
+    err = capsys.readouterr().err
+    assert "search" in err and "execute" in err
+    assert "Search the docs" not in err, "a description survived --names-only"
+
+
+def test_matching_narrows_the_listing(estate, capsys):
+    assert cli.main(["tools", "Acme", "cloudflare", "--matching", "execute"]) == 0
+
+    err = capsys.readouterr().err
+    assert "execute" in err
+    assert "search" not in err
+
+
+def test_matching_reaches_the_argument_schema_from_the_cli(estate, capsys):
+    """Same property as the library test, asserted where the operator types it:
+    "which tools take a teamId" is not answerable from names alone."""
+    assert cli.main(["tools", "Acme", "cloudflare", "--matching", "code"]) == 0
+    err = capsys.readouterr().err
+    assert "search" not in err or "execute" in err
+
+
+def test_naming_one_tool_still_shows_it_in_full(estate, capsys):
+    """The flags shrink a listing. Asking for one tool is asking for the whole
+    of it, so they have nothing to do there and must not truncate it."""
+    assert cli.main(["tools", "Acme", "cloudflare", "execute",
+                     "--names-only"]) == 0
+
+    err = capsys.readouterr().err
+    assert "Run JavaScript against the account" in err
+
+
+def test_both_flags_are_in_the_help(capsys):
+    with pytest.raises(SystemExit):
+        cli.main(["tools", "--help"])
+
+    out = capsys.readouterr().out
+    assert "--names-only" in out and "--matching" in out

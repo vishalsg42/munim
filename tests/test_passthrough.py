@@ -559,3 +559,74 @@ async def test_a_failure_with_no_structured_half_is_unchanged(monkeypatch):
     assert result["failed"] is True
     assert result["result"] == {"error": "no"}
     assert "said" not in result
+
+
+# ---- a listing small enough to hold, and the one that was asked for ------
+
+
+def _many():
+    return [
+        {"tool": "list_projects", "does": "List projects.", "read_only": True,
+         "arguments": {"type": "object",
+                       "properties": {"teamId": {"type": "string"}}}},
+        {"tool": "deploy_to_vercel", "does": "Deploy.", "read_only": False,
+         "arguments": {"type": "object",
+                       "properties": {"teamId": {"type": "string"}}}},
+        {"tool": "search_docs", "does": "Search the documentation.",
+         "read_only": True, "arguments": {"type": "object"}},
+    ]
+
+
+def test_names_only_drops_the_schemas_and_keeps_the_verdict():
+    """Resend publishes 103 tools whose schemas are 122KB. A caller hit that as
+    a hard limit and had to write the response to a file and parse it."""
+    from munim.remote.passthrough import narrow
+
+    small = narrow(_many(), names_only=True)
+
+    assert small == [{"tool": "list_projects", "read_only": True},
+                     {"tool": "deploy_to_vercel", "read_only": False},
+                     {"tool": "search_docs", "read_only": True}]
+    assert len(json.dumps(small)) < len(json.dumps(_many())) / 2
+
+
+def test_matching_searches_the_argument_schema_not_just_the_name():
+    """The question that motivated this was "which tools take a teamId".
+    `teamId` is in no Vercel tool's name or description, so a filter over those
+    two returns nothing for the exact example that justifies having one."""
+    from munim.remote.passthrough import narrow
+
+    found = [t["tool"] for t in narrow(_many(), matching="teamId")]
+
+    assert found == ["list_projects", "deploy_to_vercel"]
+    assert "search_docs" not in found
+
+
+def test_matching_still_finds_a_name_or_a_description():
+    from munim.remote.passthrough import narrow
+
+    assert [t["tool"] for t in narrow(_many(), matching="deploy")] == \
+        ["deploy_to_vercel"]
+    assert [t["tool"] for t in narrow(_many(), matching="documentation")] == \
+        ["search_docs"]
+
+
+def test_matching_is_case_insensitive_because_a_caller_types_it():
+    from munim.remote.passthrough import narrow
+
+    assert len(narrow(_many(), matching="TEAMID")) == 2
+
+
+def test_the_two_compose():
+    from munim.remote.passthrough import narrow
+
+    both = narrow(_many(), names_only=True, matching="teamId")
+
+    assert both == [{"tool": "list_projects", "read_only": True},
+                    {"tool": "deploy_to_vercel", "read_only": False}]
+
+
+def test_neither_flag_changes_the_listing():
+    from munim.remote.passthrough import narrow
+
+    assert narrow(_many()) == _many()
