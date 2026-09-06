@@ -82,7 +82,7 @@ def test_stored_reports_presence_and_never_the_secret():
     listed = stored(["gmail", "stitch"], backend)
 
     assert listed["gmail"]["client_id"] == "an-id.apps.googleusercontent.com"
-    assert listed["gmail"]["secret"] is True
+    assert listed["gmail"]["has_secret"] is True
     assert "a-secret" not in repr(listed)
     assert listed["stitch"] is None
 

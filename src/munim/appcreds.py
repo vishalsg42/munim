@@ -80,7 +80,12 @@ def stored(providers, backend=None) -> dict:
         found = resolve(provider, backend)
         out[provider] = None if found is None else {
             "client_id": found[0],
-            "secret": bool(found[1]),
+            # `has_secret`, not `secret`. It is a boolean and always was, and
+            # the old name made it read as the credential to anyone skimming
+            # and to a scanner, which flagged the `config list` line that
+            # prints it as clear-text logging of a secret. The credential
+            # itself never leaves this function.
+            "has_secret": bool(found[1]),
             "from": "environment" if os.environ.get(_names(provider)[0])
                     else "keychain",
         }

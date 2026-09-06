@@ -13,25 +13,19 @@ from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from munim.remote.servers import SERVERS, server_for
 from munim.remote.storage import KeychainTokenStorage
 
-def hosts_in(text: str) -> set[str]:
-    """Every host named in a message, compared exactly rather than by substring.
+def host_of(text):
+    """The host of the first URL in a message, or None.
 
-    `"example.com" in message` is true of `evil-example.com.attacker.test` too.
-    It does not matter in a test that only reads a fixed string, and a weak
-    assertion is still a weak assertion: this says which host, not which
-    characters appear somewhere.
+    Parsed and compared exactly, which is the remediation
+    `py/incomplete-url-substring-sanitization` asks for and what the assertion
+    meant anyway: `"example.com" in message` is also satisfied by
+    `evil-example.com.attacker.test`.
     """
     import re
     from urllib.parse import urlparse
 
-    found = set()
-    for candidate in re.findall(r"https?://[^\s,)\'\"]+", text):
-        host = urlparse(candidate).hostname
-        if host:
-            found.add(host)
-    # Bare domains, for messages that name one without a scheme.
-    found |= set(re.findall(r"\b(?:[a-z0-9-]+\.)+[a-z]{2,}\b", text.lower()))
-    return found
+    found = re.search(r"https?://[^\s,)'\"]+", text)
+    return urlparse(found.group(0)).hostname if found else None
 
 
 
@@ -291,7 +285,7 @@ def test_a_provider_needing_an_application_says_so_before_opening_a_browser():
     said = str(caught.value)
     assert "registered by hand" in said
     assert "GMAIL_OAUTH_CLIENT_ID" in said
-    assert "console.cloud.google.com" in hosts_in(said), \
+    assert host_of(said) == "console.cloud.google.com", \
         "a fix with no address is a complaint"
 
 

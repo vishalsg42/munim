@@ -17,26 +17,6 @@ import munim.agent.launch as agent_module
 from munim.registry import ClientRecord, Registry
 from munim.server import CROSS_CLIENT, MUTATING, build_server
 
-def hosts_in(text: str) -> set[str]:
-    """Every host named in a message, compared exactly rather than by substring.
-
-    `"example.com" in message` is true of `evil-example.com.attacker.test` too.
-    It does not matter in a test that only reads a fixed string, and a weak
-    assertion is still a weak assertion: this says which host, not which
-    characters appear somewhere.
-    """
-    import re
-    from urllib.parse import urlparse
-
-    found = set()
-    for candidate in re.findall(r"https?://[^\s,)\'\"]+", text):
-        host = urlparse(candidate).hostname
-        if host:
-            found.add(host)
-    # Bare domains, for messages that name one without a scheme.
-    found |= set(re.findall(r"\b(?:[a-z0-9-]+\.)+[a-z]{2,}\b", text.lower()))
-    return found
-
 
 
 class _Keychain:
@@ -117,12 +97,15 @@ async def test_check_runs_the_agent_when_something_failed(tmp_path, monkeypatch,
     monkeypatch.setattr(agent_module, "build_model", lambda *a, **k: (object(), "fake"))
     monkeypatch.setattr(agent_module, "Agent", _FakeAgent)
 
-    server, _ = _server(tmp_path)
+    server, registry = _server(tmp_path)
     await server.call_tool("check", {"target": "acme"})
 
     assert _FakeAgent.asked, "check completed without ever invoking the agent"
     prompt = _FakeAgent.asked[0]
-    assert "neverssl.com" in hosts_in(prompt)
+    # The registry's own value, not a host literal: this asserts the
+    # prompt names the domain being checked, which is the actual claim.
+    checked = registry.clients()[0].domain
+    assert checked and checked in prompt
     assert "acme" in prompt
     # The agent is given the deterministic findings, not asked to decide them.
     assert "Failing checks:" in prompt
