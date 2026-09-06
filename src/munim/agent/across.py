@@ -11,6 +11,7 @@ read-only, so a tool that changes anything is not present to be called. "Read
 across, write within" (D5) stops depending on the model doing as it is told.
 """
 
+from pydantic import BaseModel, Field
 from strands import Agent
 
 from munim.agent.model import agents_off, build_model
@@ -33,6 +34,29 @@ useless to someone who looks after a dozen of them.
 
 Be brief. No preamble."""
 
+SHAPE_IT = """Now put what you just found into the required structure.
+
+One finding per client-and-provider you actually looked at. Do not add a finding
+for a client whose tools you did not call: if you could not check something, say
+so in the summary instead. `evidence` is quoted from a tool result, not written
+from memory; leave it empty rather than inventing one."""
+
+
+class Finding(BaseModel):
+    """One fact about one client. Field names match `checks.dns.CheckResult` and
+    the per-finding dict `audit_all_clients` returns, so the repo has one shape
+    for "something true about a client" rather than three."""
+
+    client: str
+    provider: str
+    says: str
+    evidence: str = ""
+
+
+class Answer(BaseModel):
+    findings: list[Finding] = Field(default_factory=list)
+    summary: str = ""
+
 
 def connected_clients(clients, provider: str, keyring=None) -> list:
     """Those with a session for this provider. Asking about the rest would open
@@ -50,8 +74,14 @@ def connected_clients(clients, provider: str, keyring=None) -> list:
     return [c for c in clients if has_session(c)]
 
 
-async def ask(question: str, clients: list[str], *, keyring=None) -> str:
-    """Answer `question` using every connected client's read-only tools."""
+async def ask(question: str, clients: list[str], *,
+              keyring=None) -> tuple["Answer", list["Finding"]]:
+    """Answer `question` using every connected client's read-only tools.
+
+    Returns the answer and whatever was set aside for naming a client the agent
+    never actually read. Both halves matter to the caller, which is why this
+    stopped returning a string.
+    """
     # Ahead of the per-provider keychain reads below, for the same reason as
     # within.work_on: this is importable, and refusing after doing the work
     # would be the same answer for more effort.
@@ -59,7 +89,8 @@ async def ask(question: str, clients: list[str], *, keyring=None) -> str:
     if off is not None:
         # This one returns prose rather than a dict, so the command has to be
         # folded into the sentence. A refusal with no next step is a complaint.
-        return f"{off['why']} Turn them on with: {off['fix']}"
+        return Answer(summary=f"{off['why']} Turn them on with: "
+                              f"{off['fix']}"), []
 
     toolsets = []
     reached: dict[str, list[str]] = {}
@@ -72,9 +103,10 @@ async def ask(question: str, clients: list[str], *, keyring=None) -> str:
                                   read_only=True)
 
     if not toolsets:
-        return ("No client has a session with a provider yet, so there is "
-                "nothing to read across. Connect one with "
-                "`munim connect \"<client>\" cloudflare`.")
+        return Answer(summary=(
+            "No client has a session with a provider yet, so there is nothing "
+            "to read across. Connect one with "
+            "`munim connect \"<client>\" cloudflare`.")), []
 
     # No argument. `keyring` is the session store, vault-shaped; `build_model`
     # wants a CredentialBackend and reads a model key from it. Threading one
@@ -88,8 +120,66 @@ async def ask(question: str, clients: list[str], *, keyring=None) -> str:
     roster = "\n".join(
         f"- {p}: {', '.join(getattr(c, 'name', str(c)) for c in cs)}"
         for p, cs in sorted(reached.items()))
+
+    # ---- phase one: investigate, with the provider tools and nothing else ---
+    #
+    # Deliberately two calls. Passing `structured_output_model` to a single
+    # invocation registers the schema as one more tool from the first turn, so
+    # the model may answer before calling anything and the loop stops there:
+    # the result validates perfectly and may have seen no account at all. The
+    # deprecated `Agent.structured_output()` is worse again, because it does not
+    # run the tool loop and every backend hands it only the schema. Either way
+    # the failure is an answer that looks right and is made up, which is a worse
+    # outcome than the TypeError this function used to raise.
     reply = await agent.invoke_async(
         f"Clients and the providers each is connected to:\n{roster}\n\n"
         f"Question: {question}"
     )
-    return str(reply)
+    prose = str(reply)
+    called = _clients_reached(reply, reached)
+
+    # ---- phase two: shape what phase one found -----------------------------
+    try:
+        shaped = await agent.invoke_async(SHAPE_IT, structured_output_model=Answer)
+        answer = shaped.structured_output
+    except Exception:
+        # A model that cannot produce the schema still produced prose, and prose
+        # with the findings missing beats a traceback out of an MCP tool.
+        answer = None
+
+    if answer is None:
+        return Answer(summary=prose), []
+
+    # Anything naming a client whose tools never returned is set aside rather
+    # than dropped. A model naming an account it could not see is the most
+    # interesting thing that happened in the run, and quietly deleting it would
+    # hand back a shorter, cleaner answer with no sign anything was removed,
+    # which is the same lie this function is arranged to avoid.
+    kept, discarded = [], []
+    for finding in answer.findings:
+        (kept if finding.client in called else discarded).append(finding)
+    answer.findings = kept
+    if not answer.summary:
+        answer.summary = prose
+    return answer, discarded
+
+
+def _clients_reached(reply, reached: dict) -> set[str]:
+    """Clients whose own tools actually returned something.
+
+    Not the roster. Membership of the roster says a client was *offered*, and a
+    client can be offered a provider that contributes no callable tools at all,
+    so checking against it is a spell-checker on client names rather than a
+    boundary. `metrics.tool_metrics` is keyed by the prefixed tool name and
+    counts successes, and `prefix_for` is the same function that built those
+    prefixes, so this maps back to who was really read.
+    """
+    from munim.remote.toolsets import prefix_for
+
+    labels = {getattr(c, "name", str(c))
+              for cs in reached.values() for c in cs}
+    used = {name for name, m in
+            getattr(reply.metrics, "tool_metrics", {}).items()
+            if getattr(m, "success_count", 0) > 0}
+    return {label for label in labels
+            if any(name.startswith(prefix_for(label) + "_") for name in used)}

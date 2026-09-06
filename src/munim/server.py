@@ -210,13 +210,24 @@ def build_server(backend=None, registry=None, runs_dir=None,
         records = registry.clients()
         reachable = sorted({c.name for p in SERVERS
                             for c in connected_clients(records, p)})
-        answer = await ask(question, records)
-        return {
+        answer, discarded = await ask(question, records)
+
+        # Computed here, never asked of the model. A model under-reporting what
+        # it could not check is the exact reason a caller wants this field, so
+        # putting it in the schema would make the answer its own auditor.
+        answered = {f.client for f in answer.findings}
+        shaped = {
             "question": question,
             "clients_read": reachable,
             "clients_registered": len(records),
-            "answer": answer,
+            "findings": [f.model_dump() for f in answer.findings],
+            "answer": answer.summary,
+            "could_not_check": sorted(set(reachable) - answered),
         }
+        if discarded:
+            # Surfaced, not swallowed: the agent named an account it never read.
+            shaped["discarded"] = [f.model_dump() for f in discarded]
+        return shaped
 
     @server.tool()
     async def audit_all_clients(dkim_selector: str = "resend") -> dict:

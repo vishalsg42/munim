@@ -9,6 +9,8 @@ Nothing about the tool's output would have revealed it, which is why it is
 pinned here.
 """
 
+from types import SimpleNamespace
+
 import pytest
 
 import munim.agent.launch as agent_module
@@ -60,16 +62,33 @@ def _canned_checks(monkeypatch):
     monkeypatch.setattr(agent_module, "run_reachability_async", none)
 
 
+class _Reply(str):
+    """An AgentResult's useful surface: it stringifies, and it says which tools
+    were actually called. `across.ask` reads the second to decide whether a
+    finding describes an account it really read."""
+
+    metrics = SimpleNamespace(tool_metrics={})
+    structured_output = None
+
+
 class _FakeAgent:
     """Stands in for Strands. Records that it was asked."""
     asked = []
+    # Set by a test that wants phase two to produce findings.
+    shaped = None
+    used: dict = {}
 
     def __init__(self, **kwargs):
         self.kwargs = kwargs
 
-    async def invoke_async(self, prompt):
+    async def invoke_async(self, prompt, **kwargs):
         _FakeAgent.asked.append(prompt)
-        return "Your mail is not signed, so receivers cannot prove it is you."
+        reply = _Reply("Your mail is not signed, so receivers cannot prove "
+                       "it is you.")
+        reply.metrics = SimpleNamespace(tool_metrics=_FakeAgent.used)
+        if kwargs.get("structured_output_model") is not None:
+            reply.structured_output = _FakeAgent.shaped
+        return reply
 
 
 async def test_check_runs_the_agent_when_something_failed(tmp_path, monkeypatch, agents_on):
@@ -477,3 +496,124 @@ async def test_a_toolset_with_no_tools_is_not_counted_as_one(
     assert counted, "nothing was reported at all"
     assert "0 provider tool(s)" in counted[0]["human_text"], \
         f"an empty toolset was counted as available: {counted[0]['human_text']}"
+
+
+# ---- an answer describes what was read, or says it did not ---------------
+#
+# The failure this guards against is the one that looks best: a perfectly typed
+# Answer whose evidence no provider ever produced. Passing the schema into a
+# single invocation registers it as one more tool from the first turn, so the
+# model can answer before calling anything; the deprecated
+# `Agent.structured_output()` never runs the tool loop at all. Both validate.
+
+
+def _answer(**kw):
+    from munim.agent.across import Answer
+    return Answer(**kw)
+
+
+def _finding(client, provider="resend", says="something", evidence=""):
+    from munim.agent.across import Finding
+    return Finding(client=client, provider=provider, says=says,
+                   evidence=evidence)
+
+
+@pytest.fixture
+def one_connected_client(monkeypatch):
+    import munim.agent.across as across_mod
+    import munim.remote.storage as storage_mod
+    import munim.remote.toolsets as toolsets_mod
+
+    monkeypatch.setattr(storage_mod.KeychainTokenStorage, "_read",
+                        lambda self, kind: {"access_token": "t"}
+                        if self._provider == "resend" else None)
+    monkeypatch.setattr(toolsets_mod, "toolset_for",
+                        lambda c, p, **k: _Stub(p))
+    monkeypatch.setattr(across_mod, "build_model",
+                        lambda *a, **k: (object(), "fake"))
+    monkeypatch.setattr(across_mod, "Agent", _FakeAgent)
+    _FakeAgent.asked = []
+    _FakeAgent.shaped = None
+    _FakeAgent.used = {}
+    return across_mod
+
+
+async def test_the_investigation_happens_before_the_shaping(
+        one_connected_client, agents_on):
+    """Two calls, in that order. One call with the schema attached lets the
+    model finish on its first turn without having called a provider."""
+    across_mod = one_connected_client
+    _FakeAgent.shaped = _answer(summary="done")
+
+    await across_mod.ask("who?", [ClientRecord(name="acme")])
+
+    assert len(_FakeAgent.asked) == 2, \
+        "the answer was shaped in the same pass that was supposed to gather it"
+    assert "Question: who?" in _FakeAgent.asked[0]
+    assert _FakeAgent.asked[1] == across_mod.SHAPE_IT
+
+
+async def test_a_finding_about_an_account_never_read_is_set_aside(
+        one_connected_client, agents_on):
+    """Naming a real client is not evidence of having looked at it. A client
+    can be offered a provider whose every tool the read-only filter removed."""
+    across_mod = one_connected_client
+    _FakeAgent.used = {}                       # nothing was actually called
+    _FakeAgent.shaped = _answer(findings=[_finding("acme")], summary="s")
+
+    answer, discarded = await across_mod.ask("who?", [ClientRecord(name="acme")])
+
+    assert answer.findings == [], "an unread account was reported as a finding"
+    assert [f.client for f in discarded] == ["acme"], \
+        "it was dropped silently instead of surfaced"
+
+
+async def test_a_grounded_finding_is_kept(one_connected_client, agents_on):
+    """The other direction. Setting everything aside would pass the test above
+    while making the tool useless."""
+    across_mod = one_connected_client
+    _FakeAgent.used = {"acme_resend_list_domains":
+                       SimpleNamespace(success_count=1)}
+    _FakeAgent.shaped = _answer(findings=[_finding("acme")], summary="s")
+
+    answer, discarded = await across_mod.ask("who?", [ClientRecord(name="acme")])
+
+    assert [f.client for f in answer.findings] == ["acme"]
+    assert discarded == []
+
+
+async def test_a_tool_that_only_errored_does_not_count_as_read(
+        one_connected_client, agents_on):
+    """`call_count` would say the tool was reached. `success_count` says it
+    answered, and only an answer is evidence."""
+    across_mod = one_connected_client
+    _FakeAgent.used = {"acme_resend_list_domains":
+                       SimpleNamespace(success_count=0)}
+    _FakeAgent.shaped = _answer(findings=[_finding("acme")], summary="s")
+
+    answer, discarded = await across_mod.ask("who?", [ClientRecord(name="acme")])
+
+    assert answer.findings == []
+    assert len(discarded) == 1
+
+
+async def test_a_model_that_cannot_produce_the_schema_still_answers(
+        one_connected_client, agents_on, monkeypatch):
+    """Strands raises rather than returning prose when the schema will not
+    validate. Loud is right; loud as an unhandled exception inside an MCP tool
+    is a traceback where the operator wanted an answer."""
+    across_mod = one_connected_client
+
+    class Refuses(_FakeAgent):
+        async def invoke_async(self, prompt, **kwargs):
+            if kwargs.get("structured_output_model") is not None:
+                raise RuntimeError("could not produce structured output")
+            return await super().invoke_async(prompt)
+
+    monkeypatch.setattr(across_mod, "Agent", Refuses)
+
+    answer, discarded = await across_mod.ask("who?", [ClientRecord(name="acme")])
+
+    assert answer.findings == []
+    assert "mail is not signed" in answer.summary, \
+        "the prose the model did produce was thrown away"

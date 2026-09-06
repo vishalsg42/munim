@@ -116,7 +116,11 @@ async def test_the_refusals_come_before_any_credential_is_read():
 
     got = await work_on("c_1", "acme", "do a thing", Log(), keyring=Explode())
     assert got["agents"] == "off"
-    assert "munim config ai on" in await ask("who?", [], keyring=Explode())
+    # `ask` returns (Answer, discarded) now: the caller needs the findings and
+    # whatever was set aside, and a string could carry neither.
+    answer, discarded = await ask("who?", [], keyring=Explode())
+    assert "munim config ai on" in answer.summary
+    assert discarded == []
 
 
 async def test_the_tools_are_still_listed(server):
