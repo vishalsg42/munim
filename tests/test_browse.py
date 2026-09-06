@@ -289,23 +289,31 @@ def test_a_failed_reconnect_says_so_rather_than_claiming_success(
     assert "was not reconnected" in capsys.readouterr().err
 
 
-def test_set_domain_writes_it(estate, monkeypatch, capsys):
+def test_set_domain_writes_it_and_re_reads_the_given_registry(
+        estate, monkeypatch, capsys):
+    """It used to build a Registry from the default path, ignoring the one the
+    walk was handed. With cli.REGISTRY overridden the write went to one file
+    and the read to another, and `get` raised inside the frame."""
     written = []
-    monkeypatch.setattr("munim.cli.set_domain",
-                        lambda name, site: written.append((name, site)) or 0)
-    monkeypatch.setattr("builtins.input", lambda: "newsite.test")
-    monkeypatch.setattr(
-        "munim.registry.Registry.get",
-        lambda self, key: ClientRecord(name="Balaji Roofings",
-                                       domain="newsite.test"))
 
-    browse._provider_walk(ClientRecord(name="Balaji Roofings"),
-                          status("Balaji Roofings", "cloudflare"),
+    def write(name, site):
+        written.append((name, site))
+        record = estate.get(name)
+        estate.set_domain(record.id, site) if hasattr(estate, "set_domain") \
+            else None
+        return 0
+
+    monkeypatch.setattr("munim.cli.set_domain", write)
+    monkeypatch.setattr("builtins.input", lambda: "newsite.test")
+
+    record = estate.get("Balaji Roofings")
+    browse._provider_walk(record, status("Balaji Roofings", "cloudflare"),
+                          registry=estate,
                           keys=[pick.DOWN, pick.DOWN, pick.DOWN, pick.ENTER,
                                 pick.ESC])
 
     assert written == [("Balaji Roofings", "newsite.test")]
-    assert "newsite.test" in capsys.readouterr().err
+    assert "Domain set to" in capsys.readouterr().err
 
 
 def test_an_empty_domain_changes_nothing(estate, monkeypatch, capsys):
@@ -314,8 +322,9 @@ def test_an_empty_domain_changes_nothing(estate, monkeypatch, capsys):
                         lambda name, site: written.append(site) or 0)
     monkeypatch.setattr("builtins.input", lambda: "")
 
-    browse._provider_walk(ClientRecord(name="Balaji Roofings"),
+    browse._provider_walk(estate.get("Balaji Roofings"),
                           status("Balaji Roofings", "cloudflare"),
+                          registry=estate,
                           keys=[pick.DOWN, pick.DOWN, pick.DOWN, pick.ENTER,
                                 pick.ESC])
 
@@ -407,3 +416,95 @@ def test_a_live_listing_carries_no_stale_banner(estate, monkeypatch, capsys):
     err = capsys.readouterr().err
     assert "execute" in err
     assert "Remembered from" not in err
+
+
+# ---- the list behind an action must not lie ---------------------------
+
+
+def watch_screens(monkeypatch):
+    """Record the statuses each clients frame was built from.
+
+    Asserting on raw output does not work here: with no tty `_draw` takes the
+    cursor-up path and never emits the home sequence, so there are no frame
+    boundaries to split on. The seam is the honest place to look anyway.
+    """
+    seen = []
+    real = browse._clients_screen
+
+    def spy(registry, statuses):
+        seen.append(list(statuses))
+        return real(registry, statuses)
+
+    monkeypatch.setattr(browse, "_clients_screen", spy)
+    return seen
+
+
+def test_disconnecting_removes_the_row_behind_it(estate, monkeypatch, capsys):
+    """The clients screen is drawn from a snapshot taken before the walk, so
+    without a refresh the provider you just deleted stays listed as connected,
+    and selecting it again opens a screen for a credential that is gone."""
+    monkeypatch.setattr("munim.cli.disconnect", lambda *a, **k: 0)
+    probed(monkeypatch, status("Balaji Roofings", "cloudflare"))
+    seen = watch_screens(monkeypatch)
+
+    browse.walk(estate, keys=[pick.ENTER,
+                              pick.DOWN, pick.DOWN, pick.ENTER,
+                              pick.DOWN, pick.ENTER,
+                              pick.ESC])
+
+    assert len(seen) >= 2, "the clients screen was never redrawn"
+    assert any(s.provider == "cloudflare" for s in seen[0])
+    assert not any(s.provider == "cloudflare" for s in seen[-1]), \
+        "the disconnected provider was still in the refreshed list"
+
+
+def test_reconnecting_updates_the_mark_behind_it(estate, monkeypatch, capsys):
+    monkeypatch.setattr("munim.cli.connect", lambda client, provider: 0)
+    monkeypatch.setattr(health, "check_all_for",
+                        lambda record, provider, backend=None:
+                        status("Balaji Roofings", provider, health.LIVE))
+    probed(monkeypatch, status("Balaji Roofings", "cloudflare", health.EXPIRED,
+                               detail="the session expired"))
+    seen = watch_screens(monkeypatch)
+
+    browse.walk(estate, keys=[pick.ENTER, pick.DOWN, pick.ENTER, pick.ESC,
+                              pick.ESC])
+
+    assert len(seen) >= 2
+    assert seen[0][0].state == health.EXPIRED
+    assert [s.state for s in seen[-1]] == [health.LIVE], \
+        "the reconnected provider still showed as expired"
+
+
+def test_a_client_with_nothing_connected_reports_inside_the_frame(
+        estate, monkeypatch, capsys):
+    """Printed into the frame, the next redraw erased it, so choosing the row
+    did nothing visible. Same bug as the two already fixed."""
+    probed(monkeypatch)      # nothing connected anywhere
+    headers = []
+    real = browse.menu
+
+    def spy(title, rows, **kwargs):
+        headers.append(kwargs.get("header", ()))
+        return real(title, rows, **kwargs)
+
+    monkeypatch.setattr(browse, "menu", spy)
+    browse.walk(estate, keys=[pick.ENTER, pick.ESC])
+
+    assert any("munim connect" in "".join(h) for h in headers), \
+        "the instruction never reached a frame"
+
+
+def test_could_not_check_is_not_reported_as_nothing_connected(
+        estate, monkeypatch, capsys):
+    """An empty result read as "this estate is connected to nothing", so every
+    client rendered as `nothing connected` with an offer to connect it."""
+    def refuse(*a, **k):
+        raise health.NotChecked("no event loop available")
+
+    monkeypatch.setattr(health, "check_all", refuse)
+
+    assert browse.walk(estate) == 2
+    err = capsys.readouterr().err
+    assert "Could not check" in err
+    assert "nothing connected" not in err

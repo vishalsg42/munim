@@ -484,7 +484,10 @@ def _sessions(registry: Registry) -> list[Finding]:
     """
     from munim import health
 
-    results = health.check_all(registry)
+    try:
+        results = health.check_all(registry)
+    except health.NotChecked as why:
+        return [Finding(WARN, "Sessions", f"could not be checked: {why}")]
     if not results:
         return []
 

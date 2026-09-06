@@ -140,11 +140,22 @@ def check_all_for(record, provider: str, backend=None) -> Status:
         return Status(record.name, provider, UNREACHABLE, "could not be checked")
 
 
+class NotChecked(RuntimeError):
+    """The probes could not be run at all, which is not the same as nothing.
+
+    An empty result reads as "this estate is connected to nothing", and the
+    navigable view acted on exactly that: every client rendered as `nothing
+    connected` with an offer to connect it, for an operator whose whole estate
+    was fine. "I could not look" and "there is nothing there" need different
+    answers.
+    """
+
+
 def check_all(registry, backend=None) -> list[Status]:
     """The same, for callers with no event loop of their own: doctor and the CLI."""
     try:
         return asyncio.run(check_all_async(registry, backend))
-    except RuntimeError:
+    except RuntimeError as why:
         # Called from inside a running loop, which means the caller wanted
-        # check_all_async. Skipping beats crashing whatever asked.
-        return []
+        # check_all_async and reached for the wrong door.
+        raise NotChecked(str(why)) from why

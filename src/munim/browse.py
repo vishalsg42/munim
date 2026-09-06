@@ -163,7 +163,14 @@ def walk(registry, *, keys=None) -> int:
         return 0
 
     print("Checking sessions...", file=sys.stderr)
-    statuses = health.check_all(registry)
+    try:
+        statuses = health.check_all(registry)
+    except health.NotChecked as why:
+        # Distinct from an empty result, which means nothing is stored. Falling
+        # through with [] made every client render as "nothing connected" with
+        # an offer to connect it, for an operator whose estate was fine.
+        print(f"Could not check sessions: {why}", file=sys.stderr)
+        return 2
 
     with full_screen():
         return _walk(registry, records, statuses, keys)
@@ -177,30 +184,51 @@ def _walk(registry, records, statuses, keys) -> int:
     # replay the same keypresses on every screen and never terminate. iter()
     # on an iterator returns the same object, so this shares position.
     keys = iter(keys) if keys is not None else None
+    pending_note = ""
 
     while True:
         rows = _clients_screen(registry, statuses)
+        header = ["", f"  {pending_note}"] if pending_note else []
+        pending_note = ""
         chosen = menu("Clients",
                       rows,
                       subtitle=f"{len(records)} clients · "
                                f"{sum(1 for s in statuses if s.live)} live",
-                      can_go_back=False, keys=keys)
+                      header=header, can_go_back=False, keys=keys)
         if chosen is None or chosen is BACK:
             return CANCELLED if chosen is None else 0
 
         kind = chosen[0]
         if kind == "connect":
-            print(f'\nNothing connected yet. Run: munim connect "{chosen[1]}" '
-                  f'<provider>\n', file=sys.stderr)
+            # Shown in the next frame rather than printed into this one, which
+            # the following redraw erases. Same bug as the two already fixed.
+            pending_note = (f'Nothing connected yet. Run: munim connect '
+                            f'"{chosen[1]}" <provider>')
             continue
 
         _, record, status = chosen
-        if _provider_walk(record, status, keys=keys) is None:
+        outcome = _provider_walk(record, status, registry=registry, keys=keys)
+        if outcome is None:
             return CANCELLED
+        # What the action left behind. The list was drawn from a snapshot taken
+        # before the walk, so without this a disconnected provider stayed on
+        # screen marked connected and a reconnected one stayed amber.
+        gone, fresh = outcome
+        statuses = [s for s in statuses
+                    if not (s.client == record.name
+                            and s.provider == status.provider)]
+        if not gone and fresh is not None:
+            statuses.append(fresh)
+        records = registry.clients()
 
 
-def _provider_walk(record, status, *, keys=None):
-    """One provider: the header, an action menu, and the tools beneath it."""
+def _provider_walk(record, status, *, registry=None, keys=None):
+    """One provider: the header, an action menu, and the tools beneath it.
+
+    Returns (gone, status): whether the credential was removed, and what the
+    status is now. The caller needs both, because the screen it returns to was
+    drawn from a snapshot taken before any of this ran.
+    """
     keys = iter(keys) if keys is not None else None
     note = ""
     while True:
@@ -221,7 +249,7 @@ def _provider_walk(record, status, *, keys=None):
         if chosen is None:
             return None
         if chosen is BACK:
-            return 0
+            return False, status
 
         if chosen == "tools":
             outcome = _tools_walk(record, status, keys=keys)
@@ -234,9 +262,9 @@ def _provider_walk(record, status, *, keys=None):
         elif chosen == "disconnect":
             done, note = _disconnect(record, status, keys=keys)
             if done:
-                return 0        # there is no provider left to stand on
+                return True, None   # there is no provider left to stand on
         elif chosen == "domain":
-            record, note = _set_domain(record, keys=keys)
+            record, note = _set_domain(record, registry, keys=keys)
 
 
 # ---- the actions, which used to only print the command ----------------
@@ -292,9 +320,8 @@ def _disconnect(record, status, *, keys=None):
     return True, ""
 
 
-def _set_domain(record, *, keys=None):
+def _set_domain(record, registry, *, keys=None):
     from munim.cli import set_domain
-    from munim.registry import Registry
 
     with suspended():
         print(f"\nSite for {record.name} (blank to keep "
@@ -310,8 +337,11 @@ def _set_domain(record, *, keys=None):
     if code != 0:
         return record, "The domain was not changed."
 
-    from pathlib import Path
-    fresh = Registry(Path.home() / ".munim" / "registry.json").get(record.id)
+    # Re-read through the registry this walk was given. Building one from the
+    # default path ignored `cli.REGISTRY`, so with an override in place the
+    # write went to one file and the read to another, and `get` raised inside
+    # the frame and killed the walk.
+    fresh = registry.get(record.id) if registry is not None else record
     return fresh, f"Domain set to {fresh.domain}."
 
 
