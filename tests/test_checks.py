@@ -192,7 +192,7 @@ def test_the_same_checks_still_fire_on_a_real_domain(monkeypatch):
 def test_platform_detection_is_suffix_anchored():
     """A domain merely containing a platform name is still the business's own."""
     assert checks.is_platform_domain("shop.vercel.app")
-    assert checks.is_platform_domain("BALAJI.VERCEL.APP")
+    assert checks.is_platform_domain("ACME.VERCEL.APP")
     assert not checks.is_platform_domain("vercel.app.acme.example")
     assert not checks.is_platform_domain("myvercel.app-store.example")
 

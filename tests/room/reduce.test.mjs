@@ -89,11 +89,11 @@ test("findings from several clients are all kept", () => {
   let state = initialState;
   for (const e of [across("Acme", "verified"),
                    across("Ivy & Fern", "not verified"),
-                   across("Grafison", "verified")]) {
+                   across("Thistle", "verified")]) {
     state = reduce(state, { type: "event", event: e });
   }
   assert.deepEqual(Object.keys(state.byClient).sort(),
-                   ["Acme", "Grafison", "Ivy & Fern"]);
+                   ["Acme", "Thistle", "Ivy & Fern"]);
   assert.equal(state.byClient["Ivy & Fern"][0].human_text, "not verified");
 });
 
