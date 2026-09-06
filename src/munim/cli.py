@@ -723,7 +723,8 @@ def call_tool(client: str, provider: str, tool: str, args_json: str | None,
     import asyncio
     import json
 
-    from munim.remote.passthrough import UnknownTool, call_tool as invoke
+    from munim.remote.passthrough import (MissingArguments, UnknownTool,
+                                          call_tool as invoke)
     from munim.remote.session import NeedsLogin, NoRemoteServer
     from munim.runlog import RunLog, new_run_id
 
@@ -755,6 +756,9 @@ def call_tool(client: str, provider: str, tool: str, args_json: str | None,
     except UnknownTool as missing:
         print(str(missing), file=sys.stderr)
         print(f'  munim tools "{record.name}" {provider}', file=sys.stderr)
+        return 2
+    except MissingArguments as short:
+        print(str(short).replace("<client>", record.name), file=sys.stderr)
         return 2
 
     # The result goes to stdout and everything else to stderr, so piping this

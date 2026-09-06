@@ -40,6 +40,24 @@ class UnknownTool(Exception):
     """That provider has no tool by that name. The message names the ones it has."""
 
 
+class MissingArguments(Exception):
+    """A required argument was not supplied. Caught before the call goes out."""
+
+
+def _missing(tool, arguments: dict) -> list[str]:
+    """Required properties the caller did not supply.
+
+    Only the top level, and only when the schema says `required` outright.
+    Anything cleverer would be reimplementing JSON Schema validation, which is
+    the provider's job and which it does on its own side anyway.
+    """
+    schema = getattr(tool, "inputSchema", None) or {}
+    required = schema.get("required") or []
+    if not isinstance(required, list):
+        return []
+    return [name for name in required if name not in arguments]
+
+
 def known_providers() -> list[str]:
     return sorted(all_servers())
 
@@ -160,16 +178,39 @@ async def call_tool(client: str, provider: str, tool: str,
     _check_provider(provider)
     arguments = dict(arguments or {})
 
+    # Refusals are raised *after* the session closes, never inside it. The
+    # transport runs in an anyio task group, so anything raised in there comes
+    # back wrapped in an ExceptionGroup and no caller's `except UnknownTool`
+    # ever fires. That was already true of UnknownTool and no test could see
+    # it, because a fake session is not a task group.
+    refuse = None
+    result = read_only = None
+
     async with session_for(client, provider, backend=backend,
                            allow_login=False) as session:
         available = {t.name: t for t in (await session.list_tools()).tools}
         if tool not in available:
-            raise UnknownTool(
+            refuse = UnknownTool(
                 f"{provider} has no tool called {tool!r}. It has: "
                 f"{', '.join(sorted(available))}")
+        else:
+            # Checked here rather than on the wire. The schema is already in
+            # hand, and a provider's own validation error is written for
+            # whoever wrote the provider: Vercel answers a bare list_projects
+            # with "teamId: Invalid input: expected string, received
+            # undefined", which is true and says nothing about what to do.
+            missing = _missing(available[tool], arguments)
+            if missing:
+                refuse = MissingArguments(
+                    f"{provider}.{tool} needs {', '.join(missing)}. "
+                    f"See what each one is: munim tools \"<client>\" "
+                    f"{provider} {tool}")
+            else:
+                read_only = _read_only(available[tool])
+                result = await session.call_tool(tool, arguments)
 
-        read_only = _read_only(available[tool])
-        result = await session.call_tool(tool, arguments)
+    if refuse is not None:
+        raise refuse
 
     flat = _flatten(result)
     if log is not None:
@@ -211,5 +252,6 @@ def _clip(value):
     return {"truncated": text[:LOGGED_RESULT], "full_length": len(text)}
 
 
-__all__ = ["NeedsLogin", "NoRemoteServer", "UnknownTool", "call_tool",
-           "describe_tool", "known_providers", "tools_for"]
+__all__ = ["MissingArguments", "NeedsLogin", "NoRemoteServer",
+           "UnknownTool", "call_tool", "describe_tool", "known_providers",
+           "tools_for"]

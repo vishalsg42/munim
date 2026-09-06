@@ -366,7 +366,7 @@ def build_server(backend=None, registry=None, runs_dir=None,
         `munim config ai off`.
         """
         from munim.remote.passthrough import (
-            UnknownTool, call_tool, known_providers)
+            MissingArguments, UnknownTool, call_tool, known_providers)
 
         record = registry.get(client)
         log = RunLog(new_run_id(), runs)
@@ -385,6 +385,10 @@ def build_server(backend=None, registry=None, runs_dir=None,
             return {"client": record.name, "provider": provider, "tool": tool,
                     "error": str(missing),
                     "fix": "list_provider_tools names what this provider has"}
+        except MissingArguments as short:
+            return {"client": record.name, "provider": provider, "tool": tool,
+                    "error": str(short).replace("<client>", record.name),
+                    "fix": "list_provider_tools gives each tool's schema"}
         # The client goes back out under the operator's name. Everything below
         # this line worked in ids, because that is what credentials are filed
         # under, and handing an id back would be Munim's bookkeeping leaking.

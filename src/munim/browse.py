@@ -18,7 +18,8 @@ import textwrap
 
 from munim import health
 from munim.pick import (AMBER, BACK, BOLD, Blank, DIM, GREEN, Head, Item,
-                        RED, full_screen, menu, paint, suspended)
+                        RED, ask_line, full_screen, menu, paint,
+                        suspended)
 
 # What a tool's description is wrapped to. Cloudflare's `execute` carries about
 # 1200 characters of TypeScript interfaces, and they are the only thing telling
@@ -306,11 +307,23 @@ def _confirm(question: str, yes: str, *, keys=None) -> bool:
 
 
 def _reconnect(record, status, *, keys=None):
-    from munim.cli import connect
+    """Run the same thing `munim connect "<client>" <provider>` runs.
 
+    It used to call `cli.connect`, which is the older application-credential
+    path. For a provider with its own MCP server that falls through to "paste
+    an API key", so Reconnect prompted for a key inside a suspended frame,
+    got nothing, and reported "was not reconnected" while the header above it
+    still read connected. `connect_via_mcp` is what the hint text on the menu
+    row actually names.
+    """
+    from munim.cli import connect, connect_via_mcp
+    from munim.remote.servers import server_for
+
+    runs = (connect_via_mcp if server_for(status.provider) is not None
+            else connect)
     with suspended():
         print(file=sys.stderr)
-        code = connect(record.name, status.provider)
+        code = runs(record.name, status.provider)
     if code != 0:
         return status, f"{status.provider} was not reconnected."
 
@@ -343,17 +356,18 @@ def _disconnect(record, status, *, keys=None):
 def _set_domain(record, registry, *, keys=None):
     from munim.cli import set_domain
 
-    with suspended():
-        print(f"\nSite for {record.name} (blank to keep "
-              f"{record.domain or 'none'}): ", end="", file=sys.stderr,
-              flush=True)
-        try:
-            typed = input().strip()
-        except (EOFError, KeyboardInterrupt):
-            typed = ""
-        code = set_domain(record.name, typed) if typed else 1
+    # Asked inside the frame rather than through `suspended()` and `input()`.
+    # A bare input() cannot see Escape, so the prompt filled with ^[ while the
+    # operator waited for it to back out.
+    answer = ask_line(f"  Site for {record.name} "
+                      f"(Enter to keep {record.domain or 'none'}, Esc to "
+                      f"cancel): ")
+    typed = (answer or "").strip()
     if not typed:
-        return record, "Domain unchanged."
+        return record, ("Domain unchanged." if answer is not None
+                        else "Cancelled.")
+    with suspended():
+        code = set_domain(record.name, typed)
     if code != 0:
         return record, "The domain was not changed."
 

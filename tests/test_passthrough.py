@@ -371,3 +371,60 @@ async def test_the_passthrough_says_nothing_about_model_hosts():
     for forbidden in ("agents_off", "build_model", "strands", "settings.ai"):
         assert forbidden not in source, \
             f"{forbidden} in the passthrough puts a model back in this path"
+
+
+# ---- refusals must escape the task group ------------------------------
+
+
+async def test_a_refusal_is_raised_outside_the_session(monkeypatch):
+    """The transport runs in an anyio task group, so anything raised inside
+    the session comes back wrapped in an ExceptionGroup and no caller's
+    `except UnknownTool` fires. A fake session is not a task group, so no test
+    here could see it: this one asserts the shape that makes it safe."""
+    opened = []
+    fake_sessions(monkeypatch, {"c_1": FakeSession([tool("docs")], "c_1")},
+                  opened)
+
+    with pytest.raises(UnknownTool):
+        await call_tool("c_1", "cloudflare", "nope", {})
+
+
+async def test_a_required_argument_is_checked_before_the_call_goes_out(
+        monkeypatch):
+    """Vercel answers a bare list_projects with "teamId: Invalid input:
+    expected string, received undefined", which is true and says nothing about
+    what to do. The schema is already in hand."""
+    from munim.remote.passthrough import MissingArguments
+
+    opened = []
+    session = FakeSession([tool("list_projects", schema={
+        "type": "object",
+        "properties": {"teamId": {"type": "string"}},
+        "required": ["teamId"]})], "c_1")
+    fake_sessions(monkeypatch, {"c_1": session}, opened)
+
+    with pytest.raises(MissingArguments, match="teamId"):
+        await call_tool("c_1", "vercel", "list_projects", {})
+    assert session.called == [], "the call went out anyway"
+
+
+async def test_supplying_the_argument_lets_it_through(monkeypatch):
+    opened = []
+    session = FakeSession([tool("list_projects", schema={
+        "type": "object",
+        "properties": {"teamId": {"type": "string"}},
+        "required": ["teamId"]})], "c_1")
+    fake_sessions(monkeypatch, {"c_1": session}, opened)
+
+    await call_tool("c_1", "vercel", "list_projects", {"teamId": "t_1"})
+    assert session.called == [("list_projects", {"teamId": "t_1"})]
+
+
+async def test_a_tool_with_no_required_list_is_never_blocked(monkeypatch):
+    """Most tools have none, and inventing a requirement would break them."""
+    opened = []
+    session = FakeSession([tool("docs")], "c_1")
+    fake_sessions(monkeypatch, {"c_1": session}, opened)
+
+    await call_tool("c_1", "cloudflare", "docs", {})
+    assert session.called == [("docs", {})]

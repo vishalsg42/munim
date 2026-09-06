@@ -287,7 +287,7 @@ def test_declining_the_confirmation_removes_nothing(estate, monkeypatch):
 
 def test_reconnect_runs_the_login_and_re_probes(estate, monkeypatch, capsys):
     ran = []
-    monkeypatch.setattr("munim.cli.connect",
+    monkeypatch.setattr("munim.cli.connect_via_mcp",
                         lambda client, provider: ran.append((client, provider)) or 0)
     monkeypatch.setattr(health, "check_all_for",
                         lambda record, provider, backend=None, keyring=None:
@@ -302,9 +302,28 @@ def test_reconnect_runs_the_login_and_re_probes(estate, monkeypatch, capsys):
     assert "Reconnected." in capsys.readouterr().err
 
 
+def test_reconnect_uses_the_command_its_own_hint_names(estate, monkeypatch):
+    """The row says `munim connect "<client>" <provider>`, and that runs
+    connect_via_mcp for a provider with its own MCP server. Calling the older
+    application-credential path instead made Reconnect ask for an API key."""
+    def wrong(*a, **k):
+        raise AssertionError("Reconnect used the application-credential path")
+
+    monkeypatch.setattr("munim.cli.connect", wrong)
+    monkeypatch.setattr("munim.cli.connect_via_mcp", lambda c, p: 0)
+    monkeypatch.setattr(health, "check_all_for",
+                        lambda record, provider, backend=None, keyring=None:
+                        status("Balaji Roofings", provider, health.LIVE))
+
+    browse._provider_walk(ClientRecord(name="Balaji Roofings"),
+                          status("Balaji Roofings", "cloudflare",
+                                 health.EXPIRED, detail="the session expired"),
+                          keys=[pick.DOWN, pick.ENTER, pick.ESC])
+
+
 def test_a_failed_reconnect_says_so_rather_than_claiming_success(
         estate, monkeypatch, capsys):
-    monkeypatch.setattr("munim.cli.connect", lambda client, provider: 2)
+    monkeypatch.setattr("munim.cli.connect_via_mcp", lambda client, provider: 2)
 
     browse._provider_walk(ClientRecord(name="Balaji Roofings"),
                           status("Balaji Roofings", "cloudflare", health.EXPIRED,

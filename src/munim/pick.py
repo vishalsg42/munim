@@ -404,6 +404,54 @@ def _draw(title, subtitle, rows, cursor, footer, numbered, drawn, height,
     return len(lines)
 
 
+def ask_line(prompt: str, *, default: str = "") -> str | None:
+    """One typed line, with Esc to cancel. None when cancelled.
+
+    `input()` was used here first, and it has no idea what Escape means: it
+    inserted the raw bytes, so the prompt filled with ^[^[^[ while the operator
+    waited for it to back out. Every other key in this walk cancels with Esc,
+    and a prompt that alone does not is the sort of inconsistency people stop
+    trusting a tool over.
+
+    Falls back to `input()` where there is no terminal, like everything else
+    here, and returns None on EOF or interrupt so the caller has one thing to
+    check either way.
+    """
+    if not interactive():
+        try:
+            return input()
+        except (EOFError, KeyboardInterrupt):
+            return None
+
+    typed = ""
+    saved = termios.tcgetattr(sys.stdin)
+    # Visible while typing. A walk hides the cursor, and a field you cannot see
+    # your position in is worse than no field.
+    sys.stderr.write(CURSOR_ON)
+    try:
+        while True:
+            sys.stderr.write(f"\r\x1b[2K{prompt}{typed}")
+            sys.stderr.flush()
+            tty.setraw(sys.stdin.fileno(), termios.TCSANOW)
+            try:
+                key = _read_key()
+            finally:
+                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, saved)
+
+            if key in (CTRL_C, ESC):
+                return None
+            if key in (ENTER, RETURN):
+                return typed or default
+            if key in BACKSPACE:
+                typed = typed[:-1]
+            elif key.isprintable():
+                typed += key
+    finally:
+        sys.stderr.write(CURSOR_OFF if _owns_screen else "")
+        sys.stderr.write("\n")
+        sys.stderr.flush()
+
+
 def menu(title: str, rows: list, *, subtitle: str = "", header=(),
          can_go_back: bool = True, keys=None, refresh=None, tick=0.15):
     """Navigate a grouped list. Returns the chosen Item's value, BACK, or None.
