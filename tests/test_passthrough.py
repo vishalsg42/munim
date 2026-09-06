@@ -55,6 +55,14 @@ class FakeSession:
             structuredContent=None, isError=self._fails)
 
 
+async def _listing(tools):
+    return SimpleNamespace(tools=tools)
+
+
+async def _answer(result):
+    return result
+
+
 def fake_sessions(monkeypatch, per_client, opened):
     """Point the passthrough at fakes, one per client, recording who was asked."""
 
@@ -468,3 +476,86 @@ async def test_the_mcp_tools_do_not_hand_over_the_key_store():
         window = source[start:start + 220]
         assert "backend=backend" not in window, \
             f"the API-key store is being passed where the session store belongs: {call}"
+
+
+# ---- a provider's error keeps whatever detail it came with ---------------
+
+
+class TwoPartFailure:
+    """A CallToolResult carrying a generic structured error and a detailed text
+    one, which is the shape every test above avoids by setting
+    `structuredContent=None`, and the shape that loses information."""
+
+    isError = True
+    structuredContent = {"error": "Failed to list projects."}
+
+    def __init__(self, detail):
+        self.content = [SimpleNamespace(type="text", text=detail)]
+
+
+DETAIL = ('{"error": {"code": "forbidden", "message": "Not authorized: '
+          'the token is missing scope `read:project` for team team_abc. '
+          'You must re-authenticate to this scope."}}')
+
+
+async def test_a_failure_keeps_the_detailed_message_beside_the_structured_one(
+        monkeypatch):
+    """Reported by an operator: one Vercel tool named the scope, the team and
+    the fix, another said only "Failed to list projects." for every input. Same
+    credential, same problem. `_flatten` preferred `structuredContent` and
+    discarded every text block, so the tool that knew could not say."""
+    opened = []
+
+    @asynccontextmanager
+    async def fake(client, provider, **kwargs):
+        opened.append(client)
+        yield SimpleNamespace(
+            list_tools=lambda: _listing([tool("list_projects")]),
+            call_tool=lambda name, arguments: _answer(TwoPartFailure(DETAIL)))
+
+    monkeypatch.setattr(passthrough, "session_for", fake)
+    result = await call_tool("c_acme", "vercel", "list_projects", {})
+
+    assert result["failed"] is True
+    assert result["result"] == {"error": "Failed to list projects."}, \
+        "a caller that parses the structured error should still get it"
+    assert "read:project" in json.dumps(result.get("said", "")), \
+        "the message naming the scope and the fix was thrown away"
+
+
+async def test_a_success_is_not_given_a_second_copy_of_itself(monkeypatch):
+    """Only failures carry both. Doubling every successful result would make
+    the common case bigger for nothing, and the run log holds these."""
+    opened = []
+
+    class Fine:
+        isError = False
+        structuredContent = {"projects": []}
+        content = [SimpleNamespace(type="text", text='{"projects": []}')]
+
+    @asynccontextmanager
+    async def fake(client, provider, **kwargs):
+        opened.append(client)
+        yield SimpleNamespace(
+            list_tools=lambda: _listing([tool("list_projects")]),
+            call_tool=lambda name, arguments: _answer(Fine()))
+
+    monkeypatch.setattr(passthrough, "session_for", fake)
+    result = await call_tool("c_acme", "vercel", "list_projects", {})
+
+    assert "said" not in result
+    assert result["result"] == {"projects": []}
+
+
+async def test_a_failure_with_no_structured_half_is_unchanged(monkeypatch):
+    """The existing shape still behaves: nothing to reconcile, nothing added."""
+    opened = []
+    fake_sessions(monkeypatch, {"c_acme": FakeSession(
+        [tool("execute")], "c_acme", answer={"error": "no"}, fails=True)},
+        opened)
+
+    result = await call_tool("c_acme", "cloudflare", "execute", {"code": "x"})
+
+    assert result["failed"] is True
+    assert result["result"] == {"error": "no"}
+    assert "said" not in result

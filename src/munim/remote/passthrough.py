@@ -152,13 +152,29 @@ def _flatten(result) -> dict:
             parts.append(text)
 
     structured = getattr(result, "structuredContent", None)
-    out = {"failed": bool(getattr(result, "isError", False))}
+    failed = bool(getattr(result, "isError", False))
+    out = {"failed": failed}
     if structured is not None:
         out["result"] = structured
     elif len(parts) == 1:
         out["result"] = parts[0]
     else:
         out["result"] = parts
+
+    # On a failure, keep both. `structuredContent` wins above because a caller
+    # that parses a result wants the shaped one, and for a success that is the
+    # right trade. For an error it is not: a provider can return a generic
+    # structured error beside a text block carrying the whole story, and
+    # preferring the structured one silently threw the story away.
+    #
+    # That is what an operator hit. Vercel's `create_git_project` returned the
+    # real 403, naming the missing scope, the team and the fix; `list_projects`
+    # returned `{"error": "Failed to list projects."}` for a real id, a slug and
+    # a deliberately bogus one alike. Same credential, same underlying problem,
+    # and the tool that could have said what was wrong said nothing, because
+    # this function had already dropped the half that knew.
+    if failed and structured is not None and parts:
+        out["said"] = parts[0] if len(parts) == 1 else parts
     return out
 
 
