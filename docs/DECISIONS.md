@@ -1071,3 +1071,55 @@ the least attended place in this system: it runs inside a coding agent, in
 response to a model's decision, with nobody looking at a terminal. A consent
 screen appearing there is worse than a failure, so an expired session is a
 refusal naming the `munim connect` command that fixes it.
+
+
+## D32: An agent path may not open a browser, and an answer may not describe what it did not read
+
+Three faults shipped together and none of them failed where anyone could see it.
+`ask_across_clients` and `work_on_client` raised `TypeError` the moment agents
+were on, because they passed `backend=` to helpers taking `keyring=`. `check`'s
+diagnosis agent looked sessions up by label in a store keyed by identity, matched
+nothing for every client, and diagnosed with no provider tools at all. And every
+test replaced the toolset helpers with `**k` stubs, so the real signatures had
+never once been called.
+
+**Two names, and the third time this cost something.** A `CredentialBackend` has
+`get/set/forget`; a keyring is vault-shaped with `get_password/set_password`.
+Calling both `backend` shipped in `health.py`, then in `server.py`, and then
+here, where it took out the SDK the project is built on. The agent paths now
+carry one seam, `keyring`, reaching `KeychainTokenStorage` and `auth_for` and
+never `build_model`, which takes its own default. `uvx ty check src/munim/`
+names this class of fault in seconds and is worth running: neither ruff nor mypy
+is configured.
+
+**Fixing a crash can be worse than leaving it.** `toolset_for` built its auth
+provider with the SDK default `allow_login=True`. Dead code cannot open a
+browser; live code can, and an unattended cross-client question that opens one
+and blocks for five minutes is precisely what `NeedsLogin` exists to prevent. So
+agent paths pass `allow_login=False` and the door that can log a person in is
+`session_for`. The lesson is the ordering: the safety property had to land in
+the same commit as the repair, not after it.
+
+**Structured output has to see the account before it describes it.** Passing
+`structured_output_model` to a single invocation registers the schema as one
+more tool from the first turn, so the model can answer before calling any
+provider and the loop stops there. The deprecated `Agent.structured_output()` is
+worse: it never runs the tool loop and every backend hands it only the schema.
+Both produce a validated `Answer` whose `evidence` no provider produced, which
+is worse than the `TypeError` it replaced, because a traceback is honest.
+
+So two calls. Phase one investigates with the provider tools and nothing else;
+phase two shapes what phase one found. A finding survives only if that client's
+own prefixed tools actually returned, read from `metrics.tool_metrics`. Checking
+against the roster instead would be a spell-checker on client names, since a
+client can be offered a provider whose every tool the read-only filter removed.
+Anything that fails is returned under `discarded` rather than deleted: a model
+naming an account it could not see is the most interesting event in the run, and
+quietly dropping it would be the same lie in a tidier shape.
+
+**And the prefix has to name the provider.** The client alone keeps two accounts
+apart and does not keep one account's providers apart. Vercel and Supabase both
+publish `list_projects`, so a client on both produced the same prefixed name
+twice and Strands refused to build the agent. Found by running it; no test could
+have, because a stubbed toolset has no tool names.
+

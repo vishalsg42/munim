@@ -9,12 +9,21 @@
 // Fixed order. Chips render greyed at these positions from the first frame and
 // light up in place - nothing is inserted, so nothing moves and the eye can
 // track one cell changing.
+// Only checks something actually emits. This listed twenty and the catalogue
+// emits thirteen, so seven cells sat grey through every run: five had no
+// producer anywhere in the codebase, and a permanently grey chip reads as a
+// step that hung rather than one that does not exist. `cert_www`,
+// `env_redeployed`, `return_path`, `site_responds` and `ssl_mode` are gone.
+//
+// `deploy_current` and `env_scoped` stay: they come from the Vercel adapter,
+// so they are idle on a DNS-only check and real on a launch with Vercel
+// connected. `tests/room/reduce.test.mjs` pins this list against the producers.
 export const CHECKS = [
   "spf_single", "spf_lookups", "dkim_present", "dkim_chunking",
-  "dmarc_present", "dmarc_policy", "mx_present", "return_path",
-  "ns_delegated", "cert_valid", "cert_www", "caa_allows",
-  "apex_resolves", "www_redirect", "https_enforced", "ssl_mode",
-  "deploy_current", "env_scoped", "env_redeployed", "site_responds",
+  "dmarc_present", "dmarc_policy", "mx_present",
+  "ns_delegated", "cert_valid", "caa_allows",
+  "apex_resolves", "www_redirect", "https_enforced",
+  "deploy_current", "env_scoped",
 ];
 
 export const CHECK_LABELS = {
