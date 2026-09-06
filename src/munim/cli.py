@@ -1454,6 +1454,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # `munim connect cloudflare` reads as one positional, and argparse fills the
     # first one. Shift it: a lone argument that names a provider is a provider.
+    already_asked = False
     if args.command == "connect" and args.provider is None:
         from munim.remote.servers import all_servers
         known = sorted({*all_servers(), *KEY_PROVIDERS})
@@ -1463,10 +1464,34 @@ def main(argv: list[str] | None = None) -> int:
             # Nothing named at all. The list is right here; making somebody
             # recall eleven provider names to type one is the friction this
             # picker exists to remove.
-            picked = choose_one("Connect which provider?", known)
-            if picked is None:
-                return CANCELLED
-            args.provider = picked
+            #
+            # Both questions share one screen, so the second replaces the first
+            # rather than being drawn underneath it, and the screen is handed
+            # back before the browser flow prints anything worth keeping.
+            from munim import pick as _pick
+
+            with _pick.full_screen():
+                picked = choose_one("Connect which provider?", known)
+                if picked is None:
+                    return CANCELLED
+                args.provider = picked
+                if _registry().clients():
+                    from munim.remote.identity import can_name_itself
+
+                    named = ask_which_client(
+                        _registry(),
+                        account_can_name=can_name_itself(args.provider))
+                    if named is None:
+                        return CANCELLED
+                    args.client = (None if named == ACCOUNT_NAMES_IT else named)
+                    already_asked = True
+            # Printed after the screen is handed back, so the transcript still
+            # records what was chosen. A picker that leaves nothing behind is
+            # fine for browsing and wrong for a command you may need to explain
+            # later.
+            print(f"Connecting {args.provider}"
+                  + (f" for {args.client}" if args.client else ""),
+                  file=sys.stderr)
         else:
             parser.error(f"unknown provider {args.client!r}. Choose from: "
                          + ", ".join(known))
@@ -1693,7 +1718,11 @@ def main(argv: list[str] | None = None) -> int:
     # Not asked when there is nothing to choose from, because a prompt with one
     # option is worse than the zero-setup path it replaces, and not asked
     # without a terminal, because a prompt nobody can answer is a hang.
-    if args.client is None and sys.stdin.isatty():
+    # `already_asked` matters when the provider was picked from the list: that
+    # path asks both questions on one screen, and choosing "named after the
+    # account" leaves client as None on purpose. Without this the question came
+    # round a second time.
+    if args.client is None and sys.stdin.isatty() and not already_asked:
         if _registry().clients():
             from munim.remote.identity import can_name_itself
 

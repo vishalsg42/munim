@@ -50,16 +50,33 @@ def interactive() -> bool:
 
 
 def _render(options: list[tuple[str, str]], cursor: int, typed: str,
-            new_row: str, drawn: int) -> int:
+            new_row: str, drawn: int, title: str = "",
+            numbered: bool | None = None) -> int:
     """Draw the list. The last row is a text field when there is one.
 
     Returns how many lines were used, so the next draw can move back over
     exactly those and redraw in place.
+
+    Homes instead when a walk owns the screen, the way `_draw` does. Without
+    this two prompts in a row stacked: `munim connect` drew its provider list,
+    then its client list underneath, and the one you were answering was the one
+    further down.
     """
-    if drawn:
+    if _owns_screen:
+        sys.stderr.write("\x1b[H")
+    elif drawn:
         sys.stderr.write(f"\x1b[{drawn}A")
 
     rows = [*options] + ([(new_row, "")] if new_row else [])
+    # Worked out here rather than defaulted to True, so a caller cannot get it
+    # wrong: digits only reach nine, and a numbered row nothing can select is
+    # a promise the keyboard does not keep.
+    if numbered is None:
+        numbered = len(rows) <= 9
+    extra = 0
+    if _owns_screen and title:
+        sys.stderr.write(f"\x1b[2K{paint(title, BOLD)}\n\x1b[2K\n")
+        extra = 5      # title, blank, blank, footer, and the trailing newline
     for index, (label, hint) in enumerate(rows):
         here = index == cursor
         mark = "❯" if here else " "
@@ -74,9 +91,20 @@ def _render(options: list[tuple[str, str]], cursor: int, typed: str,
         else:
             body = label + (f"   {hint}" if hint else "")
 
-        sys.stderr.write(f"\x1b[2K {mark} {index + 1}  {body}\n")
+        # `1.` rather than `1  `, matching the navigable menu. Two numbering
+        # styles in one tool is one more than anybody should have to notice.
+        # And numbers only when every row is reachable by one keypress: the
+        # provider list showed a 10 and an 11 that no key could select.
+        number = f"{index + 1}. " if numbered else ""
+        sys.stderr.write(f"\x1b[2K {mark} {number}{body}\n")
+    if _owns_screen:
+        move = "↑/↓ or 1-9" if numbered else "↑/↓ navigate"
+        sys.stderr.write("\x1b[2K\n\x1b[2K"
+                         + paint(f"{move} · Enter select · Esc cancel", DIM)
+                         + "\n")
+        sys.stderr.write("\x1b[J")
     sys.stderr.flush()
-    return len(rows)
+    return len(rows) + extra
 
 
 def _read_key() -> str:
@@ -119,10 +147,12 @@ def _read_key() -> str:
 
 def _live(prompt: str, options: list[tuple[str, str]], allow_new: bool,
           new_hint: str):
-    print(prompt, file=sys.stderr)
+    if not _owns_screen:
+        print(prompt, file=sys.stderr)
 
     new_row = new_hint or "a new one, type the name" if allow_new else ""
     count = len(options) + (1 if new_row else 0)
+    numbered = count <= 9
     typed, cursor, drawn = "", 0, 0
 
     saved = termios.tcgetattr(sys.stdin)
@@ -130,7 +160,8 @@ def _live(prompt: str, options: list[tuple[str, str]], allow_new: bool,
         tty.setraw(sys.stdin.fileno())
         while True:
             termios.tcsetattr(sys.stdin, termios.TCSADRAIN, saved)
-            drawn = _render(options, cursor, typed, new_row, drawn)
+            drawn = _render(options, cursor, typed, new_row, drawn, prompt,
+                            numbered)
             tty.setraw(sys.stdin.fileno())
 
             key = _read_key()
@@ -157,7 +188,7 @@ def _live(prompt: str, options: list[tuple[str, str]], allow_new: bool,
                 elif key.isprintable():
                     typed += key
                 continue
-            if key.isdigit() and key != "0":
+            if numbered and key.isdigit() and key != "0":
                 wanted = int(key) - 1
                 if wanted < len(options):
                     return wanted

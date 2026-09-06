@@ -207,8 +207,10 @@ def auth_for(client: str, provider: str, *, backend=None,
             # The caller may not have a name yet: connecting without one uses a
             # provisional key until the provider says which account it was, and
             # printing that key reads as gibberish.
-            whose = f"{label}'s " if not label.startswith("…") else ""
-            print(f"Sign in to the {whose}{provider} account:\n{url}", flush=True)
+            # "the Balaji Roofings's cloudflare account" was reading badly:
+            # the article and the possessive cannot both be there.
+            whose = f"{label}'s " if not label.startswith("…") else "the "
+            print(f"Sign in to {whose}{provider} account:\n{url}", flush=True)
             webbrowser.open(url)
 
     async def callback() -> tuple[str, str | None]:

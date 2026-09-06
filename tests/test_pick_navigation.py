@@ -371,3 +371,60 @@ def test_a_frame_is_painted_only_when_something_changed(monkeypatch, capsys):
 
     assert len(painted) == 2, \
         f"expected one paint per change, got {len(painted)}"
+
+
+# ---- the one-question picker, inside a walk that owns the screen -------
+
+
+def test_the_old_picker_homes_when_a_walk_owns_the_screen(monkeypatch, capsys):
+    """Two prompts in a row stacked: `munim connect` drew its provider list and
+    then its client list underneath, and the one you were answering was the one
+    further down."""
+    monkeypatch.setattr(pick, "_owns_screen", True)
+    try:
+        pick._render([("a", ""), ("b", "")], 0, "", "", 0, "Pick")
+    finally:
+        monkeypatch.setattr(pick, "_owns_screen", False)
+
+    err = capsys.readouterr().err
+    assert "\x1b[H" in err, "the frame did not home"
+    assert "\x1b[J" in err, "nothing erased a taller previous frame"
+    assert "Pick" in err, "the prompt must be inside the frame it draws"
+
+
+def test_the_old_picker_stops_numbering_past_nine(capsys):
+    """It offered a 10 and an 11 that no keypress could select, under a footer
+    that said 1-9."""
+    many_rows = [(f"row{i}", "") for i in range(11)]
+    pick._render(many_rows, 0, "", "", 0)
+
+    err = capsys.readouterr().err
+    assert "10." not in err
+    assert "row10" in err, "the row itself must still be there to arrow to"
+
+
+def test_nine_rows_are_still_numbered(capsys):
+    pick._render([(f"row{i}", "") for i in range(9)], 0, "", "", 0)
+    assert "9. row8" in capsys.readouterr().err
+
+
+def test_a_digit_past_the_end_selects_nothing_when_unnumbered(monkeypatch):
+    """The footer stops advertising digits, so the loop must stop honouring
+    them, or 1 would still pick while 10 did not."""
+    monkeypatch.setattr(pick, "interactive", lambda: True)
+    keys = iter(["2", pick.ENTER])
+
+    class Fake:
+        TCSADRAIN = 0
+        def tcgetattr(self, *a): return None
+        def tcsetattr(self, *a): pass
+
+    monkeypatch.setattr(pick, "termios", Fake())
+    monkeypatch.setattr(pick, "tty",
+                        type("T", (), {"setraw": staticmethod(lambda *a, **k: None)})())
+    monkeypatch.setattr(pick.sys, "stdin",
+                        type("S", (), {"fileno": staticmethod(lambda: 0)})())
+    monkeypatch.setattr(pick, "_read_key", lambda: next(keys))
+
+    got = pick.choose("Pick", [(f"row{i}", "") for i in range(11)])
+    assert got == 0, "a digit selected a row on a list too long to number"
