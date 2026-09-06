@@ -68,6 +68,36 @@ def resolve(provider: str, backend=None) -> tuple[str, str] | None:
     return client_id, backend.get(APPLICATION, f"{provider}:app_secret") or ""
 
 
+def client_id_of(provider: str, backend=None) -> str | None:
+    """The application's client id, and never the secret beside it.
+
+    Separate from `resolve` on purpose. `resolve` returns both, so any value
+    taken out of it carries the secret's provenance: `config list` printed the
+    client id and a scanner read that as logging a credential, correctly by its
+    own rules even though a client id is public by design and appears in the
+    authorize URL the operator's own browser shows.
+
+    `stored` reports what is configured and has always said it never returns the
+    secret. Reading the id through here makes that structural rather than a
+    promise in a docstring.
+    """
+    id_name, _ = _names(provider)
+    from_env = os.environ.get(id_name)
+    if from_env:
+        return from_env
+    backend = backend or default_backend()
+    return backend.get(APPLICATION, f"{provider}:app_id") or None
+
+
+def has_secret_for(provider: str, backend=None) -> bool:
+    """Whether an application secret is stored. Never the secret."""
+    _, secret_name = _names(provider)
+    if os.environ.get(_names(provider)[0]):
+        return bool(os.environ.get(secret_name, ""))
+    backend = backend or default_backend()
+    return bool(backend.get(APPLICATION, f"{provider}:app_secret"))
+
+
 def stored(providers, backend=None) -> dict:
     """What is configured, for `munim config list`. Never the secret itself.
 
@@ -77,15 +107,13 @@ def stored(providers, backend=None) -> dict:
     backend = backend or default_backend()
     out = {}
     for provider in providers:
-        found = resolve(provider, backend)
-        out[provider] = None if found is None else {
-            "client_id": found[0],
-            # `has_secret`, not `secret`. It is a boolean and always was, and
-            # the old name made it read as the credential to anyone skimming
-            # and to a scanner, which flagged the `config list` line that
-            # prints it as clear-text logging of a secret. The credential
-            # itself never leaves this function.
-            "has_secret": bool(found[1]),
+        # Two reads, not one tuple. Neither value here has ever been in the
+        # same expression as the secret, so the promise above is a property of
+        # the code rather than of the reader's care.
+        client_id = client_id_of(provider, backend)
+        out[provider] = None if client_id is None else {
+            "client_id": client_id,
+            "has_secret": has_secret_for(provider, backend),
             "from": "environment" if os.environ.get(_names(provider)[0])
                     else "keychain",
         }

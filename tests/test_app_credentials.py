@@ -130,3 +130,35 @@ def test_the_refusal_names_the_command_that_fixes_it(monkeypatch):
 
     with pytest.raises(NoRemoteServer, match="munim config set"):
         auth_for("c_x", "gmail", label="Acme", keyring=Ring())
+
+
+def test_listing_what_is_configured_never_reads_the_secret():
+    """`stored` has always said it never returns the secret. It used to take
+    both halves out of `resolve`, so the client id it printed carried the
+    secret's provenance and a scanner read `config list` as logging a
+    credential. Two separate reads make the promise structural."""
+    from munim.appcreds import client_id_of, has_secret_for
+
+    backend = Backend()
+    remember("gmail", "an-id.apps.googleusercontent.com", "a-secret", backend)
+
+    # The id comes from a call that cannot see the secret at all.
+    assert client_id_of("gmail", backend) == "an-id.apps.googleusercontent.com"
+    assert has_secret_for("gmail", backend) is True
+
+    listed = stored(["gmail"], backend)
+    assert listed["gmail"]["client_id"] == "an-id.apps.googleusercontent.com"
+    assert "a-secret" not in repr(listed)
+
+
+def test_a_provider_with_an_id_and_no_secret_is_reported_honestly():
+    """Google documents an installed-app secret as not confidential and some
+    providers issue none, so absent is a real state rather than a fault."""
+    from munim.appcreds import client_id_of, has_secret_for
+
+    backend = Backend()
+    remember("gmail", "an-id", "", backend)
+
+    assert client_id_of("gmail", backend) == "an-id"
+    assert has_secret_for("gmail", backend) is False
+    assert stored(["gmail"], backend)["gmail"]["has_secret"] is False
