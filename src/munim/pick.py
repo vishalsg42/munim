@@ -27,6 +27,7 @@ except ImportError:                     # Windows, and anywhere without termios
     RAW_AVAILABLE = False
 
 UP, DOWN = "\x1b[A", "\x1b[B"
+BACKSPACE = ("\x7f", "\x08")
 ENTER, RETURN = "\r", "\n"
 CTRL_C, ESC = "\x03", "\x1b"
 
@@ -38,44 +39,34 @@ def interactive() -> bool:
     return (RAW_AVAILABLE and sys.stdin.isatty() and sys.stderr.isatty())
 
 
-BACKSPACE = ("\x7f", "\x08")
+def _render(options: list[tuple[str, str]], cursor: int, typed: str,
+            new_row: str, drawn: int) -> int:
+    """Draw the list. The last row is a text field when there is one.
 
-
-def _visible(options: list[tuple[str, str]], typed: str) -> list[int]:
-    """Indexes matching what has been typed so far, in order."""
-    if not typed:
-        return list(range(len(options)))
-    needle = typed.lower()
-    return [i for i, (label, hint) in enumerate(options)
-            if needle in label.lower() or needle in hint.lower()]
-
-
-def _render(options: list[tuple[str, str]], shown: list[int], cursor: int,
-            typed: str, new_hint: str, drawn: int) -> int:
-    """Draw the list and the input line. Returns how many lines it used."""
+    Returns how many lines were used, so the next draw can move back over
+    exactly those and redraw in place.
+    """
     if drawn:
         sys.stderr.write(f"\x1b[{drawn}A")
 
-    lines = 0
-    for row, index in enumerate(shown):
-        label, hint = options[index]
-        mark = "❯" if row == cursor else " "
-        line = f" {mark} {row + 1}  {label}" + (f"   {hint}" if hint else "")
-        sys.stderr.write(f"\x1b[2K{line}\n")
-        lines += 1
+    rows = [*options] + ([(new_row, "")] if new_row else [])
+    for index, (label, hint) in enumerate(rows):
+        here = index == cursor
+        mark = "❯" if here else " "
+        editing = new_row and index == len(rows) - 1
 
-    if not shown:
-        # Nothing matches, so what has been typed is a new thing rather than a
-        # bad search. Saying so is what replaces a "not listed" row: the operator
-        # is already typing the name, and asking them to first announce that they
-        # are about to is a step with no purpose.
-        sys.stderr.write(f"\x1b[2K   {new_hint or 'new'}: {typed}\n")
-        lines += 1
+        if editing:
+            # The row is the field. An operator looking at the list can see
+            # where a name goes, which typing at a bare prompt never showed
+            # them.
+            caret = "▏" if here else ""
+            body = f"{label}: {typed}{caret}" if here else label
+        else:
+            body = label + (f"   {hint}" if hint else "")
 
-    sys.stderr.write(f"\x1b[2K > {typed}\n")
-    lines += 1
+        sys.stderr.write(f"\x1b[2K {mark} {index + 1}  {body}\n")
     sys.stderr.flush()
-    return lines
+    return len(rows)
 
 
 def _read_key() -> str:
@@ -90,40 +81,49 @@ def _read_key() -> str:
 def _live(prompt: str, options: list[tuple[str, str]], allow_new: bool,
           new_hint: str):
     print(prompt, file=sys.stderr)
+
+    new_row = new_hint or "a new one, type the name" if allow_new else ""
+    count = len(options) + (1 if new_row else 0)
     typed, cursor, drawn = "", 0, 0
-    shown = _visible(options, typed)
 
     saved = termios.tcgetattr(sys.stdin)
     try:
         tty.setraw(sys.stdin.fileno())
         while True:
             termios.tcsetattr(sys.stdin, termios.TCSADRAIN, saved)
-            drawn = _render(options, shown, cursor, typed, new_hint, drawn)
+            drawn = _render(options, cursor, typed, new_row, drawn)
             tty.setraw(sys.stdin.fileno())
 
             key = _read_key()
+            on_new = bool(new_row) and cursor == count - 1
+
             if key in (CTRL_C, ESC):
                 return None
             if key in (ENTER, RETURN):
-                if shown:
-                    return shown[cursor]
-                if allow_new and typed.strip():
-                    return typed.strip()
-                continue
+                if on_new:
+                    if typed.strip():
+                        return typed.strip()
+                    continue            # an empty name is not a client
+                return cursor
             if key == UP:
-                cursor = (cursor - 1) % max(len(shown), 1)
+                cursor = (cursor - 1) % count
                 continue
             if key == DOWN:
-                cursor = (cursor + 1) % max(len(shown), 1)
+                cursor = (cursor + 1) % count
                 continue
-            if key in BACKSPACE:
-                typed = typed[:-1]
-            elif key.isprintable():
-                typed += key
-            else:
+            if on_new:
+                # Typing belongs to the field once you are standing in it.
+                if key in BACKSPACE:
+                    typed = typed[:-1]
+                elif key.isprintable():
+                    typed += key
                 continue
-            shown = _visible(options, typed)
-            cursor = 0
+            if key.isdigit() and key != "0":
+                wanted = int(key) - 1
+                if wanted < len(options):
+                    return wanted
+                if new_row and wanted == count - 1:
+                    cursor = wanted     # move into the field rather than pick it
     finally:
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, saved)
         sys.stderr.write("\n")

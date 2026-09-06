@@ -135,34 +135,67 @@ def test_a_list_with_nothing_in_it_can_still_take_a_new_name():
                        allow_new=True) == "Ivy & Fern"
 
 
-def test_typing_filters_the_list():
-    """What the arrow keys navigate once something has been typed."""
-    assert pick._visible(OPTIONS, "") == [0, 1, 2]
-    assert pick._visible(OPTIONS, "ivy") == [1]
-    assert pick._visible(OPTIONS, "test") == [0, 2], "hints are searched too"
-    assert pick._visible(OPTIONS, "zzz") == [], "nothing matching is a new name"
-
-
-def test_the_live_picker_is_reachable_from_the_real_call_site():
-    """`choose` takes the arrow-key path only when nothing was injected, and
-    `ask_which_client` defaulted `ask` to the builtin `input`. Every real
-    invocation therefore fell through to the numbered prompt, and the picker ran
-    only in its own tests: written, tested, and unreachable.
-
-    Asserted on the signature because the failure is invisible any other way.
-    Both paths work, both are tested, and the wrong one was always chosen.
-    """
+def test_the_new_row_is_where_typing_goes():
+    """Typing used to filter the list from a bare `>` prompt, which nobody
+    could guess was possible. The last row is a text field now: you can see
+    where a name goes before you type it."""
     import inspect
 
+    source = inspect.getsource(pick._live)
+    assert "on_new" in source
+    assert "typed += key" in source, "the row has to accept characters"
+
+
+def test_an_empty_name_does_not_create_a_client():
+    """Enter on an empty field is a slip, not a client called nothing."""
+    import inspect
+
+    source = inspect.getsource(pick._live)
+    assert "typed.strip()" in source
+
+
+# ---- one picker, every command ------------------------------------------
+
+def test_a_fixed_set_can_be_picked_by_number():
+    """`choose_one` is what `config ai host`, `config ai key` and `connect` use
+    when they were given no argument. One thing to learn rather than one per
+    command."""
     from munim import cli
 
-    default = inspect.signature(cli.ask_which_client).parameters["ask"].default
-    assert default is None, \
-        "a non-None default means choose() never takes the interactive path"
+    assert cli.choose_one("Which?", ["auto", "bedrock", "gemini"],
+                          ask=lambda: "2") == "bedrock"
 
 
-def test_injecting_ask_is_what_forces_the_numbered_path():
-    """The other direction, and the only thing passing `ask` should mean."""
-    called = []
-    pick.choose("Which?", OPTIONS, ask=lambda: called.append(1) or "1")
-    assert called, "an injected ask was not used"
+def test_a_fixed_set_can_be_picked_by_name():
+    from munim import cli
+
+    assert cli.choose_one("Which?", ["auto", "bedrock"],
+                          ask=lambda: "bedrock") == "bedrock"
+
+
+def test_backing_out_of_a_fixed_set_chooses_nothing():
+    from munim import cli
+
+    assert cli.choose_one("Which?", ["auto", "bedrock"], ask=lambda: "") is None
+
+
+def test_a_client_can_be_picked_for_a_command_that_was_given_none(tmp_path):
+    """`clients forget` and `clients domain` used to demand a name you had to
+    already know, while the list sat one command away."""
+    from munim import cli
+    from munim.registry import ClientRecord, Registry
+
+    reg = Registry(tmp_path / "r.json")
+    reg.add(ClientRecord(name="Acme", domain="acme.test"))
+    reg.add(ClientRecord(name="Balaji Roofings"))
+
+    assert cli._pick_client(reg, ask=lambda: "1") == "Acme"
+    assert cli._pick_client(reg, ask=lambda: "2") == "Balaji Roofings"
+
+
+def test_picking_a_client_when_there_are_none_says_so(tmp_path, capsys):
+    from munim import cli
+    from munim.registry import Registry
+
+    assert cli._pick_client(Registry(tmp_path / "r.json")) is None
+    assert "No clients registered" in capsys.readouterr().err
