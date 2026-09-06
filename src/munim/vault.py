@@ -18,11 +18,13 @@ that shape and `KeychainBackend` can be pointed at one. Nothing else in the
 codebase changes shape.
 """
 
+import asyncio
 import errno
 import json
 import os
 import stat
 import tempfile
+import time
 from pathlib import Path
 
 try:
@@ -88,6 +90,68 @@ class _Lock:
     def __exit__(self, *exc) -> None:
         if self._handle is not None:
             fcntl.flock(self._handle.fileno(), fcntl.LOCK_UN)
+            self._handle.close()
+            self._handle = None
+
+
+class Single:
+    """One holder at a time for a named piece of work, across processes.
+
+    Deliberately not `_Lock`. That one guards the whole store for a
+    read-modify-write and is taken by every write, so a caller holding it and
+    then storing something would deadlock against itself: flock binds to an
+    open file description, and a second `open()` of the same path in the same
+    process blocks on the first. This is a file per name, and what it spans is
+    a network round trip rather than a file write.
+
+    Acquired without blocking the event loop, because it is taken while probes
+    for every other provider are running on that same loop: `check_all` gathers
+    them together, so one synchronous `flock` waiting on another process would
+    stall all of them into their own timeouts.
+
+    Failing to acquire is not an error. The caller carries on unlocked, which is
+    what it did before this existed.
+    """
+
+    def __init__(self, name: str) -> None:
+        self._name = "".join(c if c.isalnum() or c in "._-" else "_"
+                             for c in name)
+        self._handle = None
+
+    @property
+    def held(self) -> bool:
+        return self._handle is not None
+
+    async def hold(self, seconds: float) -> bool:
+        if not LOCKING or self._handle is not None:
+            return False
+        target = path().parent / "locks" / f"{self._name}.lock"
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            os.chmod(target.parent, 0o700)
+            handle = open(target, "a+")
+            os.chmod(target, 0o600)
+        except OSError:
+            return False
+
+        deadline = time.monotonic() + seconds
+        while True:
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                self._handle = handle
+                return True
+            except OSError:
+                if time.monotonic() >= deadline:
+                    handle.close()
+                    return False
+                await asyncio.sleep(0.05)
+
+    def release(self) -> None:
+        if self._handle is None:
+            return
+        try:
+            fcntl.flock(self._handle.fileno(), fcntl.LOCK_UN)
+        finally:
             self._handle.close()
             self._handle = None
 

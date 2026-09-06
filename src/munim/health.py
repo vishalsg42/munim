@@ -173,10 +173,16 @@ class Stream:
 
     def _start(self):
         self._loop = asyncio.new_event_loop()
+        # Keyed by (client, provider), not by position in `statuses`. That list
+        # is public and the caller edits it: `browse` drops a row when a
+        # credential is disconnected and appends one when it is reconnected, so
+        # a position recorded here stops naming the same probe the moment
+        # either happens. It crashed with IndexError once the list got shorter,
+        # and before it got that far it wrote one client's result onto another.
         self._tasks = {
             self._loop.create_task(check(cid, name, provider,
-                                         keyring=self._keyring)): index
-            for index, (cid, name, provider) in enumerate(self._work)}
+                                         keyring=self._keyring)): (name, provider)
+            for cid, name, provider in self._work}
         # A hard stop, because "keep ticking until everything settles" with no
         # ceiling is a menu that polls forever if one probe never reports.
         self._deadline = time.monotonic() + TIMEOUT + 2
@@ -195,10 +201,20 @@ class Stream:
                              return_when=asyncio.FIRST_COMPLETED))
 
         changed = False
-        for task, index in self._tasks.items():
-            if task.done() and not self.statuses[index].settled:
-                self.statuses[index] = task.result()
-                changed = True
+        for task, key in self._tasks.items():
+            if not task.done():
+                continue
+            at = next((i for i, s in enumerate(self.statuses)
+                       if (s.client, s.provider) == key), None)
+            # Two reasons to drop a result on the floor, and both are normal.
+            # The row is gone, because the credential was disconnected while
+            # this probe was in flight. Or it is already settled, because a
+            # reconnect answered the same question with something newer than
+            # a probe that started before it.
+            if at is None or self.statuses[at].settled:
+                continue
+            self.statuses[at] = task.result()
+            changed = True
 
         if not self.settled and time.monotonic() > self._deadline:
             self.statuses = [s if s.settled

@@ -49,6 +49,14 @@ class KeychainTokenStorage(TokenStorage):
         # get_password while the identical CLI command worked.
         self._keyring = keyring if keyring is not None else vault
 
+    @property
+    def client(self) -> str:
+        return self._client
+
+    @property
+    def provider(self) -> str:
+        return self._provider
+
     def _service(self, kind: str) -> str:
         return f"{SERVICE}:{self._provider}:{kind}"
 

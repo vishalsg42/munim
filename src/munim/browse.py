@@ -54,7 +54,8 @@ def _clients_screen(registry, statuses) -> list:
         held = by_client.get(record.name, [])
         rows.append(Head(record.name + (f"  {record.domain}" if record.domain else "")))
         if not held:
-            rows.append(Item("nothing connected", value=("connect", record.name)))
+            rows.append(Item("nothing connected", hint="connect a provider",
+                             value=("connect", record)))
         for status in sorted(held, key=lambda s: s.provider):
             rows.append(Item(status.provider, mark=_mark(status),
                              value=("provider", record, status)))
@@ -220,10 +221,14 @@ def _walk(registry, records, stream, keys) -> int:
 
         kind = chosen[0]
         if kind == "connect":
-            # Shown in the next frame rather than printed into this one, which
-            # the following redraw erases. Same bug as the two already fixed.
-            pending_note = (f'Nothing connected yet. Run: munim connect '
-                            f'"{chosen[1]}" <provider>')
+            outcome = _connect(chosen[1], keys=keys)
+            if outcome is None:
+                return CANCELLED
+            fresh, pending_note = outcome
+            if fresh is not None:
+                stream.statuses = [*stream.statuses, fresh]
+            statuses = stream.statuses
+            records = registry.clients()
             continue
 
         _, record, status = chosen
@@ -304,6 +309,48 @@ def _confirm(question: str, yes: str, *, keys=None) -> bool:
                   [Item("Cancel", value=False), Item(yes, value=True)],
                   keys=keys)
     return picked is True
+
+
+def _connect(record, *, keys=None):
+    """Connect a provider for a client that has none, from inside the list.
+
+    This row used to print `munim connect "<client>" <provider>` and return, so
+    the one client who needed an action most was the only one that could not
+    take one. Disconnecting a client's last provider landed here too, which
+    made disconnect a one-way door: the row you would have reconnected from is
+    the row that was just removed.
+
+    Returns None for Ctrl-C, else (status or None, note). A provider that has
+    no MCP server is left out rather than offered and then refused, because a
+    menu that lists something it will not do is worse than a shorter menu.
+    """
+    from munim.cli import connect_via_mcp
+    from munim.remote.passthrough import known_providers
+
+    keys = iter(keys) if keys is not None else None
+    chosen = menu(
+        f"Connect a provider for {record.name}",
+        [Item(name, value=name) for name in known_providers()],
+        header=["", "  A browser window opens for you to authorise.",
+                f'  The consent screen will name it "Munim ({record.name})".'],
+        keys=keys)
+    if chosen is None:
+        return None
+    if chosen is BACK:
+        return None, ""
+
+    # Out of the frame, like every other action here: a browser prompt and its
+    # progress lines cannot happen inside something that redraws over them.
+    with suspended():
+        print(file=sys.stderr)
+        code = connect_via_mcp(record.name, chosen)
+    if code != 0:
+        return None, f"{chosen} was not connected."
+
+    fresh = health.check_all_for(record, chosen)
+    return fresh, ("Connected." if fresh.live
+                   else f"Connected, but the session will not open: "
+                        f"{fresh.detail}")
 
 
 def _reconnect(record, status, *, keys=None):

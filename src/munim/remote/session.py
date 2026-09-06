@@ -35,6 +35,20 @@ from munim.remote.storage import (
 # rather than undercutting it.
 LOGIN_TIMEOUT = 300.0
 
+# How long one well-known document gets. Short because the answer is a small
+# static file, and because this now sits in front of every refresh: `doctor` and
+# `clients` probe every provider concurrently under an eight second budget, and
+# a lookup that outlives it would turn "needs authentication", which names its
+# own fix, into "could not be reached", which does not.
+DISCOVERY_TIMEOUT = 5.0
+
+# How long to wait for another process that is already refreshing this same
+# session. Short on purpose: `doctor` and `clients` probe every provider inside
+# eight seconds, and a refresh POST is well under a second, so anything past
+# this is a process that is stuck rather than busy. Giving up means carrying on
+# unlocked, which is what happened before the lock existed.
+REFRESH_WAIT = 5.0
+
 
 class NeedsLogin(Exception):
     """Opening this session would mean authorising, and the caller said no.
@@ -148,6 +162,22 @@ class _RemembersExpiry(OAuthClientProvider):
     So the one-hour token behaved like a one-hour *account*: reconnect, work,
     come back tomorrow, sign in again. Filling in the expiry the store recorded
     is what lets the refresh branch fire instead.
+
+    And then fire at the wrong address, which is the second half of this class.
+    The SDK learns where a provider's token endpoint is only from the discovery
+    chain it runs *after* a 401. `_initialize` sets `current_tokens` and
+    `client_info` and nothing else, and the 401 branch is the only place in the
+    whole package that assigns `context.oauth_metadata`, so on any stored-token
+    path it is provably None by the time `_refresh_token` reads it. That sends
+    the refresh to the fallback, `<mcp host>/token`, which for Resend is a 404
+    against a real endpoint at `api.resend.com/oauth/token`. A rejected refresh
+    is answered with a browser login, so the operator never sees the 404, only
+    the consent screen, again.
+
+    Cloudflare, Linear and Notion were unharmed because their authorization
+    server *is* their MCP host, so the wrong URL happened to be right. Resend,
+    Vercel, Netlify and Supabase all answer that URL with a 404. Hence
+    `_refresh_token` below: find out where to refresh before refreshing.
     """
 
     async def _initialize(self) -> None:
@@ -183,6 +213,24 @@ class _RemembersExpiry(OAuthClientProvider):
             if held is not None and held.access_token:
                 self.context.current_tokens = held
                 self._adopt_expiry()
+        else:
+            # Loaded here rather than left to `super()` so the question below
+            # can be asked at all: with no tokens in hand there is no way to
+            # tell that a refresh is about to fire. `super()` then skips its own
+            # call. Outside its lock, which acquires nothing here, so the worst
+            # case is one repeated read of the store.
+            await self._initialize()
+
+        # Decided here rather than in `_refresh_token`, because by the time the
+        # SDK calls that it has already committed to refreshing: the check it
+        # makes is one line earlier. Waiting for another process and then asking
+        # for a rotation anyway is a second rotation seconds after the first,
+        # and providers answer that with 429. Observed against Cloudflare,
+        # Vercel and Supabase, on three of six sessions, with the lock working
+        # exactly as intended.
+        if (not self.context.is_token_valid()
+                and self.context.can_refresh_token()):
+            await self._wait_our_turn()
 
         # Proxied with asend, not `async for`. httpx's auth flow is a two-way
         # generator: it yields a request and expects the response sent back in.
@@ -196,7 +244,177 @@ class _RemembersExpiry(OAuthClientProvider):
         except StopAsyncIteration:
             return
         finally:
+            # A flow abandoned between building the refresh and handling its
+            # response would otherwise hold this until the process exits.
+            self._let_go()
             await inner.aclose()
+
+    def _single(self):
+        """The cross-process lock for this one session's refresh, or None.
+
+        Named per (client, provider): one client's Cloudflare refresh has no
+        reason to wait behind another client's, and a provider that hangs must
+        not stop every other provider renewing.
+        """
+        from munim import vault
+
+        store = self.context.storage
+        client = getattr(store, "client", None)
+        provider = getattr(store, "provider", None)
+        if client is None or provider is None:
+            return None
+        return vault.Single(f"refresh-{provider}-{client}")
+
+    # The refresh lock, when one is held. A class attribute so it exists from
+    # the first line of the flow: a session that never needs a refresh never
+    # reaches the code that would create it.
+    _holding = None
+
+    async def _wait_our_turn(self) -> None:
+        """Take this session's refresh lock, and see if it is still needed.
+
+        These providers rotate: spending a refresh token invalidates it. Munim
+        runs as a long-lived MCP server *and* as a CLI over one store, so two of
+        them can read the same token and both post it. The provider accepts one
+        and rejects the other, and the SDK answers a rejected refresh with a
+        browser login. That is the "authorise again, and again".
+
+        Whoever we waited for has written newer tokens by the time we get in, so
+        the first thing to do is read them. Usually that settles it: their token
+        is ours now and no refresh is needed, which is why the lock is handed
+        straight back. Only a session still expired after that goes on to
+        refresh, holding the lock until the answer is written.
+        """
+        if self._holding is not None:
+            return
+        holder = self._single()
+        if holder is None or not await holder.hold(REFRESH_WAIT):
+            # Nobody to wait for, or waited long enough. Carrying on unlocked is
+            # what happened before this existed.
+            return
+        self._holding = holder
+        held = await self.context.storage.get_tokens()
+        if held is not None and held.access_token:
+            self.context.current_tokens = held
+            self._adopt_expiry()
+        if self.context.is_token_valid():
+            self._let_go()
+
+    def _let_go(self) -> None:
+        if self._holding is not None:
+            self._holding.release()
+            self._holding = None
+
+    async def _refresh_token(self):
+        """Look up where the refresh goes, then let the SDK build it.
+
+        Overridden rather than done in `async_auth_flow` because this is called
+        from inside `context.lock` (the SDK's own flow holds it across the
+        refresh), so there is no second critical section to reason about, no
+        question of a non-reentrant lock, and no reordering of the flow proxy.
+
+        The lookup uses its own client rather than yielding requests through the
+        auth flow. Yielding would be closer to what the SDK does on a 401, and
+        it cannot report failure: httpx sends a yielded request outside its own
+        try block, so a DNS failure or a timeout on a well-known document
+        escapes the whole `send()` and is never thrown back into the generator.
+        There would be no way to fall back. A separate client costs a connection
+        pool that is thrown away, and nothing else: `streamablehttp_client` is
+        called with defaults, so there is no transport, proxy or timeout
+        configuration here to inherit.
+
+        Best effort throughout. Anything that fails leaves `oauth_metadata`
+        unset and `super()` builds exactly the request it builds today, so a
+        provider that publishes no metadata is no worse off than it is now.
+        """
+        # Normally already held: `async_auth_flow` takes it before the SDK
+        # decides to refresh, which is the only place the decision can still be
+        # unmade. This covers a caller that reaches the refresh another way.
+        await self._wait_our_turn()
+        try:
+            if self.context.oauth_metadata is None:
+                await self._find_token_endpoint()
+            return await super()._refresh_token()
+        except BaseException:
+            # Nothing will be sent, so nothing will hand the lock back.
+            self._let_go()
+            raise
+
+    async def _handle_refresh_response(self, response):
+        """Release once the outcome is written, whatever the outcome was."""
+        try:
+            return await super()._handle_refresh_response(response)
+        finally:
+            self._let_go()
+
+    async def _find_token_endpoint(self) -> None:
+        """The discovery chain, out of band, for the sake of the refresh.
+
+        Only `oauth_metadata` is adopted. Setting `protected_resource_metadata`
+        as well would be more faithful to the 401 path and would also flip
+        `should_include_resource_param`, which starts sending RFC 8707
+        `resource` in the refresh body where today it is absent. That is a
+        change to what is *asked for*, not to where the asking goes, and this
+        is the fix for where.
+        """
+        import httpx
+        from mcp.client.auth.exceptions import OAuthFlowError
+        from mcp.client.auth.utils import (
+            build_oauth_authorization_server_metadata_discovery_urls,
+            build_protected_resource_metadata_discovery_urls,
+            create_oauth_metadata_request,
+            handle_auth_metadata_response,
+            handle_protected_resource_response,
+        )
+
+        server_url = self.context.server_url
+        found = None
+        try:
+            # A short leash. The MCP client reads with a 300 second timeout,
+            # which is right for a tool call and wrong for a well-known
+            # document: a host that accepts the connection and then hangs would
+            # stall every command for five minutes without saying why. `doctor`
+            # and `clients` probe under an eight second budget.
+            async with httpx.AsyncClient(
+                    timeout=httpx.Timeout(DISCOVERY_TIMEOUT),
+                    follow_redirects=True) as http:
+                for url in build_protected_resource_metadata_discovery_urls(
+                        None, server_url):
+                    resource = await handle_protected_resource_response(
+                        await http.send(create_oauth_metadata_request(url)))
+                    if resource is None:
+                        continue
+                    try:
+                        # The one safety check on this path, and the reason the
+                        # SDK's own discovery runs it: the refresh carries the
+                        # refresh token, and for a confidential client the
+                        # client secret too. Whatever `authorization_servers`
+                        # names is where those go. A document that claims to
+                        # speak for another resource is not adopted.
+                        await self._validate_resource_match(resource)
+                    except OAuthFlowError:
+                        continue
+                    if not str(resource.authorization_servers[0]).startswith(
+                            "https://"):
+                        continue
+                    found = str(resource.authorization_servers[0])
+                    break
+
+                for url in build_oauth_authorization_server_metadata_discovery_urls(
+                        found, server_url):
+                    ok, metadata = await handle_auth_metadata_response(
+                        await http.send(create_oauth_metadata_request(url)))
+                    if not ok:
+                        return
+                    if metadata is not None:
+                        self.context.oauth_metadata = metadata
+                        return
+        except Exception:
+            # Deliberately everything, and deliberately silent. The worst this
+            # can do is leave the refresh where it already was, and turning a
+            # failed lookup into a traceback out of a menu's idle path would be
+            # a worse trade than the bug being fixed.
+            return
 
 
 def auth_for(client: str, provider: str, *, keyring=None,
