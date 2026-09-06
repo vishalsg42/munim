@@ -1477,20 +1477,31 @@ def main(argv: list[str] | None = None) -> int:
             from munim import pick as _pick
 
             with _pick.full_screen():
-                picked = choose_one("Connect which provider?", known)
-                if picked is None:
-                    return CANCELLED
-                args.provider = picked
-                if _registry().clients():
+                # A loop, not two statements in a row, because Esc on the
+                # second question means "I picked the wrong provider" far more
+                # often than it means "abandon the command".
+                while True:
+                    picked = choose_one("Connect which provider?", known,
+                                        can_go_back=False)
+                    if picked is None or picked is BACK:
+                        return CANCELLED
+                    args.provider = picked
+                    if not _registry().clients():
+                        break
+
                     from munim.remote.identity import can_name_itself
 
                     named = ask_which_client(
                         _registry(),
-                        account_can_name=can_name_itself(args.provider))
+                        account_can_name=can_name_itself(args.provider),
+                        can_go_back=True)
+                    if named is BACK:
+                        continue            # up a level, back to the providers
                     if named is None:
                         return CANCELLED
                     args.client = (None if named == ACCOUNT_NAMES_IT else named)
                     already_asked = True
+                    break
             # Printed after the screen is handed back, so the transcript still
             # records what was chosen. A picker that leaves nothing behind is
             # fine for browsing and wrong for a command you may need to explain
@@ -1538,28 +1549,49 @@ def main(argv: list[str] | None = None) -> int:
     if args.command in ("tools", "call"):
         from munim.remote.passthrough import known_providers
 
-        client = args.client or _pick_client(_registry(),
-                                             "Whose account?")
-        if client is None:
-            return CANCELLED if args.client is None else 2
-        provider = args.provider or choose_one("Which provider?",
-                                               known_providers())
-        if provider is None:
-            return CANCELLED
-        if args.command == "tools":
-            return list_tools(client, provider, args.tool, args.as_json)
+        from munim import pick as _pick
 
-        tool = args.tool
-        if tool is None:
-            # Picking the tool from the live list is the whole shape of this
-            # command: the provider's tools are what you choose from, and
-            # Munim never has to know their names.
-            names = _tool_names(client, provider)
-            if names is None:
-                return 2
-            tool = choose_one(f"Which {provider} tool?", names)
-            if tool is None:
-                return CANCELLED
+        # Client, then provider, then tool: three questions that are one
+        # decision, so Esc steps up a level rather than throwing the whole
+        # command away. Only the first has nowhere above it to go.
+        with _pick.full_screen():
+            client, provider, tool = args.client, args.provider, args.tool
+            while True:
+                if client is None:
+                    client = _pick_client(_registry(), "Whose account?")
+                    if client is None or client is BACK:
+                        return CANCELLED
+                if provider is None:
+                    provider = choose_one("Which provider?", known_providers(),
+                                          can_go_back=True)
+                    if provider is BACK:
+                        client, provider = (None if args.client is None
+                                            else args.client), None
+                        if args.client is not None:
+                            return CANCELLED    # nothing above it to go back to
+                        continue
+                    if provider is None:
+                        return CANCELLED
+                if args.command == "tools" or tool is not None:
+                    break
+
+                names = _tool_names(client, provider)
+                if names is None:
+                    return 2
+                tool = choose_one(f"Which {provider} tool?", names,
+                                  can_go_back=True)
+                if tool is BACK:
+                    provider, tool = (None if args.provider is None
+                                      else args.provider), None
+                    if args.provider is not None:
+                        return CANCELLED
+                    continue
+                if tool is None:
+                    return CANCELLED
+                break
+
+        if args.command == "tools":
+            return list_tools(client, provider, tool, args.as_json)
         given = args.args_json
         if args.args_file:
             if given:
@@ -1595,18 +1627,23 @@ def main(argv: list[str] | None = None) -> int:
                 return rename(*args.names)
             if len(args.names) == 1:
                 parser.error("clients rename takes the old name and the new one")
-            old_name = _pick_client(_registry(), "Rename which client?")
-            if old_name is None:
-                return CANCELLED
-            print(f"New name for {old_name!r}: ", end="", file=sys.stderr,
-                  flush=True)
-            try:
-                fresh = input().strip()
-            except (EOFError, KeyboardInterrupt):
-                print(file=sys.stderr)
-                return CANCELLED
-            if not fresh:
-                return CANCELLED
+            from munim import pick as _pick
+
+            with _pick.full_screen():
+                while True:
+                    old_name = _pick_client(_registry(),
+                                            "Rename which client?")
+                    if old_name is None or old_name is BACK:
+                        return CANCELLED
+                    fresh = _pick.ask_line(
+                        f"  New name for {old_name} "
+                        f"(Esc to pick a different client): ")
+                    if fresh is None:
+                        continue        # up a level, pick a different client
+                    fresh = fresh.strip()
+                    if not fresh:
+                        return CANCELLED
+                    break
             return rename(old_name, fresh)
         if args.action == "forget":
             name = args.names[0] if args.names else _pick_client(_registry())
@@ -1621,12 +1658,21 @@ def main(argv: list[str] | None = None) -> int:
             # Two pickers rather than one, because merge is not symmetric: the
             # source is emptied into the target and then stops existing. Asking
             # twice, in that order, is what makes which is which visible.
-            source = _pick_client(_registry(), "Merge which client away?")
-            if source is None:
-                return CANCELLED
-            target = _pick_client(_registry(), f"Into which client?")
-            if target is None:
-                return CANCELLED
+            from munim import pick as _pick
+
+            with _pick.full_screen():
+                while True:
+                    source = _pick_client(_registry(),
+                                          "Merge which client away?")
+                    if source is None or source is BACK:
+                        return CANCELLED
+                    target = _pick_client(_registry(), "Into which client?",
+                                          can_go_back=True)
+                    if target is BACK:
+                        continue        # up a level, pick a different source
+                    if target is None:
+                        return CANCELLED
+                    break
             if source == target:
                 print("A client cannot be merged into itself.", file=sys.stderr)
                 return 2
@@ -1638,15 +1684,22 @@ def main(argv: list[str] | None = None) -> int:
                 parser.error('clients domain takes a client and a site: '
                              'munim clients domain "Balaji Roofings" '
                              'balajiroofingindustries.com')
-            name = _pick_client(_registry())
-            if name is None:
-                return 2
-            print(f"Site for {name!r}: ", end="", file=sys.stderr, flush=True)
-            try:
-                site = input().strip()
-            except (EOFError, KeyboardInterrupt):
-                print(file=sys.stderr)
-                return 2
+            from munim import pick as _pick
+
+            with _pick.full_screen():
+                while True:
+                    name = _pick_client(_registry())
+                    if name is None or name is BACK:
+                        return CANCELLED
+                    site = _pick.ask_line(
+                        f"  Site for {name} "
+                        f"(Esc to pick a different client): ")
+                    if site is None:
+                        continue        # up a level, pick a different client
+                    site = site.strip()
+                    if not site:
+                        return CANCELLED
+                    break
             return set_domain(name, site)
 
         from munim.connected import connections, describe
