@@ -219,3 +219,52 @@ async def test_every_tool_that_changes_something_names_its_client(tmp_path):
     for name in ("plan_mail_setup", "apply_mail_setup"):
         assert name in MUTATING, f"{name} writes and is not declared mutating"
         assert "client" in tools[name].inputSchema.get("required", []), name
+
+
+async def test_a_mail_plan_without_the_rest_key_returns_the_fix_not_a_traceback(
+        tmp_path):
+    """The reported confusion, end to end. `client_status` said resend was
+    connected, `plan_mail_setup` said there was no resend credential, and both
+    were reading a different store. It now says which one and how to add it,
+    as a result with a `fix` rather than a raised ToolError, because a caller
+    reading "Error executing tool" has to decide whether something broke."""
+    import json
+
+    from munim.registry import ClientRecord, Registry
+    from munim.server import build_server
+
+    class Ring:
+        def __init__(self, store): self.store = store
+        def get_password(self, service, account):
+            return self.store.get((service, account))
+        def set_password(self, service, account, secret):
+            self.store[(service, account)] = secret
+        def delete_password(self, service, account):
+            self.store.pop((service, account), None)
+
+    class Keys:
+        def __init__(self, ring): self._ring = ring
+        def get(self, client, provider):
+            return self._ring.get_password(f"munim:{provider}", client)
+        def set(self, client, provider, secret):
+            self._ring.set_password(f"munim:{provider}", client, secret)
+
+    reg = Registry(tmp_path / "r.json")
+    reg.add(ClientRecord(name="Acme Ltd", domain="acme.example"))
+    record = reg.clients()[0]
+
+    # An MCP session for resend, and no pasted key: exactly the shape reported.
+    ring = Ring({("munim-mcp:resend:tokens", record.id): '{"a": 1}'})
+    server = build_server(backend=Keys(ring), registry=reg,
+                          runs_dir=tmp_path / "runs",
+                          reports_dir=tmp_path / "reports", keyring=ring)
+
+    result = await server.call_tool(
+        "plan_mail_setup", {"client": "Acme Ltd", "domain": "acme.example"})
+    blocks = result[0] if isinstance(result, tuple) else result
+    shaped = json.loads((blocks[0] if isinstance(blocks, list) else blocks).text)
+
+    assert "MCP session" in shaped["error"], \
+        "it did not mention the session that does exist"
+    assert "REST API" in shaped["error"], "it did not say what this path needs"
+    assert shaped["fix"] == 'munim connect "Acme Ltd" resend --token'

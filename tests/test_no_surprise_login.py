@@ -129,3 +129,22 @@ def test_the_filter_is_not_stacked_once_per_session():
     hush_teardown()
     from munim.remote.session import _QuietTeardown
     assert sum(isinstance(f, _QuietTeardown) for f in logger.filters) == 1
+
+
+def test_the_sign_in_prompt_never_goes_to_stdout():
+    """The MCP server speaks JSON-RPC over stdout. One non-protocol line there
+    makes the client drop the server, which is what "all fourteen tools
+    vanished mid-session and did not come back" looks like from the outside.
+
+    No server path reaches this today, because each passes `allow_login=False`.
+    The default is `True`, so the distance between unreachable and reachable is
+    one keyword argument, and this is cheaper than remembering that."""
+    from pathlib import Path
+
+    source = Path("src/munim/remote/session.py").read_text()
+    for line in source.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("print(") or stripped.startswith("print(f"):
+            assert "file=sys.stderr" in line or "file=sys.stderr" in source[
+                source.index(line):source.index(line) + 400], \
+                f"a print in the session module may reach stdout: {stripped}"

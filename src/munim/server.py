@@ -23,7 +23,7 @@ from mcp.server.fastmcp import FastMCP
 from munim.agent.launch import launch
 from munim.checks.dns import run_all_async, run_reachability_async
 from munim.connect.oauth import PROVIDERS as OAUTH_PROVIDERS
-from munim.connected import reachable
+from munim.connected import connections, reachable
 from munim.connect.token import TokenConnector
 from munim.container import Container, KeychainBackend, UnknownClient
 from munim.env import load as load_env
@@ -51,7 +51,7 @@ CROSS_CLIENT = {"find_across_clients", "ask_across_clients",
 PROVIDERS = ("cloudflare", "vercel", "resend")
 
 
-def _shaped(record, stored: list[str], found) -> dict:
+def _shaped(record, stored: list[str], found, kinds=None) -> dict:
     """One client's row: what is stored, and what actually opens.
 
     Both are reported. `connected` answers "can I use this right now", which is
@@ -85,7 +85,7 @@ def _shaped(record, stored: list[str], found) -> dict:
 
 
 def build_server(backend=None, registry=None, runs_dir=None,
-                 reports_dir=None) -> FastMCP:
+                 reports_dir=None, keyring=None) -> FastMCP:
     server = FastMCP("munim")
     backend = backend or KeychainBackend()
     registry = registry or Registry(Path.home() / ".munim" / "registry.json")
@@ -96,7 +96,11 @@ def build_server(backend=None, registry=None, runs_dir=None,
     reports = Path(reports_dir) if reports_dir else None
 
     def container_for(client: str) -> Container:
-        return Container.for_client(registry, client, backend)
+        # Both stores. `backend` holds pasted API keys and `keyring` holds MCP
+        # sessions, and a container needs to know about the second only to
+        # explain a refusal about the first. Threaded rather than defaulted so
+        # a test watches the same store the server does.
+        return Container.for_client(registry, client, backend, keyring=keyring)
 
     def resolve(target: str) -> ClientRecord:
         """Turn whatever the operator said into a client.
@@ -141,18 +145,31 @@ def build_server(backend=None, registry=None, runs_dir=None,
         So this asks each provider, concurrently. Pass `check=false` to skip
         that and report only what is stored, which is instant and was the old
         behaviour.
+
+        `stored` is the union of two different things and says which is which.
+        `api_key` is a pasted key, used by the REST adapters; `mcp_session` is
+        an OAuth session, used by the provider's own tools. A provider can have
+        one and not the other, which is how `plan_mail_setup` refused a client
+        that `client_status` had just called connected. Neither list is a claim
+        that the credential works: it is a claim that one is filed.
         """
         from munim import health
 
         records = registry.clients()
-        stored = {r.name: reachable(r.id, backend) for r in records}
+        stored = {r.name: reachable(r.id, backend, keyring) for r in records}
+        by_kind = {}
+        for r in records:
+            keys, sessions = connections(r.id, backend, keyring)
+            by_kind[r.name] = {"api_key": keys, "mcp_session": sessions}
         if not check:
             return [{"client": r.name, "domain": r.domain,
-                     "stored": stored[r.name], "checked": False}
+                     "stored": stored[r.name], **by_kind[r.name],
+                     "checked": False}
                     for r in records]
 
         found = await health.check_all_async(registry, backend)
-        return [_shaped(r, stored[r.name], found) for r in records]
+        return [_shaped(r, stored[r.name], found, by_kind[r.name])
+                for r in records]
 
     @server.tool()
     async def find_across_clients(need: str) -> list[dict]:
@@ -331,7 +348,9 @@ def build_server(backend=None, registry=None, runs_dir=None,
     # ---- the provider's own tools ----------------------------------------
 
     @server.tool()
-    async def list_provider_tools(client: str, provider: str) -> dict:
+    async def list_provider_tools(client: str, provider: str,
+                                  names_only: bool = False,
+                                  matching: str = "") -> dict:
         """What this client's account with this provider can actually be asked to do.
 
         Every provider here runs its own MCP server with its own tools, and
@@ -347,8 +366,14 @@ def build_server(backend=None, registry=None, runs_dir=None,
         `read_only` is what the provider says about its own tool, and null means
         it said nothing. It is reported, not enforced; naming a client is what
         unlocks writing (D5).
+
+        `names_only` returns the name and `read_only` and nothing else, which
+        for Resend is 2KB against 122KB. Use it first: the full listing has
+        exceeded a caller's response limit outright. `matching` filters on the
+        name, the description **and** the argument schema, so "which tools take
+        a teamId" is answerable, which it is not by name and description alone.
         """
-        from munim.remote.passthrough import known_providers, tools_for
+        from munim.remote.passthrough import known_providers, narrow, tools_for
 
         record = registry.get(client)
         try:
@@ -364,8 +389,13 @@ def build_server(backend=None, registry=None, runs_dir=None,
         except NoRemoteServer as unknown:
             return {"client": record.name, "provider": provider,
                     "error": str(unknown), "providers": known_providers()}
-        return {"client": record.name, "provider": provider,
-                "count": len(tools), "tools": tools}
+        shown = narrow(tools, names_only=names_only, matching=matching)
+        listed = {"client": record.name, "provider": provider,
+                  "count": len(shown), "tools": shown}
+        if len(shown) != len(tools):
+            # So a filtered listing cannot be mistaken for the whole surface.
+            listed["of"] = len(tools)
+        return listed
 
     @server.tool()
     async def call_provider_tool(client: str, provider: str, tool: str,
@@ -413,6 +443,58 @@ def build_server(backend=None, registry=None, runs_dir=None,
         # under, and handing an id back would be Munim's bookkeeping leaking.
         return {**result, "client": record.name, "run_id": log.run_id}
 
+    @server.tool()
+    async def call_provider_api(client: str, provider: str, path: str,
+                                method: str = "GET", query: dict | None = None,
+                                body: dict | None = None) -> dict:
+        """One HTTP call to a provider's own API, with one client's credential.
+
+        The way down a layer when a provider's MCP server does not publish what
+        you need. Vercel's publishes no environment-variable write and no way to
+        attach a domain to a project, so those are reachable through no tool at
+        any layer; this is how they become reachable.
+
+        `path` is a path, not a URL, and that is enforced rather than assumed:
+        an absolute URL would send this client's credential to whatever host it
+        named. The provider's host is asserted before anything is sent.
+
+        Every call is recorded as a mutation whatever the method, because an
+        HTTP verb is a convention and not an annotation, and this will not claim
+        a read on the strength of one. The response body is deliberately **not**
+        logged: a raw environment endpoint returns secret values.
+
+        Works for cloudflare, vercel and resend, the three whose REST base URL
+        and header shape Munim knows. It is not a universal escape hatch.
+        """
+        from munim.container import UnknownCredential, UnsupportedProvider
+        from munim.remote.rawcall import UnsafePath, call as raw, providers
+        from munim.remote.session import freshen
+
+        record = registry.get(client)
+        log = RunLog(new_run_id(), runs)
+        # Before the container reads anything: where a REST call rides the MCP
+        # session's token, only an async session can renew it, and `Container`
+        # is synchronous.
+        await freshen(record.id, provider)
+        try:
+            result = await raw(container_for(record.name), provider, path,
+                               method=method, query=query, body=body, log=log)
+        except UnsupportedProvider as unknown:
+            return {"client": record.name, "provider": provider,
+                    "error": str(unknown), "providers": providers()}
+        except UnsafePath as unsafe:
+            return {"client": record.name, "provider": provider,
+                    "error": str(unsafe),
+                    "fix": "pass a path beginning with '/', not a URL"}
+        except UnknownCredential as missing:
+            return {"client": record.name, "provider": provider,
+                    "error": str(missing),
+                    "fix": f'munim connect "{record.name}" {provider} --token'}
+        except ValueError as bad:
+            return {"client": record.name, "provider": provider,
+                    "error": str(bad)}
+        return {**result, "client": record.name, "run_id": log.run_id}
+
     # ---- repair ----------------------------------------------------------
 
     @server.tool()
@@ -428,10 +510,20 @@ def build_server(backend=None, registry=None, runs_dir=None,
         a plan is made of until it exists. That adds nothing to anyone's DNS.
         """
         from munim.agent.mailplan import plan as make_plan
+        from munim.container import UnknownCredential
 
         record = registry.get(client)
         log = RunLog(new_run_id(), runs)
-        made = await make_plan(container_for(record.name), record.domain or domain, log)
+        try:
+            made = await make_plan(container_for(record.name),
+                                   record.domain or domain, log)
+        except UnknownCredential as missing:
+            # Returned rather than raised, like every other refusal here that
+            # has a next step. A caller reading "Error executing tool" has to
+            # decide whether something broke; a `fix` field says it did not.
+            return {"client": record.name, "domain": record.domain or domain,
+                    "error": str(missing),
+                    "fix": f'munim connect "{record.name}" resend --token'}
         return {**made.to_dict(), "run_id": log.run_id}
 
     @server.tool()
@@ -479,20 +571,25 @@ def build_server(backend=None, registry=None, runs_dir=None,
         """What is known about one client. Never returns a credential.
 
         `connected` is the live answer, for the same reason as `list_clients`.
+        `api_key` and `mcp_session` say which store each entry in `stored` came
+        from, because a client can have one and not the other and the two are
+        not interchangeable.
         """
         from munim import health
 
         record = registry.get(client)
-        stored = reachable(record.id, backend)
+        stored = reachable(record.id, backend, keyring)
+        keys, sessions = connections(record.id, backend, keyring)
+        kinds = {"api_key": keys, "mcp_session": sessions}
         available = [p for p in PROVIDERS if p in OAUTH_PROVIDERS]
         if not check:
             return {"client": record.name, "domain": record.domain,
-                    "stored": stored, "checked": False,
+                    "stored": stored, **kinds, "checked": False,
                     "oauth_available": available}
 
         found = await asyncio.gather(
             *(health.check(record.id, record.name, p) for p in stored))
-        return {**_shaped(record, stored, found),
+        return {**_shaped(record, stored, found, kinds),
                 "oauth_available": available}
 
     # ---- write within ----------------------------------------------------

@@ -15,7 +15,7 @@ from munim.registry import ClientRecord, Registry
 @pytest.fixture
 def registry(tmp_path):
     reg = Registry(tmp_path / "r.json")
-    reg.add(ClientRecord(name="Balaji Roofings", domain="balajiroofings.example"))
+    reg.add(ClientRecord(name="Acme Ltd", domain="acme.example"))
     reg.add(ClientRecord(name="Kloudfirst", domain="kloudfirst.com"))
     return reg
 
@@ -28,7 +28,7 @@ def _answers(*replies):
 def test_a_number_picks_the_client_it_listed(registry):
     """Listed alphabetically, so the number means the same thing twice."""
     chosen = cli.ask_which_client(registry, ask=_answers("1"))
-    assert chosen == registry.get("Balaji Roofings").id
+    assert chosen == registry.get("Acme Ltd").id
 
 
 def test_a_name_typed_straight_in_works(registry):

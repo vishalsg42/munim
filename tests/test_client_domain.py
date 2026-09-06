@@ -7,8 +7,9 @@ that is always up being watched instead of the site that can break.
 
 That happened on a real client in this project. The site returned 404 for long
 enough to be noticed by a person, and munim reported everything fine, because it
-was watching `balajiroofings-quote.vercel.app` rather than
-`balajiroofingindustries.com`.
+was watching the Vercel preview hostname rather than the domain the business
+actually uses. Their names are not written down here: they did not consent to a
+public repository.
 """
 
 import pytest

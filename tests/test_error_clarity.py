@@ -106,3 +106,81 @@ def _tool(server, name):
     if asyncio.iscoroutinefunction(fn):
         return lambda **kw: asyncio.run(fn(**kw))
     return fn
+
+
+# ---- two stores, and a refusal that says which one is empty --------------
+
+
+class _Sessions:
+    """A vault holding one MCP session, the way `munim connect` leaves it."""
+
+    def __init__(self, *, client="c_1", provider="resend"):
+        self.store = {(f"munim-mcp:{provider}:tokens", client): '{"a": 1}'}
+        self.asked = []
+
+    def get_password(self, service, account):
+        self.asked.append((service, account))
+        return self.store.get((service, account))
+
+    def set_password(self, service, account, secret):
+        self.store[(service, account)] = secret
+
+    def delete_password(self, service, account):
+        self.store.pop((service, account), None)
+
+
+def test_a_provider_connected_by_oauth_says_so_rather_than_no_credential():
+    """An operator was told by `client_status` that resend was connected and by
+    `plan_mail_setup` that it had no resend credential, in the same minute.
+    Both were true, about different stores, and neither said so."""
+    from munim.container import Container, UnknownCredential
+
+    box = Container("c_1", Backend(), keyring=_Sessions())
+
+    with pytest.raises(UnknownCredential) as caught:
+        box.http("resend")
+
+    said = str(caught.value)
+    assert "MCP session" in said, "it did not mention the session that exists"
+    assert "REST API" in said, "it did not say what this path actually needs"
+    assert "--token" in said, "it did not say how to fix it"
+
+
+def test_a_provider_with_neither_credential_keeps_the_shorter_message():
+    """The longer message is only useful when there is something to contrast
+    with. Saying it always would be noise on the ordinary case."""
+    from munim.container import Container, UnknownCredential
+
+    box = Container("c_1", Backend(), keyring=_Sessions(provider="vercel"))
+
+    with pytest.raises(UnknownCredential) as caught:
+        box.http("resend")
+
+    said = str(caught.value)
+    assert "no resend credential" in said
+    assert "MCP session" not in said
+
+
+def test_the_session_lookup_names_only_this_client():
+    """The isolation property, extended to the second store. `test_isolation`
+    watches the injected backend and would have kept passing while a session
+    read went to the module default and asked about anyone."""
+    from munim.container import Container, UnknownCredential
+
+    sessions = _Sessions()
+    box = Container("c_1", Backend(), keyring=sessions)
+
+    with pytest.raises(UnknownCredential):
+        box.http("resend")
+
+    assert sessions.asked, "the session store was never consulted"
+    assert all(account == "c_1" for _, account in sessions.asked), \
+        f"a container asked about another client: {sessions.asked}"
+
+
+def test_a_container_with_no_keyring_still_refuses_cleanly():
+    """The seam is optional: adapters built in tests pass no keyring at all."""
+    from munim.container import Container, UnknownCredential
+
+    with pytest.raises(UnknownCredential, match="no resend credential"):
+        Container("c_1", Backend()).http("resend")

@@ -18,6 +18,8 @@ import stat
 
 import pytest
 
+import time
+
 from munim import vault
 
 
@@ -62,10 +64,10 @@ def test_two_clients_never_share_a_record(store):
 def test_a_client_name_with_spaces_is_not_ambiguous(store):
     """Accounts are not always `c_` hex: sessions are filed under the operator's
     own label during a rename, and the provisional key is "…connecting"."""
-    vault.set_password("munim-mcp:vercel", "Balaji Roofings", "a")
+    vault.set_password("munim-mcp:vercel", "Acme Ltd", "a")
     vault.set_password("munim-mcp:vercel", "…connecting", "b")
 
-    assert vault.get_password("munim-mcp:vercel", "Balaji Roofings") == "a"
+    assert vault.get_password("munim-mcp:vercel", "Acme Ltd") == "a"
     assert vault.get_password("munim-mcp:vercel", "…connecting") == "b"
 
 
@@ -226,3 +228,71 @@ def test_adoption_never_overwrites_what_is_already_here(store, monkeypatch):
     vault.adopt_keychain(["c_1"], ["cloudflare"])
 
     assert vault.get_password("munim-mcp:cloudflare:tokens", "c_1") == "mine"
+
+
+# ---- a write waits for another process, but not forever -----------------
+
+
+def test_a_held_store_gives_up_with_a_sentence_rather_than_stalling(
+        tmp_path, monkeypatch):
+    """Reproduced against a live MCP server: another process holding the store
+    stalled the server's event loop for exactly as long as it held it, 8.07s
+    for 8s of contention, and the client saw a server that had stopped
+    answering. `flock(LOCK_EX)` with no timeout waits forever, and every store
+    write takes it, including the ones the server makes when a probe refreshes
+    a token."""
+    import fcntl
+
+    monkeypatch.setenv("MUNIM_CREDENTIALS", str(tmp_path / "credentials.json"))
+    monkeypatch.setattr(vault, "WAIT_FOR_STORE", 0.3)
+
+    held = open(vault._lock_path(), "a+")
+    fcntl.flock(held.fileno(), fcntl.LOCK_EX)
+    try:
+        started = time.monotonic()
+        with pytest.raises(vault.StoreUnavailable, match="held the credential"):
+            with vault._Lock():
+                pass
+        waited = time.monotonic() - started
+    finally:
+        fcntl.flock(held.fileno(), fcntl.LOCK_UN)
+        held.close()
+
+    assert waited < 3, f"it waited {waited:.1f}s past its own bound"
+
+
+def test_an_uncontended_write_is_not_slowed_by_the_bound(tmp_path, monkeypatch):
+    """The bound is a ceiling, not a delay. Polling must not cost anything in
+    the ordinary case, which is every write that is not contended."""
+    monkeypatch.setenv("MUNIM_CREDENTIALS", str(tmp_path / "credentials.json"))
+
+    started = time.monotonic()
+    for _ in range(20):
+        vault.set_password("munim:test", "c_1", "secret")
+    took = time.monotonic() - started
+
+    assert vault.get_password("munim:test", "c_1") == "secret"
+    assert took < 2, f"twenty uncontended writes took {took:.1f}s"
+
+
+def test_the_lock_is_released_when_the_wait_gives_up(tmp_path, monkeypatch):
+    """A failed acquire must not leave a file handle holding anything, or the
+    next write in the same process inherits the problem."""
+    import fcntl
+
+    monkeypatch.setenv("MUNIM_CREDENTIALS", str(tmp_path / "credentials.json"))
+    monkeypatch.setattr(vault, "WAIT_FOR_STORE", 0.2)
+
+    held = open(vault._lock_path(), "a+")
+    fcntl.flock(held.fileno(), fcntl.LOCK_EX)
+    try:
+        with pytest.raises(vault.StoreUnavailable):
+            with vault._Lock():
+                pass
+    finally:
+        fcntl.flock(held.fileno(), fcntl.LOCK_UN)
+        held.close()
+
+    # And once the other process lets go, the next write succeeds.
+    vault.set_password("munim:test", "c_1", "after")
+    assert vault.get_password("munim:test", "c_1") == "after"

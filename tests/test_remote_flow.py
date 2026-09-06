@@ -114,10 +114,10 @@ async def test_two_clients_log_in_and_keep_separate_tokens():
     _stand_up_provider(issued)
     ring = FakeKeyring()
 
-    await _log_in("Balaji Roofings", ring)
+    await _log_in("Acme Ltd", ring)
     await _log_in("Kloudfirst", ring)
 
-    a = await KeychainTokenStorage("Balaji Roofings", "cloudflare", ring).get_client_info()
+    a = await KeychainTokenStorage("Acme Ltd", "cloudflare", ring).get_client_info()
     b = await KeychainTokenStorage("Kloudfirst", "cloudflare", ring).get_client_info()
 
     assert a is not None and b is not None, "registration did not reach storage"
@@ -131,7 +131,7 @@ async def test_two_clients_log_in_and_keep_separate_tokens():
 async def test_the_authorization_url_carries_pkce_and_our_callback():
     _stand_up_provider({})
     ring = FakeKeyring()
-    url = await _log_in("Balaji Roofings", ring)
+    url = await _log_in("Acme Ltd", ring)
 
     query = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
     assert query["code_challenge_method"] == ["S256"]

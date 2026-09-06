@@ -85,12 +85,22 @@ class KeychainBackend:
 class Container:
     """One client's world. Bound at construction; cannot widen."""
 
-    def __init__(self, client: str, backend: CredentialBackend) -> None:
+    def __init__(self, client: str, backend: CredentialBackend,
+                 keyring=None) -> None:
         self._client = client
         self._backend = backend
+        # The session store, and a seam so a test can watch it. `backend` holds
+        # pasted API keys; `keyring` is where OAuth sessions live. Nothing here
+        # reads a session's token, only whether one exists, and only to explain
+        # a refusal. Without the seam that read would reach the module default
+        # and `test_isolation` would keep asserting that every *backend* call
+        # names one client while a second store went unwatched, which is worse
+        # than a failing test.
+        self._keyring = keyring
 
     @classmethod
-    def for_client(cls, registry, client: str, backend: CredentialBackend) -> "Container":
+    def for_client(cls, registry, client: str, backend: CredentialBackend,
+                   keyring=None) -> "Container":
         """Construct only for a client the registry knows, and bind to their id.
 
         Callers pass whatever they were given, usually a name. What gets bound
@@ -104,7 +114,7 @@ class Container:
         wanted = client.strip()
         for record in registry.clients():
             if wanted in (record.id, record.name) or wanted.lower() == record.name.lower():
-                box = cls(record.id, backend)
+                box = cls(record.id, backend, keyring=keyring)
                 box._label = record.name
                 return box
         raise UnknownClient(f"no client registered as {client!r}")
@@ -119,6 +129,47 @@ class Container:
         """What this client is called, falling back to the id when unknown."""
         return getattr(self, "_label", None) or self._client
 
+    def _has_session(self, provider: str) -> bool:
+        """Whether an MCP session exists for this client and provider.
+
+        Presence only: never the token. Deliberately the narrow
+        `KeychainTokenStorage.holds()` rather than `connections()`, which walks
+        every provider and re-parses the whole store for each, 14 to 25 file
+        reads to answer a question about one. `connected.py:50` already records
+        that going wider there took the suite from 47 seconds to 177.
+        """
+        from munim.remote.storage import KeychainTokenStorage
+
+        try:
+            return bool(KeychainTokenStorage(
+                self._client, provider, self._keyring).holds())
+        except Exception:
+            # A store that cannot be read is not a session, and this is only
+            # ever called to make a refusal more useful.
+            return False
+
+    def _session_token(self, provider: str) -> str | None:
+        """The MCP session's access token, where that provider's REST API takes
+        it. None everywhere else, which is the default.
+
+        Whoever calls this is responsible for the token being fresh: nothing
+        synchronous can refresh one. `remote/session.freshen` is the async step
+        that does, and the tools that reach a REST path call it first.
+        """
+        from munim.remote.servers import server_for
+        from munim.remote.storage import KeychainTokenStorage
+
+        server = server_for(provider)
+        if server is None or not getattr(server, "rest_takes_session", False):
+            return None
+        try:
+            held = KeychainTokenStorage(
+                self._client, provider, self._keyring)._read("tokens") or {}
+        except Exception:
+            return None
+        token = held.get("access_token")
+        return token if token else None
+
     def _credential(self, provider: str) -> str:
         """Private. Adapters use .http(); nothing else should reach a secret."""
         secret = self._backend.get(self._client, provider)
@@ -128,6 +179,27 @@ class Container:
             # makes the operator map an opaque key back to a client before the
             # message helps at all. Falls back to the id when there is no label,
             # which is a container built without going through the registry.
+            # Two stores, and saying only "no credential" while the other one
+            # holds a live session is how an operator was told a client was
+            # connected by `client_status` and not connected by
+            # `plan_mail_setup`, in the same minute, both truthfully. The
+            # difference is what this needs to say.
+            # Where the provider's own REST API accepts the token its MCP
+            # server issued, the session *is* the credential and asking for a
+            # second one would be bureaucracy. Measured per provider, defaulting
+            # to no, because it is false for two of the three: see
+            # `RemoteServer.rest_takes_session`.
+            borrowed = self._session_token(provider)
+            if borrowed is not None:
+                return borrowed
+            if self._has_session(provider):
+                raise UnknownCredential(
+                    f"{provider} is connected for {self.label!r} as an MCP "
+                    f"session, and this path uses {provider}'s REST API, which "
+                    f"needs its own API key. The two are different credentials "
+                    f"and one does not stand in for the other. Run: "
+                    f'munim connect "{self.label}" {provider} --token'
+                )
             raise UnknownCredential(
                 f"no {provider} credential for client {self.label!r}"
             )

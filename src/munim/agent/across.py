@@ -162,7 +162,7 @@ async def ask(question: str, clients: list[str], *, keyring=None,
     kept, discarded = [], []
     for finding in answer.findings:
         # Matched through `prefix_for`, not by string equality. A model writes
-        # "Grafison" for a client registered as "grafison", and an end-to-end
+        # "Ivy_Fern" for a client registered as "ivy_fern", and an end-to-end
         # run discarded exactly that: a correct, grounded finding reported as an
         # account the agent never read. `prefix_for` is the same normaliser that
         # built the tool prefixes, so a name that reaches the same tools is the

@@ -38,13 +38,13 @@ def _client_info(client_id: str) -> OAuthClientInformationFull:
 
 async def test_two_clients_hold_separate_tokens_for_one_provider():
     ring = FakeKeyring()
-    a = KeychainTokenStorage("Balaji Roofings", "cloudflare", ring)
+    a = KeychainTokenStorage("Acme Ltd", "cloudflare", ring)
     b = KeychainTokenStorage("Kloudfirst", "cloudflare", ring)
 
-    await a.set_tokens(_token("token-for-balaji"))
+    await a.set_tokens(_token("token-for-acme"))
     await b.set_tokens(_token("token-for-kloudfirst"))
 
-    assert (await a.get_tokens()).access_token == "token-for-balaji"
+    assert (await a.get_tokens()).access_token == "token-for-acme"
     assert (await b.get_tokens()).access_token == "token-for-kloudfirst"
 
 
@@ -52,7 +52,7 @@ async def test_two_clients_hold_separate_registrations():
     """Each client is its own registered application, which is why the provider
     has nothing to clobber."""
     ring = FakeKeyring()
-    a = KeychainTokenStorage("Balaji Roofings", "cloudflare", ring)
+    a = KeychainTokenStorage("Acme Ltd", "cloudflare", ring)
     b = KeychainTokenStorage("Kloudfirst", "cloudflare", ring)
 
     await a.set_client_info(_client_info("client-id-a"))
@@ -64,8 +64,8 @@ async def test_two_clients_hold_separate_registrations():
 
 async def test_one_client_across_providers_does_not_collide():
     ring = FakeKeyring()
-    cf = KeychainTokenStorage("Balaji Roofings", "cloudflare", ring)
-    vc = KeychainTokenStorage("Balaji Roofings", "vercel", ring)
+    cf = KeychainTokenStorage("Acme Ltd", "cloudflare", ring)
+    vc = KeychainTokenStorage("Acme Ltd", "vercel", ring)
 
     await cf.set_tokens(_token("cloudflare-token"))
     await vc.set_tokens(_token("vercel-token"))
@@ -116,8 +116,8 @@ def test_the_consent_screen_names_the_client():
     application name they see has to say which client they are connecting."""
     from munim.remote.session import auth_for
 
-    auth = auth_for("Balaji Roofings", "cloudflare", keyring=FakeKeyring())
-    assert auth.context.client_metadata.client_name == "Munim (Balaji Roofings)"
+    auth = auth_for("Acme Ltd", "cloudflare", keyring=FakeKeyring())
+    assert auth.context.client_metadata.client_name == "Munim (Acme Ltd)"
 
 
 def test_every_provider_registers_as_a_public_client():

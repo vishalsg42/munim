@@ -36,6 +36,11 @@ except ImportError:                     # Windows
 HOME = Path.home() / ".munim"
 VERSION = 1
 
+# How long a write waits for another process before giving up and saying so.
+# Long enough to cover a normal write and a slow disk; short enough that a
+# server whose loop is blocked on it still answers before a client gives up.
+WAIT_FOR_STORE = 10.0
+
 
 class StoreUnavailable(RuntimeError):
     """The file exists and cannot be used.
@@ -84,8 +89,35 @@ class _Lock:
         target.parent.mkdir(parents=True, exist_ok=True)
         self._handle = open(target, "a+")
         os.chmod(target, 0o600)
-        fcntl.flock(self._handle.fileno(), fcntl.LOCK_EX)
-        return self
+
+        # Bounded, and polled rather than blocking. `flock(LOCK_EX)` with no
+        # timeout waits forever, and this is taken by every store write,
+        # including the ones the MCP server makes from inside its event loop
+        # when a probe refreshes a token. Another process holding the store
+        # therefore stalled the whole loop: measured at 8.07s of dead server
+        # for 8s of contention, and the operator who reported it saw every tool
+        # stop answering and the client give up.
+        #
+        # A bound cannot make the wait shorter than the other writer needs. What
+        # it does is turn an unbounded stall into a failure with a sentence on
+        # it, which is the difference between a tool that is slow and a server
+        # that looks dead.
+        deadline = time.monotonic() + WAIT_FOR_STORE
+        while True:
+            try:
+                fcntl.flock(self._handle.fileno(),
+                            fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return self
+            except OSError:
+                if time.monotonic() >= deadline:
+                    self._handle.close()
+                    self._handle = None
+                    raise StoreUnavailable(
+                        f"another munim process has held the credential store "
+                        f"for more than {WAIT_FOR_STORE:.0f}s. If one is stuck "
+                        f"mid-login, close it and try again."
+                    )
+                time.sleep(0.02)
 
     def __exit__(self, *exc) -> None:
         if self._handle is not None:

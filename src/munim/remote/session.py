@@ -14,6 +14,8 @@ a session for a client that is not registered.
 
 import asyncio
 import logging
+import sys
+import time
 import urllib.parse
 from contextlib import asynccontextmanager, contextmanager
 
@@ -466,10 +468,18 @@ def auth_for(client: str, provider: str, *, keyring=None,
             # The caller may not have a name yet: connecting without one uses a
             # provisional key until the provider says which account it was, and
             # printing that key reads as gibberish.
-            # "the Balaji Roofings's cloudflare account" was reading badly:
+            # "the Acme Ltd's cloudflare account" was reading badly:
             # the article and the possessive cannot both be there.
             whose = f"{label}'s " if not label.startswith("…") else "the "
-            print(f"Sign in to {whose}{provider} account:\n{url}", flush=True)
+            # stderr, and not for tidiness. The MCP server speaks JSON-RPC over
+            # **stdout**, so one non-protocol line there makes the client drop
+            # the server: an operator reported every tool vanishing mid-session
+            # and not coming back. No server path reaches this today, because
+            # each passes `allow_login=False` and `redirect` raises before it,
+            # but the default is `True` and the distance between "unreachable"
+            # and "reachable" is one keyword argument.
+            print(f"Sign in to {whose}{provider} account:\n{url}",
+                  file=sys.stderr, flush=True)
             webbrowser.open(url)
 
     async def callback() -> tuple[str, str | None]:
@@ -523,6 +533,38 @@ def auth_for(client: str, provider: str, *, keyring=None,
         redirect_handler=redirect,
         callback_handler=callback,
     )
+
+
+async def freshen(client: str, provider: str, *, keyring=None) -> None:
+    """Renew a stored access token if it has aged out, quietly.
+
+    A session's token is only ever refreshed inside `async_auth_flow`, which
+    runs when a request goes through the MCP transport. `Container` is
+    synchronous and opens no session, so code reading a stored token outside one
+    can tell that it has expired and can never do anything about it. Refusing
+    there would send somebody through a browser login for a token a single
+    refresh would have fixed.
+
+    So: open a session and close it. That is enough to make the SDK refresh and
+    write the new token back, and it is a no-op when the token is still good.
+    Best effort throughout, because this exists to improve the odds for the call
+    that follows, and that call reports its own failure perfectly well.
+    """
+    from munim.remote.storage import KeychainTokenStorage
+
+    try:
+        store = KeychainTokenStorage(client, provider, keyring)
+        expires = store.expires_at()
+        # `None` means unknown, which is true of tokens stored before that
+        # bookkeeping existed. Refresh those too: an unnecessary round trip
+        # costs a second, and an unrefreshed dead token costs a browser login.
+        if expires is not None and expires > time.time() + 60:
+            return
+        async with session_for(client, provider, keyring=keyring,
+                               allow_login=False, verify=False):
+            pass
+    except Exception:
+        return
 
 
 def headers_for(client: str, provider: str, keys=None) -> dict | None:

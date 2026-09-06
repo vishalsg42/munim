@@ -671,7 +671,8 @@ def _tool_names(client: str, provider: str) -> list[str] | None:
 
 
 def list_tools(client: str, provider: str, tool: str | None = None,
-               as_json: bool = False) -> int:
+               as_json: bool = False, names_only: bool = False,
+               matching: str = "") -> int:
     """What this client's provider account can be asked to do.
 
     The counterpart to `munim call`. Every provider here runs its own MCP
@@ -681,7 +682,8 @@ def list_tools(client: str, provider: str, tool: str | None = None,
     import asyncio
     import json
 
-    from munim.remote.passthrough import UnknownTool, describe_tool, tools_for
+    from munim.remote.passthrough import (UnknownTool, describe_tool, narrow,
+                                          tools_for)
     from munim.remote.session import NeedsLogin, NoRemoteServer
 
     record = _resolved(client)
@@ -698,6 +700,11 @@ def list_tools(client: str, provider: str, tool: str | None = None,
             tool_detail(record, provider, one)
             return 0
         tools = asyncio.run(tools_for(record.id, provider))
+        # Naming one tool asks for it in full, so the flags that shrink a
+        # listing have nothing to do there and are ignored above rather than
+        # silently truncating the one thing the operator asked to see.
+        whole = len(tools)
+        tools = narrow(tools, names_only=names_only, matching=matching)
     except NeedsLogin:
         # Both providers refuse `initialize` without a token, so the list
         # cannot be fetched again once the credential dies. What it said last
@@ -720,6 +727,8 @@ def list_tools(client: str, provider: str, tool: str | None = None,
                               "tools": tools}, indent=2))
             return 0
         print(f"⚠ {stale}\n", file=sys.stderr)
+        whole = len(tools)
+        tools = narrow(tools, names_only=names_only, matching=matching)
     except NoRemoteServer as unknown:
         print(str(unknown), file=sys.stderr)
         return 2
@@ -742,9 +751,14 @@ def list_tools(client: str, provider: str, tool: str | None = None,
         # same as one that says a tool writes, and printing "write" for both
         # would be Munim asserting something the provider never said.
         mark = {True: "read-only", False: "writes", None: ""}[tool["read_only"]]
-        first = (tool["does"].splitlines() or [""])[0][:70]
-        print(f"  {mark:<9} {tool['tool']:<28} {first}", file=sys.stderr)
-    print(f"\n{len(tools)} tools. To see one in full:", file=sys.stderr)
+        # `does` is absent under --names-only, which is the point of it.
+        first = ((tool.get("does") or "").splitlines() or [""])[0][:70]
+        print(f"  {mark:<9} {tool['tool']:<28} {first}".rstrip(), file=sys.stderr)
+    # Say what was filtered out, so a narrowed listing cannot be mistaken for
+    # the whole surface the provider offers.
+    shown = (f"{len(tools)} of {whole} tools" if len(tools) != whole
+             else f"{len(tools)} tools")
+    print(f"\n{shown}. To see one in full:", file=sys.stderr)
     print(f'  munim tools "{record.name}" {provider} <tool>', file=sys.stderr)
     return 0
 
@@ -1417,6 +1431,12 @@ def main(argv: list[str] | None = None) -> int:
                          "and its arguments")
     tl.add_argument("--json", action="store_true", dest="as_json",
                     help="machine-readable, for scripts")
+    tl.add_argument("--names-only", action="store_true", dest="names_only",
+                    help="just the names and whether each is read-only: "
+                         "Resend's full listing is 122KB and its names are 2KB")
+    tl.add_argument("--matching", default="", metavar="TEXT",
+                    help="only tools whose name, description or argument "
+                         "schema contains this")
 
     cl = sub.add_parser("call", help="call one of a provider's tools")
     cl.add_argument("client", nargs="?")
@@ -1658,7 +1678,9 @@ def main(argv: list[str] | None = None) -> int:
                 break
 
         if args.command == "tools":
-            return list_tools(client, provider, tool, args.as_json)
+            return list_tools(client, provider, tool, args.as_json,
+                              names_only=getattr(args, "names_only", False),
+                              matching=getattr(args, "matching", ""))
         given = args.args_json
         if args.args_file:
             if given:
@@ -1749,8 +1771,7 @@ def main(argv: list[str] | None = None) -> int:
                 return set_domain(*args.names)
             if len(args.names) == 1:
                 parser.error('clients domain takes a client and a site: '
-                             'munim clients domain "Balaji Roofings" '
-                             'balajiroofingindustries.com')
+                             'munim clients domain "Acme Ltd" acme.example')
             from munim import pick as _pick
 
             with _pick.full_screen():

@@ -134,11 +134,27 @@ they did not consent to a public repository or video.
 
 **Writes.** Nine of Vercel's own tools are write tools and every one of them is
 reachable through `call_provider_tool`, along with Cloudflare's `execute`, which
-has been used against a live client zone. What Vercel's MCP server does **not**
-publish is an environment-variable write or a way to attach a domain to a
-project, so those two operations are reachable through no tool at any layer and
-Munim does not fake them. Resend writes: it can create a domain and trigger
-verification.
+has been used against a live client zone. Resend writes: it can create a domain
+and trigger verification.
+
+What Vercel's MCP server does **not** publish is an environment-variable write
+or a way to attach a domain to a project. An earlier version of this section
+said those were therefore reachable through no tool at any layer, which was
+true and was also an admission that the ceiling on what Munim can do for a
+provider was set by whoever wrote that provider's MCP server. `call_provider_api`
+is the way down: one HTTP call to the provider's own API with the same client's
+credential, for the three whose base URL and header shape are known.
+
+It is the sharpest tool here and the docs say so rather than implying otherwise.
+Every other tool is bounded by a schema somebody else wrote; this one is bounded
+by a host assertion and a run-log entry. `base_url` does not contain it, which
+was measured rather than assumed: httpx honours an absolute URL over the base
+and takes the `Authorization` header along, so the path is validated and the
+built request's host is compared with the provider's before anything is sent.
+Every call is logged as a mutation whatever the method, because an HTTP verb is
+a convention and not an annotation, and the response body is never logged
+because a raw environment endpoint returns the secrets D6 exists to keep out of
+a coding agent's context.
 
 **Not implemented:** resuming an interrupted launch from the run log.
 

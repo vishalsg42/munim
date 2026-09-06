@@ -58,6 +58,32 @@ def _missing(tool, arguments: dict) -> list[str]:
     return [name for name in required if name not in arguments]
 
 
+def narrow(described: list[dict], *, names_only: bool = False,
+           matching: str = "") -> list[dict]:
+    """A listing small enough to hold, and the one the caller asked for.
+
+    Resend publishes 103 tools and their schemas are 122KB; the names alone are
+    2.1KB. An operator hit the second number as a hard limit, had to write the
+    response to a file and parse it, and the question they wanted answered was
+    "which of these take a teamId".
+
+    So `matching` searches the **argument schema** as well as the name and the
+    description. `teamId` appears in neither of the first two for any Vercel
+    tool: a filter over name and description would have returned nothing for
+    the exact example that justifies having a filter.
+    """
+    wanted = matching.strip().lower()
+    if wanted:
+        described = [t for t in described
+                     if wanted in t["tool"].lower()
+                     or wanted in (t.get("does") or "").lower()
+                     or wanted in json.dumps(t.get("arguments") or {}).lower()]
+    if names_only:
+        return [{"tool": t["tool"], "read_only": t["read_only"]}
+                for t in described]
+    return described
+
+
 def known_providers() -> list[str]:
     return sorted(all_servers())
 
@@ -152,13 +178,38 @@ def _flatten(result) -> dict:
             parts.append(text)
 
     structured = getattr(result, "structuredContent", None)
-    out = {"failed": bool(getattr(result, "isError", False))}
+    failed = bool(getattr(result, "isError", False))
+    out = {"failed": failed}
     if structured is not None:
         out["result"] = structured
     elif len(parts) == 1:
         out["result"] = parts[0]
     else:
         out["result"] = parts
+
+    # Keep both halves when they are not the same thing. `structuredContent`
+    # wins above because a caller that parses a result wants the shaped one,
+    # and dropping the text alongside it loses whatever the provider only said
+    # in prose.
+    #
+    # Not gated on `isError`, and that is the lesson rather than an oversight.
+    # Checked against Vercel: a call that returns
+    # `{"error": "Failed to list projects."}` comes back with `isError: False`.
+    # A provider that does not flag its own failures makes any condition
+    # resting on that flag unreliable, so this asks whether information would
+    # be lost, which is a question about the payload rather than about a claim
+    # the provider may not have made.
+    #
+    # Honesty about scope: an operator reported one Vercel tool naming a
+    # missing scope and the fix while another said only "Failed to list
+    # projects." I first said munim swallowed nothing, then found this discard
+    # and said it was their bug. It is a real discard and it is *not* their
+    # case: reproduced live, that call returns one text block, no structured
+    # half, and nothing to lose. Their symptom is Vercel's own terseness.
+    if structured is not None and parts:
+        said = parts[0] if len(parts) == 1 else parts
+        if said != structured:
+            out["said"] = said
     return out
 
 

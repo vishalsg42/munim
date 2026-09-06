@@ -55,6 +55,14 @@ class FakeSession:
             structuredContent=None, isError=self._fails)
 
 
+async def _listing(tools):
+    return SimpleNamespace(tools=tools)
+
+
+async def _answer(result):
+    return result
+
+
 def fake_sessions(monkeypatch, per_client, opened):
     """Point the passthrough at fakes, one per client, recording who was asked."""
 
@@ -83,21 +91,21 @@ async def test_a_call_reaches_only_the_named_clients_session(monkeypatch):
     physically holds one client's tools", so it is asserted rather than assumed.
     """
     opened = []
-    balaji = FakeSession([tool("execute")], "c_balaji", answer={"zone": "balaji"})
+    acme = FakeSession([tool("execute")], "c_acme", answer={"zone": "acme"})
     kloud = FakeSession([tool("execute")], "c_kloud", answer={"zone": "kloud"})
-    fake_sessions(monkeypatch, {"c_balaji": balaji, "c_kloud": kloud}, opened)
+    fake_sessions(monkeypatch, {"c_acme": acme, "c_kloud": kloud}, opened)
 
-    result = await call_tool("c_balaji", "cloudflare", "execute", {"code": "x"})
+    result = await call_tool("c_acme", "cloudflare", "execute", {"code": "x"})
 
-    assert opened == [("c_balaji", "cloudflare")]
-    assert result["result"] == {"zone": "balaji"}
-    assert balaji.called == [("execute", {"code": "x"})]
+    assert opened == [("c_acme", "cloudflare")]
+    assert result["result"] == {"zone": "acme"}
+    assert acme.called == [("execute", {"code": "x"})]
     assert kloud.called == [], "the other client's session was opened"
 
 
 async def test_an_unconnected_client_refuses_rather_than_falling_through(monkeypatch):
     opened = []
-    fake_sessions(monkeypatch, {"c_balaji": FakeSession([tool("execute")], "x")},
+    fake_sessions(monkeypatch, {"c_acme": FakeSession([tool("execute")], "x")},
                   opened)
 
     with pytest.raises(NeedsLogin):
@@ -107,7 +115,7 @@ async def test_an_unconnected_client_refuses_rather_than_falling_through(monkeyp
 async def test_an_unknown_provider_is_refused_before_any_session_opens():
     """No session, no credential lookup, and the message names the real ones."""
     with pytest.raises(NoRemoteServer) as caught:
-        await call_tool("c_balaji", "cloudfare", "execute", {})
+        await call_tool("c_acme", "cloudfare", "execute", {})
 
     assert "cloudflare" in str(caught.value), "the message should name what exists"
 
@@ -145,7 +153,7 @@ async def test_session_for_is_asked_not_to_allow_a_login(monkeypatch):
         yield FakeSession([tool("execute")], client)
 
     monkeypatch.setattr(passthrough, "session_for", fake)
-    await call_tool("c_balaji", "cloudflare", "execute", {})
+    await call_tool("c_acme", "cloudflare", "execute", {})
 
     assert seen["allow_login"] is False
 
@@ -155,11 +163,11 @@ async def test_session_for_is_asked_not_to_allow_a_login(monkeypatch):
 
 async def test_a_tool_that_does_not_exist_names_the_ones_that_do(monkeypatch):
     opened = []
-    fake_sessions(monkeypatch, {"c_balaji": FakeSession(
-        [tool("docs"), tool("search"), tool("execute")], "c_balaji")}, opened)
+    fake_sessions(monkeypatch, {"c_acme": FakeSession(
+        [tool("docs"), tool("search"), tool("execute")], "c_acme")}, opened)
 
     with pytest.raises(UnknownTool) as caught:
-        await call_tool("c_balaji", "cloudflare", "exec", {})
+        await call_tool("c_acme", "cloudflare", "exec", {})
 
     message = str(caught.value)
     assert "exec" in message
@@ -178,23 +186,23 @@ async def test_arguments_pass_through_untouched(monkeypatch):
     would put Munim back in the business of knowing each provider's schema.
     """
     opened = []
-    session = FakeSession([tool("deploy_to_vercel")], "c_balaji")
-    fake_sessions(monkeypatch, {"c_balaji": session}, opened)
+    session = FakeSession([tool("deploy_to_vercel")], "c_acme")
+    fake_sessions(monkeypatch, {"c_acme": session}, opened)
 
     arguments = {"project": {"name": "site", "env": [{"k": "A", "v": "1"}]},
                  "code": "await fetch('https://api')", "force": True,
                  "count": 3, "nothing": None}
-    await call_tool("c_balaji", "vercel", "deploy_to_vercel", dict(arguments))
+    await call_tool("c_acme", "vercel", "deploy_to_vercel", dict(arguments))
 
     assert session.called == [("deploy_to_vercel", arguments)]
 
 
 async def test_no_arguments_is_an_empty_object_not_none(monkeypatch):
     opened = []
-    session = FakeSession([tool("list_projects")], "c_balaji")
-    fake_sessions(monkeypatch, {"c_balaji": session}, opened)
+    session = FakeSession([tool("list_projects")], "c_acme")
+    fake_sessions(monkeypatch, {"c_acme": session}, opened)
 
-    await call_tool("c_balaji", "vercel", "list_projects")
+    await call_tool("c_acme", "vercel", "list_projects")
 
     assert session.called == [("list_projects", {})]
 
@@ -209,17 +217,17 @@ async def test_every_call_lands_in_the_run_log(tmp_path, monkeypatch):
     is the only place a person can see that one call touched one account.
     """
     opened = []
-    fake_sessions(monkeypatch, {"c_balaji": FakeSession(
-        [tool("execute")], "c_balaji", answer={"changed": 1})}, opened)
+    fake_sessions(monkeypatch, {"c_acme": FakeSession(
+        [tool("execute")], "c_acme", answer={"changed": 1})}, opened)
 
     log = RunLog(new_run_id(), tmp_path)
-    await call_tool("c_balaji", "cloudflare", "execute",
+    await call_tool("c_acme", "cloudflare", "execute",
                     {"code": "zones.update()"}, log=log)
 
     events = list(log.read())
     assert len(events) == 1
     event = events[0]
-    assert event.client == "c_balaji"
+    assert event.client == "c_acme"
     assert event.detail["provider"] == "cloudflare"
     assert event.detail["tool"] == "execute"
     assert event.detail["arguments"] == {"code": "zones.update()"}
@@ -235,15 +243,15 @@ async def test_a_read_only_tool_is_an_observation_and_anything_else_a_mutation(
     can write, so it carries no read-only hint.
     """
     opened = []
-    fake_sessions(monkeypatch, {"c_balaji": FakeSession([
+    fake_sessions(monkeypatch, {"c_acme": FakeSession([
         tool("search", read_only=True),
         tool("execute"),
         tool("delete_zone", read_only=True, destructive=True),
-    ], "c_balaji")}, opened)
+    ], "c_acme")}, opened)
 
     log = RunLog(new_run_id(), tmp_path)
     for name in ("search", "execute", "delete_zone"):
-        await call_tool("c_balaji", "cloudflare", name, {}, log=log)
+        await call_tool("c_acme", "cloudflare", name, {}, log=log)
 
     kinds = [e.kind for e in log.read()]
     assert kinds == ["observation", "mutation", "mutation"]
@@ -252,12 +260,12 @@ async def test_a_read_only_tool_is_an_observation_and_anything_else_a_mutation(
 async def test_a_failed_call_is_still_recorded(tmp_path, monkeypatch):
     """An attempt that was refused is a thing that happened to the account."""
     opened = []
-    fake_sessions(monkeypatch, {"c_balaji": FakeSession(
-        [tool("execute")], "c_balaji", answer={"error": "no"}, fails=True)},
+    fake_sessions(monkeypatch, {"c_acme": FakeSession(
+        [tool("execute")], "c_acme", answer={"error": "no"}, fails=True)},
         opened)
 
     log = RunLog(new_run_id(), tmp_path)
-    result = await call_tool("c_balaji", "cloudflare", "execute", {"code": "x"},
+    result = await call_tool("c_acme", "cloudflare", "execute", {"code": "x"},
                              log=log)
 
     assert result["failed"] is True, "a refusal comes back, it does not raise"
@@ -271,11 +279,11 @@ async def test_a_huge_result_is_clipped_in_the_log_but_not_in_the_answer(
     """The log is an audit trail, not a copy of the provider's database."""
     opened = []
     big = {"rows": ["x" * 100 for _ in range(200)]}
-    fake_sessions(monkeypatch, {"c_balaji": FakeSession(
-        [tool("execute")], "c_balaji", answer=big)}, opened)
+    fake_sessions(monkeypatch, {"c_acme": FakeSession(
+        [tool("execute")], "c_acme", answer=big)}, opened)
 
     log = RunLog(new_run_id(), tmp_path)
-    result = await call_tool("c_balaji", "cloudflare", "execute", {}, log=log)
+    result = await call_tool("c_acme", "cloudflare", "execute", {}, log=log)
 
     assert result["result"] == big, "the caller gets the whole thing"
     logged = list(log.read())[0].detail["result"]
@@ -286,10 +294,10 @@ async def test_a_huge_result_is_clipped_in_the_log_but_not_in_the_answer(
 async def test_a_call_without_a_log_still_works(monkeypatch):
     """The CLI always passes one; a direct caller need not be forced to."""
     opened = []
-    fake_sessions(monkeypatch, {"c_balaji": FakeSession([tool("docs")], "x")},
+    fake_sessions(monkeypatch, {"c_acme": FakeSession([tool("docs")], "x")},
                   opened)
 
-    result = await call_tool("c_balaji", "cloudflare", "docs", {})
+    result = await call_tool("c_acme", "cloudflare", "docs", {})
     assert result["tool"] == "docs"
 
 
@@ -298,14 +306,14 @@ async def test_a_call_without_a_log_still_works(monkeypatch):
 
 async def test_listing_reports_what_the_provider_says_about_each_tool(monkeypatch):
     opened = []
-    fake_sessions(monkeypatch, {"c_balaji": FakeSession([
+    fake_sessions(monkeypatch, {"c_acme": FakeSession([
         tool("search", read_only=True, does="Search the docs"),
         tool("execute", does="Run JavaScript",
              schema={"type": "object", "properties": {"code": {"type": "string"}}}),
         tool("delete_zone", read_only=True, destructive=True),
-    ], "c_balaji")}, opened)
+    ], "c_acme")}, opened)
 
-    listed = await tools_for("c_balaji", "cloudflare")
+    listed = await tools_for("c_acme", "cloudflare")
 
     by_name = {t["tool"]: t for t in listed}
     assert by_name["search"]["read_only"] is True
@@ -325,16 +333,16 @@ async def test_an_unannotated_tool_reports_null_not_false(monkeypatch):
     Nothing is being decided here, so the unknown stays visible.
     """
     opened = []
-    fake_sessions(monkeypatch, {"c_balaji": FakeSession(
-        [tool("execute")], "c_balaji")}, opened)
+    fake_sessions(monkeypatch, {"c_acme": FakeSession(
+        [tool("execute")], "c_acme")}, opened)
 
-    listed = await tools_for("c_balaji", "cloudflare")
+    listed = await tools_for("c_acme", "cloudflare")
     assert listed[0]["read_only"] is None
 
 
 async def test_listing_an_unknown_provider_names_the_real_ones():
     with pytest.raises(NoRemoteServer, match="cloudflare"):
-        await tools_for("c_balaji", "not-a-provider")
+        await tools_for("c_acme", "not-a-provider")
 
 
 def test_known_providers_is_more_than_the_three_the_mail_tools_use():
@@ -468,3 +476,188 @@ async def test_the_mcp_tools_do_not_hand_over_the_key_store():
         window = source[start:start + 220]
         assert "backend=backend" not in window, \
             f"the API-key store is being passed where the session store belongs: {call}"
+
+
+# ---- a provider's error keeps whatever detail it came with ---------------
+
+
+class TwoPartFailure:
+    """A CallToolResult carrying a generic structured error and a detailed text
+    one, which is the shape every test above avoids by setting
+    `structuredContent=None`, and the shape that loses information."""
+
+    isError = True
+    structuredContent = {"error": "Failed to list projects."}
+
+    def __init__(self, detail):
+        self.content = [SimpleNamespace(type="text", text=detail)]
+
+
+DETAIL = ('{"error": {"code": "forbidden", "message": "Not authorized: '
+          'the token is missing scope `read:project` for team team_abc. '
+          'You must re-authenticate to this scope."}}')
+
+
+async def test_a_failure_keeps_the_detailed_message_beside_the_structured_one(
+        monkeypatch):
+    """Reported by an operator: one Vercel tool named the scope, the team and
+    the fix, another said only "Failed to list projects." for every input. Same
+    credential, same problem. `_flatten` preferred `structuredContent` and
+    discarded every text block, so the tool that knew could not say."""
+    opened = []
+
+    @asynccontextmanager
+    async def fake(client, provider, **kwargs):
+        opened.append(client)
+        yield SimpleNamespace(
+            list_tools=lambda: _listing([tool("list_projects")]),
+            call_tool=lambda name, arguments: _answer(TwoPartFailure(DETAIL)))
+
+    monkeypatch.setattr(passthrough, "session_for", fake)
+    result = await call_tool("c_acme", "vercel", "list_projects", {})
+
+    assert result["failed"] is True
+    assert result["result"] == {"error": "Failed to list projects."}, \
+        "a caller that parses the structured error should still get it"
+    assert "read:project" in json.dumps(result.get("said", "")), \
+        "the message naming the scope and the fix was thrown away"
+
+
+async def test_a_result_is_not_given_a_second_copy_of_itself(monkeypatch):
+    """Both halves are kept only when they differ. Doubling a result whose two
+    halves say the same thing would make the common case bigger for nothing."""
+    opened = []
+
+    class Fine:
+        isError = False
+        structuredContent = {"projects": []}
+        content = [SimpleNamespace(type="text", text='{"projects": []}')]
+
+    @asynccontextmanager
+    async def fake(client, provider, **kwargs):
+        opened.append(client)
+        yield SimpleNamespace(
+            list_tools=lambda: _listing([tool("list_projects")]),
+            call_tool=lambda name, arguments: _answer(Fine()))
+
+    monkeypatch.setattr(passthrough, "session_for", fake)
+    result = await call_tool("c_acme", "vercel", "list_projects", {})
+
+    assert "said" not in result
+    assert result["result"] == {"projects": []}
+
+
+async def test_a_failure_with_no_structured_half_is_unchanged(monkeypatch):
+    """The existing shape still behaves: nothing to reconcile, nothing added."""
+    opened = []
+    fake_sessions(monkeypatch, {"c_acme": FakeSession(
+        [tool("execute")], "c_acme", answer={"error": "no"}, fails=True)},
+        opened)
+
+    result = await call_tool("c_acme", "cloudflare", "execute", {"code": "x"})
+
+    assert result["failed"] is True
+    assert result["result"] == {"error": "no"}
+    assert "said" not in result
+
+
+# ---- a listing small enough to hold, and the one that was asked for ------
+
+
+def _many():
+    return [
+        {"tool": "list_projects", "does": "List projects.", "read_only": True,
+         "arguments": {"type": "object",
+                       "properties": {"teamId": {"type": "string"}}}},
+        {"tool": "deploy_to_vercel", "does": "Deploy.", "read_only": False,
+         "arguments": {"type": "object",
+                       "properties": {"teamId": {"type": "string"}}}},
+        {"tool": "search_docs", "does": "Search the documentation.",
+         "read_only": True, "arguments": {"type": "object"}},
+    ]
+
+
+def test_names_only_drops_the_schemas_and_keeps_the_verdict():
+    """Resend publishes 103 tools whose schemas are 122KB. A caller hit that as
+    a hard limit and had to write the response to a file and parse it."""
+    from munim.remote.passthrough import narrow
+
+    small = narrow(_many(), names_only=True)
+
+    assert small == [{"tool": "list_projects", "read_only": True},
+                     {"tool": "deploy_to_vercel", "read_only": False},
+                     {"tool": "search_docs", "read_only": True}]
+    assert len(json.dumps(small)) < len(json.dumps(_many())) / 2
+
+
+def test_matching_searches_the_argument_schema_not_just_the_name():
+    """The question that motivated this was "which tools take a teamId".
+    `teamId` is in no Vercel tool's name or description, so a filter over those
+    two returns nothing for the exact example that justifies having one."""
+    from munim.remote.passthrough import narrow
+
+    found = [t["tool"] for t in narrow(_many(), matching="teamId")]
+
+    assert found == ["list_projects", "deploy_to_vercel"]
+    assert "search_docs" not in found
+
+
+def test_matching_still_finds_a_name_or_a_description():
+    from munim.remote.passthrough import narrow
+
+    assert [t["tool"] for t in narrow(_many(), matching="deploy")] == \
+        ["deploy_to_vercel"]
+    assert [t["tool"] for t in narrow(_many(), matching="documentation")] == \
+        ["search_docs"]
+
+
+def test_matching_is_case_insensitive_because_a_caller_types_it():
+    from munim.remote.passthrough import narrow
+
+    assert len(narrow(_many(), matching="TEAMID")) == 2
+
+
+def test_the_two_compose():
+    from munim.remote.passthrough import narrow
+
+    both = narrow(_many(), names_only=True, matching="teamId")
+
+    assert both == [{"tool": "list_projects", "read_only": True},
+                    {"tool": "deploy_to_vercel", "read_only": False}]
+
+
+def test_neither_flag_changes_the_listing():
+    from munim.remote.passthrough import narrow
+
+    assert narrow(_many()) == _many()
+
+
+async def test_the_extra_half_does_not_depend_on_the_provider_flagging_an_error(
+        monkeypatch):
+    """Checked against Vercel: a call returning
+    `{"error": "Failed to list projects."}` comes back with `isError: False`.
+    A provider that does not flag its own failures makes any condition resting
+    on that flag unreliable, so this asks whether information would be lost."""
+    opened = []
+
+    class QuietFailure:
+        isError = False                      # Vercel really does this
+        structuredContent = {"error": "Failed."}
+
+        def __init__(self):
+            self.content = [SimpleNamespace(
+                type="text", text='{"detail": "scope read:project is missing"}')]
+
+    @asynccontextmanager
+    async def fake(client, provider, **kwargs):
+        opened.append(client)
+        yield SimpleNamespace(
+            list_tools=lambda: _listing([tool("list_projects")]),
+            call_tool=lambda name, arguments: _answer(QuietFailure()))
+
+    monkeypatch.setattr(passthrough, "session_for", fake)
+    result = await call_tool("c_acme", "vercel", "list_projects", {})
+
+    assert result["failed"] is False, "the provider did not flag it, and we say so"
+    assert "read:project" in json.dumps(result["said"]), \
+        "the detail was dropped because the provider did not call it an error"

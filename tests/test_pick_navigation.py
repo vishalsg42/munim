@@ -18,7 +18,7 @@ from munim.pick import BACK, Blank, Head, Item
 
 def rows():
     return [
-        Head("Balaji Roofings"),
+        Head("Acme Ltd"),
         Item("cloudflare", value="b/cf", mark="needs authentication"),
         Item("vercel", value="b/vc", mark="needs authentication"),
         Blank(),

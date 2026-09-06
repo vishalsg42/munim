@@ -5,6 +5,23 @@ gap stated plainly is worth more than a gap discovered by whoever installs this.
 
 ## Not yet done
 
+**A store write can still stall the server's event loop, for up to ten
+seconds.** Reported by an operator as every tool vanishing mid-session after
+they re-authenticated, and reproduced: another process holding the credential
+store stalled a live MCP server for exactly as long as it held it, 8.07s of
+dead server for 8s of contention. `vault._Lock` took `flock(LOCK_EX)` with no
+timeout, and every store write takes it, including the ones the server makes
+from inside its loop when a probe refreshes a token.
+
+That wait is now bounded and explains itself instead of running forever, which
+is the difference between a slow tool and a server that looks dead. It is not
+the whole fix. The loop still blocks for as long as the other writer takes, up
+to the bound, because the write path is synchronous and the SDK calls it from
+async code. Doing it properly means the async callers acquiring without blocking
+the way `vault.Single` already does for the refresh lock, and that is a change
+to the `TokenStorage` write path rather than a flag.
+
+
 **Linux and Windows.** Developed on macOS and the platform assumptions have been
 found rather than guessed at. `doctor` now reports whether a keychain backend
 exists instead of raising, credential reads degrade to "nothing connected" rather

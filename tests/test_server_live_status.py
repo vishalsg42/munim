@@ -57,10 +57,19 @@ def stored(monkeypatch, providers, keys=()):
     API key vanished from every answer was invisible to every test here.
     """
     keys = list(keys)
+    # Signatures match the real ones, including the keyring the server now
+    # threads through so a status reads the same store it was built with. A
+    # double that is narrower than what it replaces turns a real call into a
+    # TypeError that looks like the test's fault.
     monkeypatch.setattr(server_module, "reachable",
-                        lambda cid, backend=None: sorted({*providers, *keys}))
+                        lambda cid, backend=None, keyring=None:
+                        sorted({*providers, *keys}))
+    monkeypatch.setattr(server_module, "connections",
+                        lambda cid, backend=None, keyring=None:
+                        (keys, list(providers)))
     monkeypatch.setattr(health, "connections",
-                        lambda cid, backend=None: (keys, list(providers)))
+                        lambda cid, backend=None, keyring=None:
+                        (keys, list(providers)))
 
 
 def probed(monkeypatch, **states):

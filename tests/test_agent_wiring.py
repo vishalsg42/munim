@@ -621,20 +621,20 @@ async def test_a_model_that_cannot_produce_the_schema_still_answers(
 
 async def test_a_client_named_with_different_capitals_is_still_that_client(
         one_connected_client, agents_on):
-    """Found end to end: the model wrote "Grafison" for a client registered as
-    "grafison", and the grounding check discarded a correct finding and raised
+    """Found end to end: the model wrote "Ivy_Fern" for a client registered as
+    "ivy_fern", and the grounding check discarded a correct finding and raised
     it as an account never read. Case is the model's to get wrong and not the
     operator's to pay for."""
     across_mod = one_connected_client
-    _FakeAgent.used = {"grafison_resend_list_domains":
+    _FakeAgent.used = {"ivy_fern_resend_list_domains":
                        SimpleNamespace(success_count=1)}
-    _FakeAgent.shaped = _answer(findings=[_finding("Grafison")], summary="s")
+    _FakeAgent.shaped = _answer(findings=[_finding("Ivy_Fern")], summary="s")
 
     answer, discarded = await across_mod.ask(
-        "who?", [ClientRecord(name="grafison")])
+        "who?", [ClientRecord(name="ivy_fern")])
 
     assert discarded == [], "a grounded finding was reported as never read"
-    assert [f.client for f in answer.findings] == ["grafison"], \
+    assert [f.client for f in answer.findings] == ["ivy_fern"], \
         "the answer renamed the operator's client"
 
 
@@ -642,13 +642,13 @@ async def test_a_name_that_matches_no_client_is_still_set_aside(
         one_connected_client, agents_on):
     """The other direction: loosening the match must not make it meaningless."""
     across_mod = one_connected_client
-    _FakeAgent.used = {"grafison_resend_list_domains":
+    _FakeAgent.used = {"ivy_fern_resend_list_domains":
                        SimpleNamespace(success_count=1)}
     _FakeAgent.shaped = _answer(findings=[_finding("Some Other Bakery")],
                                 summary="s")
 
     answer, discarded = await across_mod.ask(
-        "who?", [ClientRecord(name="grafison")])
+        "who?", [ClientRecord(name="ivy_fern")])
 
     assert answer.findings == []
     assert [f.client for f in discarded] == ["Some Other Bakery"]

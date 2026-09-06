@@ -21,7 +21,7 @@ def status(client, provider, state=health.LIVE, tools=3, detail=""):
 @pytest.fixture
 def estate(tmp_path, monkeypatch):
     reg = Registry(tmp_path / "r.json")
-    reg.add(ClientRecord(name="Balaji Roofings", domain="balaji.test"))
+    reg.add(ClientRecord(name="Acme Ltd", domain="acme.test"))
     reg.add(ClientRecord(name="Ivy & Fern"))
     monkeypatch.setattr(cli, "_registry", lambda: reg)
     return reg
@@ -61,21 +61,21 @@ def probed(monkeypatch, *statuses):
 
 def test_providers_are_grouped_under_their_client(estate, monkeypatch):
     probed(monkeypatch,
-           status("Balaji Roofings", "cloudflare"),
-           status("Balaji Roofings", "vercel"),
+           status("Acme Ltd", "cloudflare"),
+           status("Acme Ltd", "vercel"),
            status("Ivy & Fern", "cloudflare"))
 
     rows = browse._clients_screen(estate, health.check_all(estate))
     heads = [r.text for r in rows if isinstance(r, pick.Head)]
 
-    assert any("Balaji Roofings" in h for h in heads)
+    assert any("Acme Ltd" in h for h in heads)
     assert any("Ivy & Fern" in h for h in heads)
-    assert any("balaji.test" in h for h in heads), "the domain belongs on the group"
+    assert any("acme.test" in h for h in heads), "the domain belongs on the group"
 
 
 def test_a_client_with_nothing_connected_still_appears(estate, monkeypatch):
     """Otherwise the one client who most needs an instruction is invisible."""
-    probed(monkeypatch, status("Balaji Roofings", "cloudflare"))
+    probed(monkeypatch, status("Acme Ltd", "cloudflare"))
 
     rows = browse._clients_screen(estate, health.check_all(estate))
     labels = [r.label for r in rows if isinstance(r, pick.Item)]
@@ -86,7 +86,7 @@ def test_a_client_with_nothing_connected_still_appears(estate, monkeypatch):
 def test_an_expired_session_is_marked_differently_from_a_live_one(
         estate, monkeypatch):
     probed(monkeypatch,
-           status("Balaji Roofings", "cloudflare", health.EXPIRED,
+           status("Acme Ltd", "cloudflare", health.EXPIRED,
                   detail="the session expired"),
            status("Ivy & Fern", "cloudflare", health.LIVE))
 
@@ -100,7 +100,7 @@ def test_an_expired_session_is_marked_differently_from_a_live_one(
 def test_an_unreachable_provider_is_not_called_expired(estate, monkeypatch):
     """Reconnecting does not fix a network that is down."""
     probed(monkeypatch,
-           status("Balaji Roofings", "cloudflare", health.UNREACHABLE,
+           status("Acme Ltd", "cloudflare", health.UNREACHABLE,
                   detail="no answer in 8s"))
 
     rows = browse._clients_screen(estate, health.check_all(estate))
@@ -190,11 +190,11 @@ def test_the_access_label_is_three_valued(capsys):
 
 
 def test_the_detail_names_the_command_that_runs_it(capsys):
-    browse.tool_detail(ClientRecord(name="Balaji Roofings"), "cloudflare",
+    browse.tool_detail(ClientRecord(name="Acme Ltd"), "cloudflare",
                        {"tool": "execute", "does": "", "read_only": None,
                         "arguments": {}})
 
-    assert 'munim call "Balaji Roofings" cloudflare execute' in \
+    assert 'munim call "Acme Ltd" cloudflare execute' in \
         capsys.readouterr().err
 
 
@@ -202,12 +202,12 @@ def test_the_detail_names_the_command_that_runs_it(capsys):
 
 
 def test_escape_at_the_top_leaves_with_success(estate, monkeypatch, capsys):
-    probed(monkeypatch, status("Balaji Roofings", "cloudflare"))
+    probed(monkeypatch, status("Acme Ltd", "cloudflare"))
     assert browse.walk(estate, keys=[pick.ESC]) == 0
 
 
 def test_control_c_at_the_top_exits_cancelled(estate, monkeypatch, capsys):
-    probed(monkeypatch, status("Balaji Roofings", "cloudflare"))
+    probed(monkeypatch, status("Acme Ltd", "cloudflare"))
     assert browse.walk(estate, keys=[pick.CTRL_C]) == cli.CANCELLED
 
 
@@ -225,10 +225,10 @@ def test_a_dead_session_explains_rather_than_listing_tools(
     redraw covered it, so choosing "View tools" on a dead session looked like
     the menu had done nothing at all.
     """
-    dead = status("Balaji Roofings", "cloudflare", health.EXPIRED, tools=0,
+    dead = status("Acme Ltd", "cloudflare", health.EXPIRED, tools=0,
                   detail="the session expired")
 
-    said = browse._tools_walk(ClientRecord(name="Balaji Roofings"), dead)
+    said = browse._tools_walk(ClientRecord(name="Acme Ltd"), dead)
 
     assert isinstance(said, str)
     assert "the session expired" in said
@@ -239,9 +239,9 @@ def test_a_dead_session_explains_rather_than_listing_tools(
 
 def test_the_reason_is_shown_inside_the_next_frame(estate, monkeypatch, capsys):
     """Choosing an action must leave visible evidence it did something."""
-    dead = status("Balaji Roofings", "cloudflare", health.EXPIRED, tools=0,
+    dead = status("Acme Ltd", "cloudflare", health.EXPIRED, tools=0,
                   detail="the session expired")
-    record = ClientRecord(name="Balaji Roofings")
+    record = ClientRecord(name="Acme Ltd")
 
     # "View tools", then Esc out of the provider screen.
     browse._provider_walk(record, dead, keys=[pick.ENTER, pick.ESC])
@@ -259,8 +259,8 @@ def test_disconnect_asks_first_and_then_actually_removes(
     monkeypatch.setattr("munim.cli.disconnect",
                         lambda *a, **k: called.append(a) or 0)
 
-    live = status("Balaji Roofings", "cloudflare")
-    record = ClientRecord(name="Balaji Roofings")
+    live = status("Acme Ltd", "cloudflare")
+    record = ClientRecord(name="Acme Ltd")
 
     # Down twice to Disconnect, Enter, then Down to "Yes", Enter.
     browse._provider_walk(record, live,
@@ -268,7 +268,7 @@ def test_disconnect_asks_first_and_then_actually_removes(
                                 pick.DOWN, pick.ENTER])
 
     assert called, "Disconnect did not run anything"
-    assert called[0][:2] == ("Balaji Roofings", "cloudflare")
+    assert called[0][:2] == ("Acme Ltd", "cloudflare")
 
 
 def test_declining_the_confirmation_removes_nothing(estate, monkeypatch):
@@ -276,8 +276,8 @@ def test_declining_the_confirmation_removes_nothing(estate, monkeypatch):
     monkeypatch.setattr("munim.cli.disconnect",
                         lambda *a, **k: called.append(a) or 0)
 
-    browse._provider_walk(ClientRecord(name="Balaji Roofings"),
-                          status("Balaji Roofings", "cloudflare"),
+    browse._provider_walk(ClientRecord(name="Acme Ltd"),
+                          status("Acme Ltd", "cloudflare"),
                           keys=[pick.DOWN, pick.DOWN, pick.ENTER,
                                 pick.ENTER,      # lands on Cancel
                                 pick.ESC])
@@ -291,14 +291,14 @@ def test_reconnect_runs_the_login_and_re_probes(estate, monkeypatch, capsys):
                         lambda client, provider: ran.append((client, provider)) or 0)
     monkeypatch.setattr(health, "check_all_for",
                         lambda record, provider, backend=None, keyring=None:
-                        status("Balaji Roofings", provider, health.LIVE))
+                        status("Acme Ltd", provider, health.LIVE))
 
-    browse._provider_walk(ClientRecord(name="Balaji Roofings"),
-                          status("Balaji Roofings", "cloudflare", health.EXPIRED,
+    browse._provider_walk(ClientRecord(name="Acme Ltd"),
+                          status("Acme Ltd", "cloudflare", health.EXPIRED,
                                  detail="the session expired"),
                           keys=[pick.DOWN, pick.ENTER, pick.ESC])
 
-    assert ran == [("Balaji Roofings", "cloudflare")]
+    assert ran == [("Acme Ltd", "cloudflare")]
     assert "Reconnected." in capsys.readouterr().err
 
 
@@ -313,10 +313,10 @@ def test_reconnect_uses_the_command_its_own_hint_names(estate, monkeypatch):
     monkeypatch.setattr("munim.cli.connect_via_mcp", lambda c, p: 0)
     monkeypatch.setattr(health, "check_all_for",
                         lambda record, provider, backend=None, keyring=None:
-                        status("Balaji Roofings", provider, health.LIVE))
+                        status("Acme Ltd", provider, health.LIVE))
 
-    browse._provider_walk(ClientRecord(name="Balaji Roofings"),
-                          status("Balaji Roofings", "cloudflare",
+    browse._provider_walk(ClientRecord(name="Acme Ltd"),
+                          status("Acme Ltd", "cloudflare",
                                  health.EXPIRED, detail="the session expired"),
                           keys=[pick.DOWN, pick.ENTER, pick.ESC])
 
@@ -325,8 +325,8 @@ def test_a_failed_reconnect_says_so_rather_than_claiming_success(
         estate, monkeypatch, capsys):
     monkeypatch.setattr("munim.cli.connect_via_mcp", lambda client, provider: 2)
 
-    browse._provider_walk(ClientRecord(name="Balaji Roofings"),
-                          status("Balaji Roofings", "cloudflare", health.EXPIRED,
+    browse._provider_walk(ClientRecord(name="Acme Ltd"),
+                          status("Acme Ltd", "cloudflare", health.EXPIRED,
                                  detail="the session expired"),
                           keys=[pick.DOWN, pick.ENTER, pick.ESC])
 
@@ -350,13 +350,13 @@ def test_set_domain_writes_it_and_re_reads_the_given_registry(
     monkeypatch.setattr("munim.cli.set_domain", write)
     monkeypatch.setattr("builtins.input", lambda: "newsite.test")
 
-    record = estate.get("Balaji Roofings")
-    browse._provider_walk(record, status("Balaji Roofings", "cloudflare"),
+    record = estate.get("Acme Ltd")
+    browse._provider_walk(record, status("Acme Ltd", "cloudflare"),
                           registry=estate,
                           keys=[pick.DOWN, pick.DOWN, pick.DOWN, pick.ENTER,
                                 pick.ESC])
 
-    assert written == [("Balaji Roofings", "newsite.test")]
+    assert written == [("Acme Ltd", "newsite.test")]
     assert "Domain set to" in capsys.readouterr().err
 
 
@@ -366,8 +366,8 @@ def test_an_empty_domain_changes_nothing(estate, monkeypatch, capsys):
                         lambda name, site: written.append(site) or 0)
     monkeypatch.setattr("builtins.input", lambda: "")
 
-    browse._provider_walk(estate.get("Balaji Roofings"),
-                          status("Balaji Roofings", "cloudflare"),
+    browse._provider_walk(estate.get("Acme Ltd"),
+                          status("Acme Ltd", "cloudflare"),
                           registry=estate,
                           keys=[pick.DOWN, pick.DOWN, pick.DOWN, pick.ENTER,
                                 pick.ESC])
@@ -391,7 +391,7 @@ def test_the_flat_listing_is_untouched_when_not_a_terminal(
     assert cli.main(["clients"]) == 0
     out = capsys.readouterr()
 
-    assert "Balaji Roofings" in out.err or "Balaji Roofings" in out.out
+    assert "Acme Ltd" in out.err or "Acme Ltd" in out.out
     assert "\x1b[" not in out.err + out.out, "escape codes reached a pipe"
     assert "Checking sessions" not in out.err, "a pipe must not pay for a probe"
 
@@ -417,11 +417,11 @@ def test_a_remembered_list_is_shown_when_the_session_is_dead(
     be fetched again once the credential dies. It was known once."""
     from munim import toolcache
 
-    record = ClientRecord(name="Balaji Roofings")
+    record = ClientRecord(name="Acme Ltd")
     toolcache.remember(record.id, "cloudflare",
                        [{"tool": "execute", "does": "Run JS",
                          "read_only": None, "arguments": {}}])
-    dead = status("Balaji Roofings", "cloudflare", health.EXPIRED, tools=0,
+    dead = status("Acme Ltd", "cloudflare", health.EXPIRED, tools=0,
                   detail="the session expired")
 
     browse._tools_walk(record, dead, keys=[pick.ESC])
@@ -435,7 +435,7 @@ def test_a_remembered_list_is_shown_when_the_session_is_dead(
 
 def test_nothing_remembered_still_explains_rather_than_showing_nothing(
         estate, monkeypatch):
-    dead = status("Balaji Roofings", "cloudflare", health.EXPIRED, tools=0,
+    dead = status("Acme Ltd", "cloudflare", health.EXPIRED, tools=0,
                   detail="the session expired")
 
     said = browse._tools_walk(ClientRecord(name="Nobody Here"), dead)
@@ -448,13 +448,13 @@ def test_a_live_listing_carries_no_stale_banner(estate, monkeypatch, capsys):
     was read a moment ago."""
     import asyncio
 
-    live = status("Balaji Roofings", "cloudflare", health.LIVE)
+    live = status("Acme Ltd", "cloudflare", health.LIVE)
     monkeypatch.setattr(
         "munim.remote.passthrough.tools_for",
         lambda *a, **k: asyncio.sleep(0, result=[
             {"tool": "execute", "does": "", "read_only": None, "arguments": {}}]))
 
-    browse._tools_walk(ClientRecord(name="Balaji Roofings"), live,
+    browse._tools_walk(ClientRecord(name="Acme Ltd"), live,
                        keys=[pick.ESC])
 
     err = capsys.readouterr().err
@@ -488,7 +488,7 @@ def test_disconnecting_removes_the_row_behind_it(estate, monkeypatch, capsys):
     without a refresh the provider you just deleted stays listed as connected,
     and selecting it again opens a screen for a credential that is gone."""
     monkeypatch.setattr("munim.cli.disconnect", lambda *a, **k: 0)
-    probed(monkeypatch, status("Balaji Roofings", "cloudflare"))
+    probed(monkeypatch, status("Acme Ltd", "cloudflare"))
     seen = watch_screens(monkeypatch)
 
     browse.walk(estate, keys=[pick.ENTER,
@@ -508,8 +508,8 @@ def test_reconnecting_updates_the_mark_behind_it(estate, monkeypatch, capsys):
     monkeypatch.setattr("munim.cli.connect_via_mcp", lambda client, provider: 0)
     monkeypatch.setattr(health, "check_all_for",
                         lambda record, provider, backend=None, keyring=None:
-                        status("Balaji Roofings", provider, health.LIVE))
-    probed(monkeypatch, status("Balaji Roofings", "cloudflare", health.EXPIRED,
+                        status("Acme Ltd", provider, health.LIVE))
+    probed(monkeypatch, status("Acme Ltd", "cloudflare", health.EXPIRED,
                                detail="the session expired"))
     seen = watch_screens(monkeypatch)
 
@@ -565,7 +565,7 @@ def test_backing_out_of_the_provider_picker_returns_to_the_clients(
 
 def test_a_settled_stream_is_not_polled(estate, monkeypatch):
     """Nothing left to wait for means the menu blocks rather than ticking."""
-    stream = SettledStream([status("Balaji Roofings", "cloudflare")])
+    stream = SettledStream([status("Acme Ltd", "cloudflare")])
     monkeypatch.setattr(health, "Stream", lambda *a, **k: stream)
 
     browse.walk(estate, keys=[pick.ESC])

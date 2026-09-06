@@ -4,7 +4,7 @@ Four screens, and a stack. Esc pops one level, Ctrl-C leaves from any depth,
 and Esc at the top leaves too, because there is nowhere further up.
 
 Why this exists rather than more flags: munim's surface is three levels deep
-already. `munim tools "Balaji Roofings" cloudflare execute` is the same
+already. `munim tools "Acme Ltd" cloudflare execute` is the same
 information, and it requires knowing all three names before you can see any of
 them. The list is the thing that tells you what the names are.
 
