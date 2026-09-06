@@ -27,8 +27,33 @@ def estate(tmp_path, monkeypatch):
     return reg
 
 
+class SettledStream:
+    """A stream whose probes have already finished.
+
+    Every navigation test wants a list to walk, not a spinner. The streaming
+    path is exercised in tests/test_health_stream.py and through the pty
+    harness, which is the only place a tick without a keypress is observable.
+    """
+
+    settled = True
+
+    def __init__(self, statuses):
+        self.statuses = list(statuses)
+        self.pumped = 0
+        self.closed = 0
+
+    def pump(self, slice_seconds=0.0):
+        self.pumped += 1
+        return False
+
+    def close(self):
+        self.closed += 1
+
+
 def probed(monkeypatch, *statuses):
     monkeypatch.setattr(health, "check_all", lambda *a, **k: list(statuses))
+    monkeypatch.setattr(health, "Stream",
+                        lambda registry, backend=None: SettledStream(statuses))
 
 
 # ---- the client screen ------------------------------------------------
@@ -495,16 +520,24 @@ def test_a_client_with_nothing_connected_reports_inside_the_frame(
         "the instruction never reached a frame"
 
 
-def test_could_not_check_is_not_reported_as_nothing_connected(
-        estate, monkeypatch, capsys):
-    """An empty result read as "this estate is connected to nothing", so every
-    client rendered as `nothing connected` with an offer to connect it."""
-    def refuse(*a, **k):
-        raise health.NotChecked("no event loop available")
+def test_a_settled_stream_is_not_polled(estate, monkeypatch):
+    """Nothing left to wait for means the menu blocks rather than ticking."""
+    stream = SettledStream([status("Balaji Roofings", "cloudflare")])
+    monkeypatch.setattr(health, "Stream", lambda *a, **k: stream)
 
-    monkeypatch.setattr(health, "check_all", refuse)
+    browse.walk(estate, keys=[pick.ESC])
 
-    assert browse.walk(estate) == 2
-    err = capsys.readouterr().err
-    assert "Could not check" in err
-    assert "nothing connected" not in err
+    assert stream.pumped == 0, "an idle screen paid for a refresh"
+
+
+def test_the_stream_is_closed_even_when_the_walk_raises(estate, monkeypatch):
+    """It owns an event loop, and leaking one leaks file descriptors."""
+    stream = SettledStream([])
+    monkeypatch.setattr(health, "Stream", lambda *a, **k: stream)
+    monkeypatch.setattr(browse, "_walk",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")))
+
+    with pytest.raises(RuntimeError):
+        browse.walk(estate)
+
+    assert stream.closed == 1

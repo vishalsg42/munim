@@ -19,7 +19,8 @@ cost about what one does.
 """
 
 import asyncio
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, replace
 
 from munim.connected import connections
 from munim.container import KeychainBackend
@@ -30,6 +31,7 @@ from munim.container import KeychainBackend
 TIMEOUT = 8.0
 
 LIVE = "connected"
+PENDING = "connecting"
 EXPIRED = "needs authentication"
 UNREACHABLE = "could not be reached"
 
@@ -45,6 +47,11 @@ class Status:
     @property
     def live(self) -> bool:
         return self.state == LIVE
+
+    @property
+    def settled(self) -> bool:
+        """Whether this is an answer rather than a question still open."""
+        return self.state != PENDING
 
     @property
     def fix(self) -> str:
@@ -124,6 +131,90 @@ async def check_all_async(registry, backend=None) -> list[Status]:
         return []
     return list(await asyncio.gather(
         *(check(*item, backend=backend) for item in work)))
+
+
+class Stream:
+    """Probes running on the caller's own event loop, pumped a slice at a time.
+
+    Deliberately not a thread. A background thread probing while the main
+    thread draws can write to the same stderr the menu owns: the MCP SDK logs
+    a traceback on any OAuth failure that is not a plain NeedsLogin, and
+    interpreter teardown can emit after the terminal has been restored. Either
+    corrupts the operator's shell.
+
+    So the loop lives here and the caller decides when it runs. `pump()`
+    advances it by one slice and returns whether anything changed; the menu
+    calls it from its idle path, between keypresses, on the one thread that
+    already owns the screen.
+
+    The work list is computed **once** and shared by the seed and the probes.
+    Two calls to `_stored` are two chances to disagree, and a row set that
+    shrinks under a moving cursor is how a menu acts on the wrong thing.
+    """
+
+    def __init__(self, registry, backend=None):
+        self._backend = backend or KeychainBackend()
+        self._work = _stored(registry, self._backend)
+        self.statuses = [Status(name, provider, PENDING)
+                         for _, name, provider in self._work]
+        self._loop = None
+        self._tasks = None
+        self._deadline = None
+
+    @property
+    def settled(self) -> bool:
+        return all(s.settled for s in self.statuses)
+
+    def _start(self):
+        self._loop = asyncio.new_event_loop()
+        self._tasks = {
+            self._loop.create_task(check(cid, name, provider,
+                                         backend=self._backend)): index
+            for index, (cid, name, provider) in enumerate(self._work)}
+        # A hard stop, because "keep ticking until everything settles" with no
+        # ceiling is a menu that polls forever if one probe never reports.
+        self._deadline = time.monotonic() + TIMEOUT + 2
+
+    def pump(self, slice_seconds: float = 0.0) -> bool:
+        """Advance the probes. True when something on screen should change."""
+        if self.settled:
+            return False
+        if self._loop is None:
+            self._start()
+
+        pending = [t for t in self._tasks if not t.done()]
+        if pending:
+            self._loop.run_until_complete(
+                asyncio.wait(pending, timeout=slice_seconds,
+                             return_when=asyncio.FIRST_COMPLETED))
+
+        changed = False
+        for task, index in self._tasks.items():
+            if task.done() and not self.statuses[index].settled:
+                self.statuses[index] = task.result()
+                changed = True
+
+        if not self.settled and time.monotonic() > self._deadline:
+            self.statuses = [s if s.settled
+                             else replace(s, state=UNREACHABLE,
+                                          detail="gave up waiting")
+                             for s in self.statuses]
+            changed = True
+        if self.settled:
+            self.close()
+        return changed
+
+    def close(self):
+        if self._loop is None:
+            return
+        for task in self._tasks:
+            task.cancel()
+        try:
+            self._loop.run_until_complete(
+                asyncio.gather(*self._tasks, return_exceptions=True))
+        finally:
+            self._loop.close()
+            self._loop = None
 
 
 def check_all_for(record, provider: str, backend=None) -> Status:

@@ -26,6 +26,7 @@ from munim.pick import (AMBER, BACK, BOLD, Blank, DIM, GREEN, Head, Item,
 WRAP = 74
 
 GLYPH = {health.LIVE: ("✓", GREEN),
+         health.PENDING: ("◯", DIM),
          health.EXPIRED: ("⚠", AMBER),
          health.UNREACHABLE: ("✗", RED)}
 
@@ -162,22 +163,22 @@ def walk(registry, *, keys=None) -> int:
               file=sys.stderr)
         return 0
 
-    print("Checking sessions...", file=sys.stderr)
+    # No "Checking sessions..." pause. The list is drawn immediately with every
+    # provider connecting, and rows settle in place as each probe lands. The
+    # probes run on this thread, pumped from the menu's idle path: a background
+    # thread would write to the same stderr the menu draws on.
+    stream = health.Stream(registry)
     try:
-        statuses = health.check_all(registry)
-    except health.NotChecked as why:
-        # Distinct from an empty result, which means nothing is stored. Falling
-        # through with [] made every client render as "nothing connected" with
-        # an offer to connect it, for an operator whose estate was fine.
-        print(f"Could not check sessions: {why}", file=sys.stderr)
-        return 2
-
-    with full_screen():
-        return _walk(registry, records, statuses, keys)
+        with full_screen():
+            return _walk(registry, records, stream, keys)
+    finally:
+        stream.close()
 
 
-def _walk(registry, records, statuses, keys) -> int:
+def _walk(registry, records, stream, keys) -> int:
     from munim.cli import CANCELLED
+
+    statuses = stream.statuses
 
     # One iterator for the whole walk. `menu` calls iter() on what it is
     # given, and iter() on a list restarts it, so passing the list down would
@@ -190,11 +191,23 @@ def _walk(registry, records, statuses, keys) -> int:
         rows = _clients_screen(registry, statuses)
         header = ["", f"  {pending_note}"] if pending_note else []
         pending_note = ""
-        chosen = menu("Clients",
-                      rows,
-                      subtitle=f"{len(records)} clients · "
-                               f"{sum(1 for s in statuses if s.live)} live",
-                      header=header, can_go_back=False, keys=keys)
+        def moved():
+            """One slice of probing, and the rows it changed."""
+            if not stream.pump(0.05):
+                return None if stream.settled else (rows, subtitle())
+            return _clients_screen(registry, stream.statuses), subtitle()
+
+        def subtitle():
+            waiting = sum(1 for s in stream.statuses if not s.settled)
+            live = sum(1 for s in stream.statuses if s.live)
+            return (f"{len(records)} clients · {live} live"
+                    + (f" · {waiting} connecting" if waiting else ""))
+
+        chosen = menu("Clients", rows, subtitle=subtitle(), header=header,
+                      can_go_back=False, keys=keys,
+                      refresh=None if stream.settled or keys is not None
+                      else moved)
+        statuses = stream.statuses
         if chosen is None or chosen is BACK:
             return CANCELLED if chosen is None else 0
 
@@ -214,11 +227,12 @@ def _walk(registry, records, statuses, keys) -> int:
         # before the walk, so without this a disconnected provider stayed on
         # screen marked connected and a reconnected one stayed amber.
         gone, fresh = outcome
-        statuses = [s for s in statuses
-                    if not (s.client == record.name
-                            and s.provider == status.provider)]
+        stream.statuses = [s for s in stream.statuses
+                           if not (s.client == record.name
+                                   and s.provider == status.provider)]
         if not gone and fresh is not None:
-            statuses.append(fresh)
+            stream.statuses.append(fresh)
+        statuses = stream.statuses
         records = registry.clients()
 
 

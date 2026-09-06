@@ -405,7 +405,7 @@ def _draw(title, subtitle, rows, cursor, footer, numbered, drawn, height,
 
 
 def menu(title: str, rows: list, *, subtitle: str = "", header=(),
-         can_go_back: bool = True, keys=None):
+         can_go_back: bool = True, keys=None, refresh=None, tick=0.15):
     """Navigate a grouped list. Returns the chosen Item's value, BACK, or None.
 
     None is Ctrl-C, which quits from any depth. BACK is Esc, which the caller
@@ -421,6 +421,12 @@ def menu(title: str, rows: list, *, subtitle: str = "", header=(),
     restarts it, so handing the same list to each screen replays the same
     keypresses forever; iter() on an iterator returns the same object, which
     is what lets position carry across screens.
+
+    `refresh` makes the menu able to change without a keypress. It is called
+    from the idle path every `tick` seconds and returns `(rows, subtitle)` when
+    something moved, or None when nothing did. Returning None costs one
+    redraw's worth of nothing. Once it stops being called the menu blocks
+    again, so an idle screen is free.
     """
     order = _selectable(rows)
     if not order:
@@ -428,28 +434,55 @@ def menu(title: str, rows: list, *, subtitle: str = "", header=(),
     if keys is None and not interactive():
         return BACK
 
-    numbered = len(order) <= 9
-    move = "↑/↓ or 1-9" if numbered else "↑/↓ navigate"
-    footer = f"{move} · Enter select · Esc {'back' if can_go_back else 'quit'}"
-
-    height = max(3, shutil.get_terminal_size().lines - CHROME
-                 - (2 if subtitle else 1) - len(header))
     at, drawn = 0, 0
     scripted = iter(keys) if keys is not None else None
+    streaming = refresh is not None
+
+    def shape():
+        """Recomputed per frame, because rows can change while streaming."""
+        order = _selectable(rows)
+        numbered = len(order) <= 9
+        move = "↑/↓ or 1-9" if numbered else "↑/↓ navigate"
+        footer = (f"{move} · Enter select · "
+                  f"Esc {'back' if can_go_back else 'quit'}")
+        height = max(3, shutil.get_terminal_size().lines - CHROME
+                     - (2 if subtitle else 1) - len(header))
+        return order, numbered, footer, height
+
+    order, numbered, footer, height = shape()
 
     saved = termios.tcgetattr(sys.stdin) if scripted is None else None
     try:
         if scripted is None:
-            tty.setraw(sys.stdin.fileno())
+            tty.setraw(sys.stdin.fileno(), termios.TCSANOW)
         while True:
             if scripted is None:
                 termios.tcsetattr(sys.stdin, termios.TCSADRAIN, saved)
+            # Clamped rather than trusted. The row set is meant to be stable
+            # while streaming, and a cursor that outruns it would raise under
+            # the operator's hands rather than merely look wrong.
+            at = min(at, len(order) - 1)
             drawn = _draw(title, subtitle, rows, order[at], footer,
                           numbered, drawn, height, header)
             if scripted is None:
-                tty.setraw(sys.stdin.fileno())
+                # TCSANOW, not the TCSAFLUSH tty.setraw defaults to. FLUSH
+                # discards input received but not yet read, and this runs once
+                # per frame. Blocking on a keypress that window is invisible;
+                # with a refresh tick it opens several times a second and eats
+                # keys the operator has already pressed.
+                tty.setraw(sys.stdin.fileno(), termios.TCSANOW)
 
             if scripted is None:
+                if streaming and not select.select([sys.stdin], [], [], tick)[0]:
+                    # Nothing typed. Let the caller move things along, redraw
+                    # if it did, and go round again.
+                    moved = refresh()
+                    if moved is None:
+                        streaming = False       # settled: block from here on
+                        continue
+                    rows, subtitle = moved
+                    order, numbered, footer, height = shape()
+                    continue
                 key = _read_key()
             else:
                 # Running out of scripted keys means the caller expected the
