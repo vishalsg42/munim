@@ -32,8 +32,12 @@ def many(count):
 
 
 def short_terminal(monkeypatch, lines=14):
-    monkeypatch.setattr(pick.shutil, "get_terminal_size",
-                        lambda: type("S", (), {"lines": lines, "columns": 80})())
+    """`pick.shutil` is the global module, and pytest's own writer calls
+    get_terminal_size(fallback=...). A lambda taking no arguments broke pytest
+    itself rather than the code under test."""
+    monkeypatch.setattr(
+        pick.shutil, "get_terminal_size",
+        lambda *a, **k: type("S", (), {"lines": lines, "columns": 80})())
 
 
 # ---- selection and navigation -----------------------------------------
@@ -93,26 +97,6 @@ def test_running_out_of_keys_backs_out_rather_than_blocking():
 
 
 # ---- the footer describes what the keys actually do -------------------
-
-
-def test_numbers_are_offered_only_when_they_can_reach_every_row(capsys):
-    """Offering "7" on a list of forty is a promise the keyboard cannot keep."""
-    pick.menu("Short", many(9), keys=[pick.ESC])
-    assert "1-9" in capsys.readouterr().err
-
-    pick.menu("Long", many(10), keys=[pick.ESC])
-    err = capsys.readouterr().err
-    assert "1-9" not in err
-    assert "↑/↓ navigate" in err
-
-
-def test_a_number_does_nothing_on_a_list_too_long_to_number(capsys):
-    """The footer stops offering digits, so the loop must stop honouring them."""
-    got = pick.menu("Long", many(10), keys=["2", pick.ENTER])
-    assert got == 0, "a digit selected a row on an unnumbered list"
-
-
-# ---- paging -----------------------------------------------------------
 
 
 def test_a_long_list_pages_and_says_how_much_is_hidden(monkeypatch, capsys):
@@ -181,6 +165,7 @@ def test_choose_still_returns_none_for_both_escape_and_control_c(monkeypatch):
 
     class Fake:
         TCSADRAIN = real.TCSADRAIN
+        TCSANOW = real.TCSANOW
         def tcgetattr(self, *a): return None
         def tcsetattr(self, *a): pass
 
@@ -392,39 +377,84 @@ def test_the_old_picker_homes_when_a_walk_owns_the_screen(monkeypatch, capsys):
     assert "Pick" in err, "the prompt must be inside the frame it draws"
 
 
-def test_the_old_picker_stops_numbering_past_nine(capsys):
-    """It offered a 10 and an 11 that no keypress could select, under a footer
-    that said 1-9."""
-    many_rows = [(f"row{i}", "") for i in range(11)]
-    pick._render(many_rows, 0, "", "", 0)
+# ---- a row number can be more than one digit --------------------------
+
+
+def test_every_row_is_numbered_however_many_there_are(capsys):
+    """Numbering used to stop at nine, so a list of eleven showed rows with no
+    number at all. Dropping the numbers was the wrong half of the fix."""
+    pick.menu("Long", many(11), keys=[pick.ESC])
 
     err = capsys.readouterr().err
-    assert "10." not in err
-    assert "row10" in err, "the row itself must still be there to arrow to"
+    assert "11. row10" in err
+    assert "a number" in err, "the footer should offer numbers, not 1-9"
 
 
-def test_nine_rows_are_still_numbered(capsys):
-    pick._render([(f"row{i}", "") for i in range(9)], 0, "", "", 0)
-    assert "9. row8" in capsys.readouterr().err
+def test_an_unambiguous_digit_selects_at_once():
+    """In a list of eleven, 2 can only ever mean row 2."""
+    assert pick.menu("Long", many(11), keys=["2"]) == 1
 
 
-def test_a_digit_past_the_end_selects_nothing_when_unnumbered(monkeypatch):
-    """The footer stops advertising digits, so the loop must stop honouring
-    them, or 1 would still pick while 10 did not."""
-    monkeypatch.setattr(pick, "interactive", lambda: True)
-    keys = iter(["2", pick.ENTER])
+def test_an_ambiguous_digit_waits_for_the_next_one():
+    """1 could still become 10 or 11, so it must not act on its own."""
+    assert pick.menu("Long", many(11), keys=["1", "0"]) == 9
+    assert pick.menu("Long", many(11), keys=["1", "1"]) == 10
 
-    class Fake:
-        TCSADRAIN = 0
-        def tcgetattr(self, *a): return None
-        def tcsetattr(self, *a): pass
 
-    monkeypatch.setattr(pick, "termios", Fake())
-    monkeypatch.setattr(pick, "tty",
-                        type("T", (), {"setraw": staticmethod(lambda *a, **k: None)})())
-    monkeypatch.setattr(pick.sys, "stdin",
-                        type("S", (), {"fileno": staticmethod(lambda: 0)})())
-    monkeypatch.setattr(pick, "_read_key", lambda: next(keys))
+def test_enter_commits_a_number_that_is_still_ambiguous():
+    """Typing 1 and pressing Enter means row 1, not whatever the cursor is on."""
+    assert pick.menu("Long", many(11), keys=["1", pick.ENTER]) == 0
 
-    got = pick.choose("Pick", [(f"row{i}", "") for i in range(11)])
-    assert got == 0, "a digit selected a row on a list too long to number"
+
+def test_the_pending_digits_are_shown_rather_than_kept_secret(capsys):
+    pick.menu("Long", many(11), keys=["1", pick.ESC])
+    assert "1…" in capsys.readouterr().err
+
+
+def test_an_arrow_abandons_a_half_typed_number():
+    """Otherwise the next digit joins a number the operator has moved on from."""
+    assert pick.menu("Long", many(11), keys=["1", pick.DOWN, pick.ENTER]) == 1
+
+
+def test_a_number_past_the_end_starts_over_from_that_digit():
+    """9 in a list of eleven is row 9, and it cannot become anything longer."""
+    assert pick.menu("Long", many(11), keys=["9"]) == 8
+
+
+def test_a_short_list_still_acts_on_one_digit():
+    """Nothing about this may slow down the common case."""
+    assert pick.menu("Short", many(4), keys=["3"]) == 2
+
+
+def test_the_one_question_picker_numbers_past_nine_too(capsys):
+    """Same rule in both pickers. `munim connect` lists eleven providers."""
+    pick._render([(f"p{i}", "") for i in range(11)], 0, "", "", 0)
+    assert "11. p10" in capsys.readouterr().err
+
+
+def test_the_one_question_picker_shows_pending_digits_too(monkeypatch, capsys):
+    """`menu` showed them and `choose` did not, so in `munim connect` a half
+    typed 1 looked like nothing had happened."""
+    monkeypatch.setattr(pick, "_owns_screen", True)
+    try:
+        pick._render([(f"p{i}", "") for i in range(11)], 0, "", "", 0,
+                     "Pick", "1")
+    finally:
+        monkeypatch.setattr(pick, "_owns_screen", False)
+
+    assert "1…" in capsys.readouterr().err
+
+
+def test_raw_mode_never_discards_a_pending_keystroke():
+    """tty.setraw defaults to TCSAFLUSH, which throws away input received but
+    not yet read. Typing a two digit row number puts the second digit in
+    exactly that window, so `10` selected nothing and the terminal echoed a
+    bare 0. Every raw-mode switch in this module must be TCSANOW."""
+    import re
+    from pathlib import Path
+
+    source = Path(pick.__file__).read_text()
+    bare = re.findall(r"tty\.setraw\(.*", source)
+    assert bare, "the raw-mode calls moved; this guard needs updating"
+    assert all("TCSANOW" in call for call in bare), \
+        f"a raw-mode switch can still discard input: {bare}"

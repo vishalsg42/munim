@@ -51,7 +51,7 @@ def interactive() -> bool:
 
 def _render(options: list[tuple[str, str]], cursor: int, typed: str,
             new_row: str, drawn: int, title: str = "",
-            numbered: bool | None = None) -> int:
+            numbering: str = "") -> int:
     """Draw the list. The last row is a text field when there is one.
 
     Returns how many lines were used, so the next draw can move back over
@@ -68,11 +68,6 @@ def _render(options: list[tuple[str, str]], cursor: int, typed: str,
         sys.stderr.write(f"\x1b[{drawn}A")
 
     rows = [*options] + ([(new_row, "")] if new_row else [])
-    # Worked out here rather than defaulted to True, so a caller cannot get it
-    # wrong: digits only reach nine, and a numbered row nothing can select is
-    # a promise the keyboard does not keep.
-    if numbered is None:
-        numbered = len(rows) <= 9
     extra = 0
     if _owns_screen and title:
         sys.stderr.write(f"\x1b[2K{paint(title, BOLD)}\n\x1b[2K\n")
@@ -93,14 +88,12 @@ def _render(options: list[tuple[str, str]], cursor: int, typed: str,
 
         # `1.` rather than `1  `, matching the navigable menu. Two numbering
         # styles in one tool is one more than anybody should have to notice.
-        # And numbers only when every row is reachable by one keypress: the
-        # provider list showed a 10 and an 11 that no key could select.
-        number = f"{index + 1}. " if numbered else ""
-        sys.stderr.write(f"\x1b[2K {mark} {number}{body}\n")
+        sys.stderr.write(f"\x1b[2K {mark} {index + 1}. {body}\n")
     if _owns_screen:
-        move = "↑/↓ or 1-9" if numbered else "↑/↓ navigate"
+        pending = f"  {numbering}…" if numbering else ""
         sys.stderr.write("\x1b[2K\n\x1b[2K"
-                         + paint(f"{move} · Enter select · Esc cancel", DIM)
+                         + paint(f"↑/↓ or a number{pending} · Enter select · "
+                                 f"Esc cancel", DIM)
                          + "\n")
         sys.stderr.write("\x1b[J")
     sys.stderr.flush()
@@ -152,17 +145,17 @@ def _live(prompt: str, options: list[tuple[str, str]], allow_new: bool,
 
     new_row = new_hint or "a new one, type the name" if allow_new else ""
     count = len(options) + (1 if new_row else 0)
-    numbered = count <= 9
     typed, cursor, drawn = "", 0, 0
+    numbering = ""              # digits so far, when a row number is being typed
 
     saved = termios.tcgetattr(sys.stdin)
     try:
-        tty.setraw(sys.stdin.fileno())
+        tty.setraw(sys.stdin.fileno(), termios.TCSANOW)
         while True:
             termios.tcsetattr(sys.stdin, termios.TCSADRAIN, saved)
             drawn = _render(options, cursor, typed, new_row, drawn, prompt,
-                            numbered)
-            tty.setraw(sys.stdin.fileno())
+                            numbering)
+            tty.setraw(sys.stdin.fileno(), termios.TCSANOW)
 
             key = _read_key()
             on_new = bool(new_row) and cursor == count - 1
@@ -170,16 +163,18 @@ def _live(prompt: str, options: list[tuple[str, str]], allow_new: bool,
             if key in (CTRL_C, ESC):
                 return None
             if key in (ENTER, RETURN):
+                if numbering and int(numbering) <= len(options):
+                    return int(numbering) - 1
                 if on_new:
                     if typed.strip():
                         return typed.strip()
                     continue            # an empty name is not a client
                 return cursor
             if key == UP:
-                cursor = (cursor - 1) % count
+                cursor, numbering = (cursor - 1) % count, ""
                 continue
             if key == DOWN:
-                cursor = (cursor + 1) % count
+                cursor, numbering = (cursor + 1) % count, ""
                 continue
             if on_new:
                 # Typing belongs to the field once you are standing in it.
@@ -188,12 +183,14 @@ def _live(prompt: str, options: list[tuple[str, str]], allow_new: bool,
                 elif key.isprintable():
                     typed += key
                 continue
-            if numbered and key.isdigit() and key != "0":
-                wanted = int(key) - 1
-                if wanted < len(options):
-                    return wanted
-                if new_row and wanted == count - 1:
-                    cursor = wanted     # move into the field rather than pick it
+            if key.isdigit():
+                numbering, picked = _digit(numbering, key, count)
+                if picked is None:
+                    continue
+                if picked < len(options):
+                    return picked
+                if new_row and picked == count - 1:
+                    cursor = picked     # move into the field rather than pick it
     finally:
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, saved)
         sys.stderr.write("\n")
@@ -372,6 +369,31 @@ def paint(text: str, code: str) -> str:
     return f"{code}{text}{RESET}" if coloured() else text
 
 
+def _digit(buffer: str, key: str, count: int):
+    """Accumulate a typed row number. Returns (buffer, chosen index or None).
+
+    Numbering used to stop at nine, because one keypress is one digit and a
+    list of eleven showed a 10 and an 11 that nothing could select. Removing
+    the numbers was the wrong half of the fix: the answer is to let a number be
+    more than one keypress.
+
+    A digit selects at once when it can only mean one row. In a list of eleven
+    "2" is unambiguous and acts immediately, while "1" could still become 10 or
+    11, so it waits: a further digit, or Enter, decides. That is why the buffer
+    is shown in the footer rather than kept secret.
+    """
+    candidate = buffer + key
+    if int(candidate) < 1 or int(candidate) > count:
+        # Not a row. Start again from this digit if that alone is one.
+        candidate = key
+        if int(candidate) < 1 or int(candidate) > count:
+            return "", None
+    value = int(candidate)
+    ambiguous = any(str(n).startswith(candidate) and n != value
+                    for n in range(1, count + 1))
+    return (candidate, None) if ambiguous else ("", value - 1)
+
+
 def _selectable(rows) -> list[int]:
     return [i for i, row in enumerate(rows) if isinstance(row, Item)]
 
@@ -520,15 +542,16 @@ def menu(title: str, rows: list, *, subtitle: str = "", header=(),
         return BACK
 
     at, drawn = 0, 0
+    typing = ""                 # digits so far, when a row number is being typed
     scripted = iter(keys) if keys is not None else None
     streaming = refresh is not None
 
     def shape():
         """Recomputed per frame, because rows can change while streaming."""
         order = _selectable(rows)
-        numbered = len(order) <= 9
-        move = "↑/↓ or 1-9" if numbered else "↑/↓ navigate"
-        footer = (f"{move} · Enter select · "
+        numbered = True
+        pending = f"  {typing}…" if typing else ""
+        footer = (f"↑/↓ or a number{pending} · Enter select · "
                   f"Esc {'back' if can_go_back else 'quit'}")
         height = max(3, shutil.get_terminal_size().lines - CHROME
                      - (2 if subtitle else 1) - len(header))
@@ -547,6 +570,7 @@ def menu(title: str, rows: list, *, subtitle: str = "", header=(),
             tty.setraw(sys.stdin.fileno(), termios.TCSANOW)
         while True:
             if dirty:
+                order, numbered, footer, height = shape()
                 if scripted is None:
                     termios.tcsetattr(sys.stdin, termios.TCSADRAIN, saved)
                 # Clamped rather than trusted. The row set is meant to be
@@ -588,17 +612,25 @@ def menu(title: str, rows: list, *, subtitle: str = "", header=(),
             if key == ESC:
                 return BACK
             if key in (ENTER, RETURN):
+                # A number half typed and then confirmed means that row, not
+                # whatever the cursor happens to be sitting on.
+                if typing and int(typing) <= len(order):
+                    return rows[order[int(typing) - 1]].value
                 return rows[order[at]].value
             if key == UP:
-                at = (at - 1) % len(order)
-                dirty = True
+                at, typing, dirty = (at - 1) % len(order), "", True
             elif key == DOWN:
-                at = (at + 1) % len(order)
+                at, typing, dirty = (at + 1) % len(order), "", True
+            elif key.isdigit():
+                typing, picked = _digit(typing, key, len(order))
                 dirty = True
-            elif numbered and key.isdigit() and key != "0":
-                wanted = int(key) - 1
-                if wanted < len(order):
-                    return rows[order[wanted]].value
+                if picked is not None:
+                    return rows[order[picked]].value
+            elif key in BACKSPACE and typing:
+                typing, dirty = typing[:-1], True
+            else:
+                if typing:
+                    typing, dirty = "", True
     finally:
         if scripted is None:
             termios.tcsetattr(sys.stdin, termios.TCSADRAIN, saved)

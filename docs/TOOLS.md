@@ -100,11 +100,24 @@ judgement call; changing one that does is, and it is someone else's live mail.
 **What `ask_across_clients` can actually see, and why it is less than it sounds.**
 A cross-client tool is built from only the provider tools marked `readOnlyHint`,
 default deny, so a tool that changes something is not present to be called. On
-Cloudflare that leaves `docs` and `search`, because `execute` is the only tool
-that reads live account data and it is also the only one that can write, so it
-carries no read-only hint and is correctly refused. Asked to count DNS zones
-across clients, the agent will tell you which API would answer rather than
-answering.
+Cloudflare that leaves **nothing at all**. Asked live on 2026-09-06, its server
+answers:
+
+```
+docs      readOnlyHint=False  destructiveHint=False
+search    readOnlyHint=False  destructiveHint=False
+execute   readOnlyHint=False  destructiveHint=True
+```
+
+So all three are refused, not just `execute`. An earlier version of this page
+said `docs` and `search` survived the filter, which was a guess about what a
+documentation search ought to be annotated as rather than a reading of what
+Cloudflare publishes. Asked to count DNS zones across clients, the agent has no
+Cloudflare tool to reach for and will tell you which API would answer instead.
+
+Claude Code's own `/mcp` lists those two as read-only, so it is not reading the
+same field or is being more generous with it. Munim reports what the provider
+says.
 
 This is the boundary working, not failing. The cost is real and worth stating:
 the open-ended cross-client question is limited by what each provider chooses to
