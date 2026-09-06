@@ -26,7 +26,7 @@ async def test_a_session_that_would_need_a_login_refuses_instead():
     that has to raise rather than reach for a browser."""
     with pytest.raises(NeedsLogin) as caught:
         async with session_for("c_never_connected", "cloudflare",
-                               backend=Ring(), allow_login=False):
+                               keyring=Ring(), allow_login=False):
             pass
 
     assert "c_never_connected" in str(caught.value)
@@ -37,7 +37,7 @@ async def test_the_message_says_how_to_fix_it():
     """A refusal that does not say what to run is a dead end."""
     with pytest.raises(NeedsLogin, match="munim connect"):
         async with session_for("c_never_connected", "cloudflare",
-                               backend=Ring(), allow_login=False):
+                               keyring=Ring(), allow_login=False):
             pass
 
 
@@ -54,7 +54,7 @@ async def test_the_refusal_is_not_buried_under_a_traceback(caplog):
     with caplog.at_level(logging.ERROR, logger="mcp.client.auth.oauth2"):
         with pytest.raises(NeedsLogin):
             async with session_for("c_never_connected", "cloudflare",
-                                   backend=Ring(), allow_login=False):
+                                   keyring=Ring(), allow_login=False):
                 pass
 
     assert "OAuth flow error" not in caplog.text

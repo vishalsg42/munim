@@ -191,4 +191,4 @@ async def test_the_session_store_is_the_one_that_reaches_session_for(
     sentinel = object()
     await health.check("c_1", "Acme", "cloudflare", keyring=sentinel)
 
-    assert seen["backend"] is sentinel
+    assert seen["keyring"] is sentinel

@@ -336,7 +336,10 @@ def build_server(backend=None, registry=None, runs_dir=None,
 
         record = registry.get(client)
         try:
-            tools = await tools_for(record.id, provider, backend=backend)
+            # No `backend` here. That one is the API-key store; sessions are
+            # opened against the vault, and handing the wrong one over is what
+            # made this tool fail while the identical CLI command worked.
+            tools = await tools_for(record.id, provider)
         except NeedsLogin:
             return {"client": record.name, "provider": provider,
                     "error": f"{provider} is not connected for this client, or the "
@@ -372,7 +375,7 @@ def build_server(backend=None, registry=None, runs_dir=None,
         log = RunLog(new_run_id(), runs)
         try:
             result = await call_tool(record.id, provider, tool, arguments,
-                                     backend=backend, log=log)
+                                     log=log)
         except NeedsLogin:
             return {"client": record.name, "provider": provider, "tool": tool,
                     "error": f"{provider} is not connected for this client, or the "

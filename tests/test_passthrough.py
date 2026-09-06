@@ -129,10 +129,10 @@ async def test_the_passthrough_never_opens_a_browser():
 
     with pytest.raises(NeedsLogin, match="munim connect"):
         await call_tool("c_never_connected", "cloudflare", "execute", {},
-                        backend=Ring())
+                        keyring=Ring())
 
     with pytest.raises(NeedsLogin, match="munim connect"):
-        await tools_for("c_never_connected", "cloudflare", backend=Ring())
+        await tools_for("c_never_connected", "cloudflare", keyring=Ring())
 
 
 async def test_session_for_is_asked_not_to_allow_a_login(monkeypatch):
@@ -428,3 +428,43 @@ async def test_a_tool_with_no_required_list_is_never_blocked(monkeypatch):
 
     await call_tool("c_1", "cloudflare", "docs", {})
     assert session.called == [("docs", {})]
+
+
+# ---- two stores, two arguments ----------------------------------------
+
+
+async def test_the_session_store_and_the_key_store_are_not_interchangeable():
+    """`session_for` used to take one `backend` and hand it to both.
+
+    `endpoint_for` and `auth_for` want a vault-shaped object, with
+    get_password. `headers_for` wants a CredentialBackend, with get. Whichever
+    kind a caller passed, the other kind of provider broke, and the MCP server
+    passed a CredentialBackend: `list_provider_tools` failed with an
+    ExceptionGroup while the identical CLI command worked, because the CLI
+    passed nothing and got the right default.
+    """
+    import inspect
+
+    from munim.remote.session import session_for
+
+    taken = inspect.signature(session_for).parameters
+    assert "keyring" in taken and "keys" in taken, \
+        "the two stores must be two arguments; one name for both hid a bug twice"
+    assert "backend" not in taken, \
+        "a single `backend` is the ambiguity this split exists to remove"
+
+
+async def test_the_mcp_tools_do_not_hand_over_the_key_store():
+    """The exact regression, asserted at the call site rather than by running
+    a real session: server.py must not pass its CredentialBackend into the
+    passthrough, because that is where it reached session_for."""
+    import inspect
+
+    from munim import server
+
+    source = inspect.getsource(server.build_server)
+    for call in ("tools_for(record.id, provider", "call_tool(record.id, provider"):
+        start = source.index(call)
+        window = source[start:start + 220]
+        assert "backend=backend" not in window, \
+            f"the API-key store is being passed where the session store belongs: {call}"

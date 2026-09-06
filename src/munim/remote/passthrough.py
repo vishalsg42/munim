@@ -94,7 +94,7 @@ def _described(tool) -> dict:
     }
 
 
-async def tools_for(client: str, provider: str, *, backend=None) -> list[dict]:
+async def tools_for(client: str, provider: str, *, keyring=None) -> list[dict]:
     """Everything this client's session with this provider exposes.
 
     Read-only, and it never opens a browser: a client whose session has expired
@@ -102,7 +102,7 @@ async def tools_for(client: str, provider: str, *, backend=None) -> list[dict]:
     out of an MCP call nobody is watching.
     """
     _check_provider(provider)
-    async with session_for(client, provider, backend=backend,
+    async with session_for(client, provider, keyring=keyring,
                            allow_login=False) as session:
         listing = await session.list_tools()
     described = [_described(t) for t in listing.tools]
@@ -117,14 +117,14 @@ async def tools_for(client: str, provider: str, *, backend=None) -> list[dict]:
 
 
 async def describe_tool(client: str, provider: str, tool: str, *,
-                        backend=None) -> dict:
+                        keyring=None) -> dict:
     """One tool, in full, or UnknownTool naming the ones that exist.
 
     Separate from `tools_for` because a caller asking about a named tool wants
     a different failure: "that is not a tool" with the alternatives, rather
     than an empty result they have to search themselves.
     """
-    described = await tools_for(client, provider, backend=backend)
+    described = await tools_for(client, provider, keyring=keyring)
     for one in described:
         if one["tool"] == tool:
             return one
@@ -163,7 +163,7 @@ def _flatten(result) -> dict:
 
 
 async def call_tool(client: str, provider: str, tool: str,
-                    arguments: dict | None = None, *, backend=None,
+                    arguments: dict | None = None, *, keyring=None,
                     log=None, stage: str = "passthrough") -> dict:
     """Call one provider tool with one client's credentials.
 
@@ -186,7 +186,7 @@ async def call_tool(client: str, provider: str, tool: str,
     refuse = None
     result = read_only = None
 
-    async with session_for(client, provider, backend=backend,
+    async with session_for(client, provider, keyring=keyring,
                            allow_login=False) as session:
         available = {t.name: t for t in (await session.list_tools()).tools}
         if tool not in available:

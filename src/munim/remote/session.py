@@ -428,28 +428,40 @@ def _quiet_refusals(active: bool):
 
 
 @asynccontextmanager
-async def session_for(client: str, provider: str, *, backend=None, on_url=None,
-                      verify: bool = True, label: str | None = None,
-                      allow_login: bool = True):
-    """Open one client's session with one provider's MCP server."""
+async def session_for(client: str, provider: str, *, keyring=None, keys=None,
+                      on_url=None, verify: bool = True,
+                      label: str | None = None, allow_login: bool = True):
+    """Open one client's session with one provider's MCP server.
+
+    Two stores, deliberately two arguments. `keyring` holds tokens and
+    endpoints and is vault-shaped, with get_password and set_password. `keys`
+    holds pasted API keys and is a CredentialBackend, with get and set. They
+    are different objects with different methods, and both default sensibly.
+
+    This used to be one `backend` handed to both. Whichever kind a caller
+    passed, the other kind of provider broke: a CredentialBackend raised
+    AttributeError on get_password for every OAuth provider, which is how the
+    MCP server's `list_provider_tools` failed while the identical CLI command
+    worked. It bit twice before it was split.
+    """
     server = server_for(provider)
     if server is None:
         raise NoRemoteServer(f"{provider} runs no MCP server")
 
-    url = endpoint_for(client, provider, backend)
+    url = endpoint_for(client, provider, keyring)
 
     if server.auth in ("url", "header"):
         # Neither has anything to authorise and neither opens a browser. For
         # `url` the address is the credential; for `header` it is a key the
         # operator pasted once, sent on every request.
-        headers = headers_for(client, provider, backend)
+        headers = headers_for(client, provider, keys)
         async with streamablehttp_client(url, headers=headers) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 yield session
         return  # neither kind has an account that can drift
 
-    auth = auth_for(client, provider, backend=backend, on_url=on_url,
+    auth = auth_for(client, provider, backend=keyring, on_url=on_url,
                     label=label, allow_login=allow_login)
     try:
         with _quiet_refusals(not allow_login):
@@ -457,7 +469,8 @@ async def session_for(client: str, provider: str, *, backend=None, on_url=None,
                 async with ClientSession(read, write) as session:
                     await session.initialize()
                     if verify:
-                        await _verify_account(session, client, provider, backend)
+                        await _verify_account(session, client, provider,
+                                              keyring)
                     yield session
     except BaseExceptionGroup as group:
         # The transport runs inside an anyio task group, so anything raised in

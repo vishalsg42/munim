@@ -83,7 +83,7 @@ async def check(client_id: str, name: str, provider: str,
             # verify=False because this asks whether the session opens, not
             # whether it is bound to the account it was bound to before. The
             # drift check belongs to real work, not to a health report.
-            async with session_for(client_id, provider, backend=keyring,
+            async with session_for(client_id, provider, keyring=keyring,
                                    allow_login=False, verify=False) as session:
                 listing = await session.list_tools()
         return Status(name, provider, LIVE, tools=len(listing.tools))
