@@ -6,23 +6,71 @@ first time, is in [`DECISIONS.md`](DECISIONS.md).
 
 ```mermaid
 flowchart TD
-    A["Coding agent<br/>(Claude Code, Codex, Cursor,<br/>Antigravity, Windsurf, ...)"] -->|stdio, JSON-RPC| B["Munim MCP server"]
+    A["<b>Coding agent</b><br/>Claude Code · Codex · Cursor · Windsurf"]
+    A -->|"stdio, JSON-RPC"| B["<b>Munim MCP server</b>"]
 
-    B --> F["Checks<br/>13, deterministic, no credentials"]
-    B --> G["Strands agent"]
+    B --> C["<b>Checks</b><br/>13, deterministic<br/>public DNS and HTTPS<br/>no credentials"]
+    B --> D["<b>Passthrough</b><br/>list_provider_tools<br/>call_provider_tool<br/><i>no model on this path</i>"]
+    B --> R["<b>Repair</b><br/>plan_mail_setup<br/>apply_mail_setup"]
+    B --> E["<b>Judgement</b><br/>Strands agent<br/>ask_across_clients<br/>work_on_client · launch"]
 
-    G --> S1["MCPClient<br/>prefix: acme_ltd"]
-    G --> S2["MCPClient<br/>prefix: ivy_fern"]
-    S1 --> K1[["Container(Acme Ltd)<br/>own registration, own token"]]
-    S2 --> K2[["Container(Ivy &amp; Fern)<br/>own registration, own token"]]
-    K1 --> P["The providers' own MCP servers<br/>mcp.cloudflare.com · mcp.vercel.com · mcp.resend.com"]
-    K2 --> P
+    D --> W
+    R --> W
+    E --> W
+    W{{"read across every client<br/><b>every write names one</b>"}}
 
-    G --> H[("~/.munim/runs/&lt;id&gt;.jsonl<br/>the one source")]
-    F --> H
-    H --> I["Control room<br/>separate process, SSE"]
-    H --> J["Launch report<br/>for the business owner"]
+    W --> K1
+    W --> K2
+
+    subgraph ACME ["one client"]
+        direction TB
+        K1[["<b>Container: Acme Ltd</b><br/>bound at construction, cannot widen"]]
+        K1 --> T1[("Acme's own registration<br/>and token")]
+    end
+
+    subgraph IVY ["another, on the same provider"]
+        direction TB
+        K2[["<b>Container: Ivy &amp; Fern</b><br/>bound at construction, cannot widen"]]
+        K2 --> T2[("Ivy &amp; Fern's own registration<br/>and token")]
+    end
+
+    T1 --> P
+    T2 --> P
+    P["<b>The providers' own MCP servers</b><br/>cloudflare · vercel · netlify · supabase · resend<br/>sentry · linear · notion · gmail · stitch · zoho"]
+
+    P --> H
+    C --> H
+
+    subgraph OBS ["what outlives the process"]
+        direction LR
+        H[("~/.munim/runs/&lt;id&gt;.jsonl<br/><b>the one source</b>")]
+        H --> I["Control room<br/>separate process, SSE"]
+        H --> J["Launch report<br/>for the business owner"]
+    end
+
+    classDef store fill:#eef2ff,stroke:#6366f1,color:#1e1b4b
+    classDef gate fill:#fff7ed,stroke:#ea580c,color:#7c2d12
+    classDef out fill:#f0fdf4,stroke:#16a34a,color:#14532d
+    class T1,T2,H store
+    class W gate
+    class P out
 ```
+
+Rendered for anywhere that does not run mermaid:
+[`diagrams/architecture.png`](diagrams/architecture.png) and
+[`diagrams/architecture.svg`](diagrams/architecture.svg). Regenerate both
+from the block above with `mmdc`, rather than editing them by hand.
+
+Two clients, one provider, one process. That is the whole thing, and it is not
+engineered: each client registers separately with the provider, so as far as the
+provider is concerned they are two applications and there is nothing shared to
+clobber. A coding agent holds one account per provider because one client id
+shares one token store.
+
+The passthrough is the path most work takes, and there is no model on it. Munim
+asks the provider which tools it publishes and forwards the one that was named,
+with the named client's credentials. The agent that decides which tool to call is
+the one already on the other end of the stdio pipe.
 
 Two clients, one provider, one process. That is the whole thing, and it is not
 engineered: each client registers separately with the provider, so as far as the
