@@ -1430,6 +1430,13 @@ def main(argv: list[str] | None = None) -> int:
     cl.add_argument("--json", action="store_true", dest="as_json",
                     help="wrap the result with the client, tool and run id")
 
+    ev = sub.add_parser("evals", help="whether the agent's advice has drifted")
+    ev.add_argument("--only", default="", metavar="FIXTURE",
+                    help="run one fixture by name")
+    ev.add_argument("--samples", type=int, default=None, metavar="N",
+                    help="times to ask each fixture (default: 3). One sample "
+                         "cannot tell drift from variance")
+
     rm = sub.add_parser("room", help="watch a run in a browser")
     rm.add_argument("--port", type=int, default=None,
                     help="port to serve on (default: 8977)")
@@ -1581,6 +1588,11 @@ def main(argv: list[str] | None = None) -> int:
         config("list", None, None)
         print("Agents:", file=sys.stderr)
         return config_ai(None, [])
+
+    if args.command == "evals":
+        from munim.evals import SAMPLES, run as evals_run
+        return evals_run(only=args.only,
+                         samples=args.samples or SAMPLES)
 
     if args.command == "room":
         # The room is its own process on purpose (D18): the MCP server owns
