@@ -93,7 +93,7 @@ test("findings from several clients are all kept", () => {
     state = reduce(state, { type: "event", event: e });
   }
   assert.deepEqual(Object.keys(state.byClient).sort(),
-                   ["Acme", "Thistle", "Ivy & Fern"]);
+                   ["Acme", "Ivy & Fern", "Thistle"]);
   assert.equal(state.byClient["Ivy & Fern"][0].human_text, "not verified");
 });
 
