@@ -161,7 +161,20 @@ async def ask(question: str, clients: list[str], *, keyring=None,
     # which is the same lie this function is arranged to avoid.
     kept, discarded = [], []
     for finding in answer.findings:
-        (kept if finding.client in called else discarded).append(finding)
+        # Matched through `prefix_for`, not by string equality. A model writes
+        # "Grafison" for a client registered as "grafison", and an end-to-end
+        # run discarded exactly that: a correct, grounded finding reported as an
+        # account the agent never read. `prefix_for` is the same normaliser that
+        # built the tool prefixes, so a name that reaches the same tools is the
+        # same client by construction.
+        settled = _match(finding.client, called)
+        if settled is None:
+            discarded.append(finding)
+            continue
+        # Answered under the name the operator registered, so a reply cannot
+        # quietly rename somebody's client.
+        finding.client = settled
+        kept.append(finding)
     answer.findings = kept
     if not answer.summary:
         answer.summary = prose
@@ -186,6 +199,28 @@ async def ask(question: str, clients: list[str], *, keyring=None,
                    detail={"question": question,
                            "findings": len(kept), "discarded": len(discarded)})
     return answer, discarded
+
+
+def _match(named: str, known: set[str]) -> str | None:
+    """The registered label this name refers to, or None if it refers to none.
+
+    Case and punctuation are the model's to get wrong and not the operator's to
+    pay for. Two different clients that normalise the same are already refused
+    at toolset construction, so this cannot silently pick the wrong one.
+    """
+    from munim.remote.toolsets import prefix_for
+
+    try:
+        wanted = prefix_for(named)
+    except ValueError:
+        return None
+    for label in known:
+        try:
+            if prefix_for(label) == wanted:
+                return label
+        except ValueError:
+            continue
+    return None
 
 
 def _clients_reached(reply, reached: dict) -> set[str]:
