@@ -17,8 +17,10 @@ client's credentials.
 
 import asyncio
 from pathlib import Path
+from typing import Annotated
 
 from mcp.server.fastmcp import FastMCP
+from pydantic import Field
 
 from munim.agent.launch import launch
 from munim.checks.dns import run_all_async, run_reachability_async
@@ -50,6 +52,28 @@ CROSS_CLIENT = {"find_across_clients", "ask_across_clients",
                 "audit_all_clients"}
 
 PROVIDERS = ("cloudflare", "vercel", "resend")
+
+# Every tool argument says what it is for. FastMCP builds the input schema from
+# the signature, and it takes per-argument text from `Field` rather than from
+# the docstring, so without these a coding agent sees six bare names and a type
+# for `call_provider_api` and has to guess. Sixteen tools and thirty-eight
+# arguments had none.
+#
+# `Says` rather than `Field` directly, and it is not only for readability.
+# `Field`'s first positional argument is the **default**, so `Field("what this
+# is for")` silently makes a required argument optional with a sentence as its
+# value. That was written here first and caught by reading the generated schema
+# rather than the code, which is the only place it shows.
+def Says(text: str):
+    """What this argument is for, in the schema the model actually sees."""
+    return Field(description=text)
+
+
+# Two arguments recur, and an argument that means the same thing should read
+# the same way wherever it appears.
+PROVIDER = Says("The provider to use, for example cloudflare, vercel or "
+                "resend. Only what this client is actually connected to is "
+                "reachable.")
 
 
 def _shaped(record, stored: list[str], found, kinds=None) -> dict:
@@ -134,7 +158,9 @@ def build_server(backend=None, registry=None, runs_dir=None,
     # ---- read across -----------------------------------------------------
 
     @server.tool()
-    async def list_clients(check: bool = True) -> list[dict]:
+    async def list_clients(
+        check: Annotated[bool, Says("Ask each provider whether the session still opens. False reports only what is stored, which is instant.")] = True,
+    ) -> list[dict]:
         """List every client and which providers each can actually reach.
 
         `connected` means the session opens right now, not that a credential is
@@ -173,7 +199,9 @@ def build_server(backend=None, registry=None, runs_dir=None,
                 for r in records]
 
     @server.tool()
-    async def find_across_clients(need: str) -> list[dict]:
+    async def find_across_clients(
+        need: Annotated[str, Says("What to look for, as one of the catalogue check names, for example spf_single or dmarc_policy.")],
+    ) -> list[dict]:
         """Answer one question across every client at once.
 
         Read-only by design: this is the one place that spans containers, so it
@@ -205,7 +233,9 @@ def build_server(backend=None, registry=None, runs_dir=None,
         return hits
 
     @server.tool()
-    async def ask_across_clients(question: str) -> dict:
+    async def ask_across_clients(
+        question: Annotated[str, Says("A question in plain English about every client at once, for example which of my clients has no DMARC policy.")],
+    ) -> dict:
         """Ask one question about every client at once, using their own accounts.
 
         Where `find_across_clients` answers the questions the check catalogue
@@ -253,7 +283,9 @@ def build_server(backend=None, registry=None, runs_dir=None,
         return shaped
 
     @server.tool()
-    async def audit_all_clients(dkim_selector: str = "resend") -> dict:
+    async def audit_all_clients(
+        dkim_selector: Annotated[str, Says("The DKIM selector to look for. Change it only if the client sends through something other than Resend.")] = "resend",
+    ) -> dict:
         """Check every client at once and report only what needs attention.
 
         The thing an operator actually wants running: silent when everything
@@ -322,7 +354,10 @@ def build_server(backend=None, registry=None, runs_dir=None,
         }
 
     @server.tool()
-    async def work_on_client(client: str, request: str) -> dict:
+    async def work_on_client(
+        client: Annotated[str, Says("The client to act on, by the name you registered them under. A write resolves this one client's credentials and no other.")],
+        request: Annotated[str, Says("What to do, in plain English, for example add a TXT record for domain verification. The agent uses only this client's provider tools.")],
+    ) -> dict:
         """Do something inside one client's accounts, using their own tools.
 
         The other half of read across, write within. `ask_across_clients` spans
@@ -349,9 +384,12 @@ def build_server(backend=None, registry=None, runs_dir=None,
     # ---- the provider's own tools ----------------------------------------
 
     @server.tool()
-    async def list_provider_tools(client: str, provider: str,
-                                  names_only: bool = False,
-                                  matching: str = "") -> dict:
+    async def list_provider_tools(
+        client: Annotated[str, Says("The client to act on, by the name you registered them under. A write resolves this one client's credentials and no other.")],
+        provider: Annotated[str, PROVIDER],
+        names_only: Annotated[bool, Says("Return names and read-only flags only. Resend publishes 121KB of schemas and 2KB of names.")] = False,
+        matching: Annotated[str, Says("Only tools whose name, description or argument schema contains this. Searching the schema is how you find every tool that takes a teamId.")] = "",
+    ) -> dict:
         """What this client's account with this provider can actually be asked to do.
 
         Every provider here runs its own MCP server with its own tools, and
@@ -399,8 +437,12 @@ def build_server(backend=None, registry=None, runs_dir=None,
         return listed
 
     @server.tool()
-    async def call_provider_tool(client: str, provider: str, tool: str,
-                                 arguments: dict | None = None) -> dict:
+    async def call_provider_tool(
+        client: Annotated[str, Says("The client to act on, by the name you registered them under. A write resolves this one client's credentials and no other.")],
+        provider: Annotated[str, PROVIDER],
+        tool: Annotated[str, Says("The provider tool to call, named exactly as list_provider_tools reported it.")],
+        arguments: Annotated[dict | None, Says("The arguments that tool declares, as an object. Read its inputSchema first rather than guessing.")] = None,
+    ) -> dict:
         """Call one of a provider's own tools with one client's credentials.
 
         The write half of the passthrough. `tool` and `arguments` come from
@@ -445,9 +487,14 @@ def build_server(backend=None, registry=None, runs_dir=None,
         return {**result, "client": record.name, "run_id": log.run_id}
 
     @server.tool()
-    async def call_provider_api(client: str, provider: str, path: str,
-                                method: str = "GET", query: dict | None = None,
-                                body: dict | None = None) -> dict:
+    async def call_provider_api(
+        client: Annotated[str, Says("The client to act on, by the name you registered them under. A write resolves this one client's credentials and no other.")],
+        provider: Annotated[str, Says("cloudflare, vercel or resend. Only these three have a known REST base URL and header shape.")],
+        path: Annotated[str, Says("A path beginning with one slash, for example /v9/projects. Never a full URL: an absolute URL is refused before the request is built, because it would send this client's credential to another host.")],
+        method: Annotated[str, Says("GET, POST, PATCH, PUT or DELETE. Every call is recorded as a mutation whatever the method, because an HTTP verb is a convention rather than a guarantee.")] = "GET",
+        query: Annotated[dict | None, Says("Query string parameters, as an object.")] = None,
+        body: Annotated[dict | None, Says("JSON request body, as an object.")] = None,
+    ) -> dict:
         """One HTTP call to a provider's own API, with one client's credential.
 
         The way down a layer when a provider's MCP server does not publish what
@@ -499,7 +546,10 @@ def build_server(backend=None, registry=None, runs_dir=None,
     # ---- repair ----------------------------------------------------------
 
     @server.tool()
-    async def plan_mail_setup(client: str, domain: str) -> dict:
+    async def plan_mail_setup(
+        client: Annotated[str, Says("The client to act on, by the name you registered them under. A write resolves this one client's credentials and no other.")],
+        domain: Annotated[str, Says("The domain to send mail from, for example acme.example. Uses the client's registered domain when omitted.")],
+    ) -> dict:
         """What setting up email for this client's domain would change.
 
         Reads what is already published and returns every record with the
@@ -528,8 +578,11 @@ def build_server(backend=None, registry=None, runs_dir=None,
         return {**made.to_dict(), "run_id": log.run_id}
 
     @server.tool()
-    async def apply_mail_setup(client: str, plan_id: str,
-                               approved: bool = False) -> dict:
+    async def apply_mail_setup(
+        client: Annotated[str, Says("The client to act on, by the name you registered them under. A write resolves this one client's credentials and no other.")],
+        plan_id: Annotated[str, Says("The plan_id that plan_mail_setup returned. A plan made for a different client is refused.")],
+        approved: Annotated[bool, Says("Required only when the plan would replace a record that already exists. That is the client's decision, so show them the plan before setting this.")] = False,
+    ) -> dict:
         """Carry out a plan from `plan_mail_setup`.
 
         `approved` is required when the plan would replace or combine a record
@@ -562,13 +615,19 @@ def build_server(backend=None, registry=None, runs_dir=None,
     # ---- registry --------------------------------------------------------
 
     @server.tool()
-    def add_client(name: str, domain: str = "") -> dict:
+    def add_client(
+        name: Annotated[str, Says("What you call this client, for example Acme Ltd. Used in tool names, so two clients cannot differ only by punctuation.")],
+        domain: Annotated[str, Says("Their primary domain, if you know it. It can be added later by naming it in a check.")] = "",
+    ) -> dict:
         """Register a client. Holds no credential - only a name and a domain."""
         registry.add(ClientRecord(name=name, domain=domain or None))
         return {"client": name, "domain": domain or None}
 
     @server.tool()
-    async def client_status(client: str, check: bool = True) -> dict:
+    async def client_status(
+        client: Annotated[str, Says("The client to act on, by the name you registered them under. A write resolves this one client's credentials and no other.")],
+        check: Annotated[bool, Says("Ask each provider whether the session still opens, rather than only reporting what is stored.")] = True,
+    ) -> dict:
         """What is known about one client. Never returns a credential.
 
         `connected` is the live answer, for the same reason as `list_clients`.
@@ -596,7 +655,11 @@ def build_server(backend=None, registry=None, runs_dir=None,
     # ---- write within ----------------------------------------------------
 
     @server.tool()
-    def connect_provider(client: str, provider: str, credential: str) -> dict:
+    def connect_provider(
+        client: Annotated[str, Says("The client to act on, by the name you registered them under. A write resolves this one client's credentials and no other.")],
+        provider: Annotated[str, PROVIDER],
+        credential: Annotated[str, Says("The API key or token, pasted. It is stored and never returned by any tool.")],
+    ) -> dict:
         """Connect one provider for one client using a credential you paste.
 
         Prefer `munim connect` for providers that publish an OAuth flow: it
@@ -613,7 +676,10 @@ def build_server(backend=None, registry=None, runs_dir=None,
                 "oauth_available": provider in OAUTH_PROVIDERS}
 
     @server.tool()
-    async def check(target: str, dkim_selector: str = "resend") -> dict:
+    async def check(
+        target: Annotated[str, Says("A client name, or a bare domain. A domain nobody has mentioned before is registered as a new client, because a DNS lookup is public and reveals nothing.")],
+        dkim_selector: Annotated[str, Says("The DKIM selector to look for. Change it only if the client sends through something other than Resend.")] = "resend",
+    ) -> dict:
         """Check a client or a domain. Registers it on first mention.
 
         `target` can be a client you have already added, a domain belonging to
@@ -663,7 +729,10 @@ def build_server(backend=None, registry=None, runs_dir=None,
         }
 
     @server.tool()
-    async def fix(target: str, dkim_selector: str = "resend") -> dict:
+    async def fix(
+        target: Annotated[str, Says("A client name, or a bare domain. The same resolution check uses.")],
+        dkim_selector: Annotated[str, Says("The DKIM selector to look for. Change it only if the client sends through something other than Resend.")] = "resend",
+    ) -> dict:
         """Check a client's domain, then repair what can be repaired safely.
 
         `check` explains what is wrong. This acts on it. The same thirteen
@@ -706,7 +775,9 @@ def build_server(backend=None, registry=None, runs_dir=None,
                 "watch": "http://127.0.0.1:8977"}
 
     @server.tool()
-    def launch_status(run_id: str = "") -> dict:
+    def launch_status(
+        run_id: Annotated[str, Says("The run to read, as returned by check, fix or call_provider_tool. The newest run when omitted.")] = "",
+    ) -> dict:
         """Read a run without waiting on it.
 
         A launch polls DNS and can outlast a single tool call, so progress is
