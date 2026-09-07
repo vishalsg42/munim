@@ -19,6 +19,7 @@ from munim.container import KEY_PROVIDERS, KeychainBackend
 from munim.env import load as load_env
 from munim.pick import BACK, choose
 from munim.registry import ClientRecord, Registry, UnknownClient
+from munim import words
 
 REGISTRY = None  # resolved at call time so tests can point it elsewhere
 
@@ -157,7 +158,7 @@ def confirm(planned, ask=None) -> bool:
     print("This removes every credential listed here:", file=sys.stderr)
     for what, _ in planned:
         print(f"  {what}", file=sys.stderr)
-    print(f"{len(planned)} credential(s). Getting them back is a browser login "
+    print(f"{words.count(len(planned), 'credential')}. Getting them back is a browser login "
           f"for each one.", file=sys.stderr)
     print("Type yes to continue: ", end="", file=sys.stderr, flush=True)
     try:
@@ -189,7 +190,7 @@ def _record_removal(records, removed: list[str], everything: bool) -> None:
                     else "every client"),
             stage="disconnect",
             kind="mutation",
-            human_text=f"{len(removed)} credential(s) removed",
+            human_text=f"{words.count(len(removed), 'credential')} removed",
             detail={"removed": removed, "everything": everything,
                     "clients": [r.name for r in records]},
         )
@@ -229,7 +230,7 @@ def disconnect(client: str | None, provider: str | None, everything: bool,
     if dry_run:
         for what, _ in planned:
             print(f"  would remove {what}", file=sys.stderr)
-        print(f"{len(planned)} credential(s). Nothing was removed.",
+        print(f"{words.count(len(planned), 'credential')}. Nothing was removed.",
               file=sys.stderr)
         return 0
 
@@ -253,7 +254,7 @@ def disconnect(client: str | None, provider: str | None, everything: bool,
 
     for line in removed:
         print(f"  removed {line}", file=sys.stderr)
-    print(f"{len(removed)} credential(s) gone. Clients and their domains are "
+    print(f"{words.count(len(removed), 'credential')} gone. Clients and their domains are "
           f"still here; reconnect with `munim connect <provider>`.",
           file=sys.stderr)
     return 0
@@ -571,6 +572,93 @@ def add_client(name: str, domain: str | None = None) -> int:
     print(f"Added {record.name!r}. Nothing is connected yet:",
           file=sys.stderr)
     print(f'  munim connect "{record.name}" cloudflare', file=sys.stderr)
+    return 0
+
+
+def approve(run_id: str = "", *, refuse: bool = False,
+            assume_yes: bool = False) -> int:
+    """Answer, from a terminal, a repair that has stopped and is waiting.
+
+    The control room's button is the other way to do this, and having two is
+    what keeps D18's test true: if the room were removed, nothing about how the
+    product is used would change. It is also the answer to "nobody was watching
+    the browser", which is most of the time.
+
+    Prints the diff first, always. A person approving a change to somebody
+    else's live DNS should have seen what it replaces, and an approval given
+    without that is a signature on a blank page.
+    """
+    from munim import approval
+    from munim.runlog import all_runs
+
+    if not run_id:
+        # An operator who has just watched a run stop does not want to go and
+        # find its id. The newest run with something pending is almost always
+        # the one they mean, and if it is not, they can name one.
+        for candidate in reversed(all_runs() or []):
+            if approval.pending(candidate):
+                run_id = candidate
+                break
+
+    waiting = approval.pending(run_id) if run_id else []
+    if not waiting:
+        print("Nothing is waiting for you.", file=sys.stderr)
+        print("A repair asks only when it would replace a record that already "
+              "exists.", file=sys.stderr)
+        return 0
+
+    answered = 0
+    for asked in waiting:
+        plan_id = asked.get("plan_id", "")
+        print(f"\n{asked.get('client', 'this client')} · "
+              f"{asked.get('domain', '')}", file=sys.stderr)
+        print(f"run {asked.get('run_id', run_id)} · plan {plan_id}",
+              file=sys.stderr)
+        for change in asked.get("changes", []):
+            now = ", ".join(change.get("current") or []) or "(nothing published)"
+            print(f"\n  {change.get('purpose', '')} {change.get('type', '')} "
+                  f"{change.get('name', '')}  [{change.get('action', '')}]",
+                  file=sys.stderr)
+            print(f"    now:  {now}", file=sys.stderr)
+            print(f"    next: {change.get('content', '')}", file=sys.stderr)
+            if change.get("note"):
+                print(f"    {change['note']}", file=sys.stderr)
+
+        print(f"\nThis changes {asked.get('client', 'the client')}'s live DNS. "
+              f"It is their account, not yours.", file=sys.stderr)
+
+        if refuse:
+            approval.record(asked["run_id"], plan_id, approved=False, by="cli")
+            print("Refused. The plan stays on disk.", file=sys.stderr)
+            answered += 1
+            continue
+
+        if not assume_yes:
+            if not sys.stdin.isatty():
+                # Nothing is recorded. Silence is not consent, and neither is
+                # it a refusal: a refusal is a decision somebody made, and
+                # nobody is here. Leaving it unanswered lets the run time out,
+                # which is recoverable, and says how to answer on purpose.
+                print("Nothing recorded: there is nobody at this terminal to "
+                      "ask.", file=sys.stderr)
+                print("Approve it deliberately with --yes, or refuse it with "
+                      "--no.", file=sys.stderr)
+                continue
+            reply = input("Approve? [y/N] ").strip().lower()
+            if reply not in ("y", "yes"):
+                approval.record(asked["run_id"], plan_id, approved=False,
+                                by="cli")
+                print("Not approved. The plan stays on disk.", file=sys.stderr)
+                answered += 1
+                continue
+
+        approval.record(asked["run_id"], plan_id, approved=True, by="cli")
+        print("Approved.", file=sys.stderr)
+        answered += 1
+
+    if answered:
+        print("\nThe run picks this up within a second. If it already gave up "
+              "waiting, apply the plan with apply_mail_setup.", file=sys.stderr)
     return 0
 
 
@@ -1468,6 +1556,15 @@ def main(argv: list[str] | None = None) -> int:
     rm.add_argument("--reports", default=None, metavar="DIR",
                     help="directory of launch reports")
 
+    ap = sub.add_parser("approve", help="answer a repair that is waiting on you")
+    ap.add_argument("run_id", nargs="?", default="",
+                    help="the run that is waiting (default: the newest one)")
+    ap.add_argument("--no", action="store_true",
+                    help="refuse it; the plan stays on disk and can be applied "
+                         "later")
+    ap.add_argument("--yes", "-y", action="store_true",
+                    help="do not ask again at the terminal")
+
     dr = sub.add_parser("doctor", help="what is wrong with this installation")
     dr.add_argument("--verbose", "-v", action="store_true",
                     help="also list what is connected")
@@ -1521,7 +1618,7 @@ def main(argv: list[str] | None = None) -> int:
             sorted({*all_servers(), *KEY_PROVIDERS}),
             extra_accounts=[APPLICATION])
         if adopted:
-            print(f"Moved {len(adopted)} credential(s) out of the OS keychain "
+            print(f"Moved {words.count(len(adopted), 'credential')} out of the OS keychain "
                   f"into {vault.path()}.", file=sys.stderr)
             print(f"  The keychain copies are still there. Remove them with "
                   f"Keychain Access if you want them gone.", file=sys.stderr)
@@ -1616,6 +1713,9 @@ def main(argv: list[str] | None = None) -> int:
         from munim.evals import SAMPLES, run as evals_run
         return evals_run(only=args.only,
                          samples=args.samples or SAMPLES)
+
+    if args.command == "approve":
+        return approve(args.run_id, refuse=args.no, assume_yes=args.yes)
 
     if args.command == "room":
         # The room is its own process on purpose (D18): the MCP server owns

@@ -1,7 +1,10 @@
 # The tools your agent gets
 
-Fourteen, and this is the whole surface. Anything not listed here is not
+Sixteen, and this is the whole surface. Anything not listed here is not
 reachable, whatever else is in the repository.
+
+(It said fourteen for a while, over a table of fifteen. Counted, not estimated,
+and a test now fails when the table and the server disagree.)
 
 | Tool | |
 |## The passthrough: `list_provider_tools` and `call_provider_tool`
@@ -71,6 +74,7 @@ needs no flag, and `--args-file` or `--args -` feed it from a file or a pipe.
 | `apply_mail_setup` | carry out a plan, with approval required to replace a record |
 | `list_provider_tools` | what one client's provider account can be asked to do |
 | `call_provider_tool` | call one of those tools with that client's credentials |
+| `fix` | check a client's domain, then repair what can be repaired, stopping for a person before replacing anything (needs agents on) |
 | `call_provider_api` | one HTTP call to the provider's own API, when its MCP server publishes no tool for the job |
 | `launch_status` | read a run back |
 
@@ -109,9 +113,57 @@ It works for cloudflare, vercel and resend: the three whose REST base URL and
 header shape Munim knows. It is not a universal escape hatch, and inventing base
 URLs for the other eight would be guessing.
 
+## `fix`, and why the boundary is an edge rather than a prompt
+
+`check` explains what is wrong. `fix` acts on it, and because acting means
+changing something in somebody else's account, the interesting part is not the
+agent. It is what decides whether the repairing agent is reached at all.
+
+It is a Strands `Graph` of three agents:
+
+```
+  triage  ──[ can this be repaired? ]──►  repair  ──[ did it write? ]──►  recheck
+  reads only                              three tools                     reads only
+```
+
+**The thirteen checks run before the graph**, exactly as they do for `check`,
+and the predicate on the first edge reads those results. It never reads what a
+model said. Every term of it is deterministic: is there a failure this repair
+path can actually produce a record for, does this client have the API keys the
+repair needs, and is this a domain anybody is allowed to change. A model that is
+confident, wrong, or talked into it cannot traverse an edge, because the edge is
+not listening to it.
+
+That is also why this is a graph and not a `Swarm`. In a swarm the diagnosing
+model decides to hand off to the repairing one, which puts the write boundary
+inside the model's discretion. Using more of an SDK is not the same as using it
+well, and the graph earns its place by holding a boundary a single prompt could
+only ask for.
+
+**The repair node has three tools and no fourth**: read a record as it stands,
+work out what would change, carry that out. No provider toolsets, no raw HTTP.
+The two that write **take no arguments at all**, which is the approval guarantee
+rather than a style: a tool that cannot name a plan cannot inherit an approval
+somebody gave about a different one.
+
+**A person approves in the browser.** When the plan would replace a record that
+already exists, the run stops, the control room shows each record's current
+value above its proposed one, and the button that has been rendered there since
+the room was built finally does something. Nobody watching is not a hang: the
+wait times out, nothing is changed, and the result names
+`apply_mail_setup(client, plan_id, approved=true)` so the coding agent can
+finish it. Running out of time is never read as consent.
+
+**A skipped repair says why.** An edge that does not traverse is silent, and a
+silent step is indistinguishable from one that hung. So the reason is written to
+the run log and the room renders that cell as deliberately off.
+
 **Two of these need agents turned on, and they are off by default.**
 `ask_across_clients` and `work_on_client` are agent loops end to end: with agents
 off they answer with the command to turn them on rather than doing anything.
+`fix` is a third, and it degrades the way `check` does rather than refusing: the
+checks still run and their findings still stand, and only the repair needs a
+model.
 `check` is different, because its thirteen checks are deterministic and are the
 half that matters: it runs them all either way and skips only the plain-English
 explanation, saying so in its result and in the report.

@@ -1,7 +1,7 @@
 // Run with: node --test tests/room/ - no install, no build, no dependencies.
 import assert from "node:assert";
 import { test } from "node:test";
-import { CHECKS, CHECK_LABELS, initialState, reduce } from "../../src/munim/room/static/reduce.mjs";
+import { CHECKS, CHECK_LABELS, STAGES, initialState, reduce } from "../../src/munim/room/static/reduce.mjs";
 
 
 const ev = (seq, kind, detail = {}, stage = "mail") => ({
@@ -139,8 +139,11 @@ const EMITTED = [
   "dmarc_present", "dmarc_policy", "mx_present", "ns_delegated",
   "cert_valid", "caa_allows", "apex_resolves", "www_redirect",
   "https_enforced",
-  // munim/adapters/vercel.py, produced on a launch with Vercel connected
-  "deploy_current", "env_scoped",
+  // munim/checks/hosting.py, which is what finally calls the three checks in
+  // munim/adapters/vercel.py. They were written, tested, and reachable from
+  // nothing in src/ for the life of the project, while this list already
+  // claimed two of them were "produced on a launch with Vercel connected".
+  "deploy_current", "env_applied", "env_scoped",
 ];
 
 test("every chip has something that can light it", () => {
@@ -158,4 +161,119 @@ test("every check that is emitted has a chip", () => {
 test("every chip has a label", () => {
   const unlabelled = CHECKS.filter((c) => !CHECK_LABELS[c]);
   assert.deepEqual(unlabelled, []);
+});
+
+// ---- the rail, pinned the same way the chips are -------------------------
+//
+// The chip list was pinned against its producers after seven ghost cells shipped
+// and sat grey on camera. The stage rail had exactly the same bug and nobody
+// looked: it declared `deploy` and `domain`, and **nothing in src/ has ever
+// emitted either**, across every run in the log. Two permanently grey cells,
+// reading as steps that hung. Same rule, same test.
+
+const STAGES_EMITTED = [
+  "dns",       // adapters/cloudflare.py
+  "mail",      // agent/mailplan.py, agent/mail.py, server.py
+  "verify",    // agent/launch.py, server.py
+  "diagnose",  // agent/launch.py, agent/watch.py (the triage node)
+  "repair",    // agent/gate.py, agent/graph.py, agent/watch.py
+  "recheck",   // agent/watch.py (the recheck node)
+];
+
+test("every stage in the rail has something that emits it", () => {
+  const ghosts = STAGES.filter((s) => !STAGES_EMITTED.includes(s));
+  assert.deepEqual(ghosts, [],
+    `nothing writes these stages, so their cells can only ever be grey: ${ghosts.join(", ")}`);
+});
+
+test("every stage that is emitted has a cell in the rail", () => {
+  const missing = STAGES_EMITTED.filter((s) => !STAGES.includes(s));
+  assert.deepEqual(missing, [],
+    `emitted but never shown: ${missing.join(", ")}`);
+});
+
+// ---- the one interactive element -----------------------------------------
+
+const CONFIRM = {
+  run_id: "r1", seq: 4, ts: 0, client: "Acme Ltd", stage: "mail",
+  kind: "awaiting_confirm", human_text: "2 records already exist.",
+  detail: {
+    plan_id: "p1",
+    changes: [{ purpose: "SPF", name: "acme.example", action: "merge",
+                current: ["v=spf1 include:a ~all"],
+                content: "v=spf1 include:a include:b ~all" }],
+  },
+};
+
+const feed = (...events) =>
+  events.reduce((s, e) => reduce(s, e.type ? e : { type: "event", event: e }),
+                initialState);
+
+test("the change waiting for approval arrives with what it would replace", () => {
+  const state = feed(CONFIRM);
+  const change = state.awaitingConfirm.detail.changes[0];
+
+  assert.equal(state.awaitingConfirm.detail.plan_id, "p1");
+  assert.deepEqual(change.current, ["v=spf1 include:a ~all"]);
+  assert.match(change.content, /include:b/);
+});
+
+test("pressing a button marks the answer as in flight", () => {
+  const state = feed(CONFIRM, { type: "decide", value: "approve" });
+
+  assert.equal(state.deciding, "approve");
+  assert.ok(state.awaitingConfirm, "the card stays up until the answer lands");
+});
+
+test("a second click cannot ask twice", () => {
+  // The buttons render disabled off `deciding`, so this is the state that
+  // makes a double-click impossible rather than merely refused server-side.
+  const state = feed(CONFIRM, { type: "decide", value: "approve" });
+
+  assert.equal(state.deciding, "approve");
+  assert.notEqual(state.deciding, null);
+});
+
+test("a mutation clears the prompt and the pending click", () => {
+  const state = feed(CONFIRM, { type: "decide", value: "approve" },
+    { run_id: "r1", seq: 5, ts: 0, client: "Acme Ltd", stage: "mail",
+      kind: "mutation", human_text: "Published SPF", detail: {} });
+
+  assert.equal(state.awaitingConfirm, null);
+  assert.equal(state.deciding, null);
+  assert.equal(state.decided, "approve");
+});
+
+test("a change nobody approved in time stops waiting", () => {
+  // The failure this prevents: a timed-out card sitting on screen forever,
+  // asking for something that can no longer be given.
+  const state = feed(CONFIRM, { type: "decide", value: "approve" },
+    { run_id: "r1", seq: 5, ts: 0, client: "Acme Ltd", stage: "mail",
+      kind: "escalated", human_text: "Nobody approved this in time.",
+      detail: { plan_id: "p1", decision: "timed out" } });
+
+  assert.equal(state.awaitingConfirm, null);
+  assert.equal(state.deciding, null);
+  assert.equal(state.decided, "timed out");
+});
+
+test("an escalation that is not about a decision leaves the prompt alone", () => {
+  // `escalated` carries more than refusals. A cross-client escalation must not
+  // silently dismiss a pending approval for something else entirely.
+  const state = feed(CONFIRM,
+    { run_id: "r1", seq: 5, ts: 0, client: "Acme Ltd", stage: "across",
+      kind: "escalated", human_text: "Named an account it never read.",
+      detail: {} });
+
+  assert.ok(state.awaitingConfirm, "an unrelated escalation dismissed the card");
+});
+
+test("a finished run leaves nothing waiting", () => {
+  const state = feed(CONFIRM, { type: "decide", value: "approve" },
+    { run_id: "r1", seq: 9, ts: 0, client: "Acme Ltd", stage: "mail",
+      kind: "run_done", human_text: "Finished.", detail: {} });
+
+  assert.equal(state.awaitingConfirm, null);
+  assert.equal(state.deciding, null);
+  assert.equal(state.done, true);
 });

@@ -212,6 +212,25 @@ wrong, and a claims discipline that only runs forward is not one.
 
 Resuming an interrupted launch from the run log is still not implemented.
 
-The check catalogue is complete at thirteen, all of which need no provider
-account: they read public DNS and make a public HTTPS request. Anyone can run
-them against any domain, including yours, without an account or a key.
+The check catalogue is no longer DNS-only, and the reason it was is not
+flattering. `adapters/vercel.py` had contained three deterministic checks since
+it was written, returning the same type as the DNS ones and tested, and nothing
+in `src/` ever called them. Only tests did, which is why nobody noticed. What
+was missing was one method: nothing could map a client's domain to a Vercel
+project.
+
+Three families now, labelled by what they need:
+
+  - **Thirteen about DNS**, needing no provider account at all. They read public
+    DNS and make a public HTTPS request, so anyone can run them against any
+    domain, including yours, without an account or a key. That property is worth
+    keeping stated separately from the count.
+  - **Three about Vercel hosting**, when a client has a Vercel credential.
+  - **One per connected provider**, asking the only party who can answer whether
+    that account still works. This one generalises to all eleven with no
+    per-provider code.
+
+Every path that cannot answer returns `skip` rather than `fail`, because a check
+that fires wrongly is worth less than no check (D20). Per-provider check
+families for the remaining eight are declined rather than deferred: there is no
+version of that which finishes and is defensible. See D37.

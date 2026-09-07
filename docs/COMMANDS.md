@@ -119,6 +119,38 @@ munim-room --port 8986                  # if 8977 is taken
 munim-room --runs DIR --reports DIR     # serve a different set of runs
 ```
 
+### Answering a repair that stopped
+
+`fix` repairs what it can and stops before replacing a record somebody already
+published. That is the client's decision, not the agent's, and there are two
+ways to make it.
+
+In the control room, the card shows each record's current value above the one
+it would become, with a button. That is the fast one, and the one worth
+watching.
+
+From a terminal, for when nobody was watching the browser, which is most of the
+time:
+
+```bash
+munim approve                    # the newest run that is waiting
+munim approve <run-id>           # a particular one
+munim approve <run-id> --no      # refuse; the plan stays on disk
+munim approve <run-id> --yes     # do not ask again at the prompt
+```
+
+It prints the diff before it asks, always. An approval given without seeing
+what it replaces is a signature on a blank page.
+
+**Silence is not consent.** Piped into with no terminal and no `--yes`, it
+records nothing at all and says so. Not a refusal either: a refusal is a
+decision somebody made, and nobody is there to make one. The run times out on
+its own, which is recoverable.
+
+Nobody answering at all is also handled: the run gives up, changes nothing, and
+tells your coding agent to call `apply_mail_setup` with `approved=true` when
+somebody has looked.
+
 ---
 
 

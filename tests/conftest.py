@@ -43,6 +43,10 @@ def _agents_are_off_and_no_host_is_real(tmp_path, monkeypatch):
     monkeypatch.setenv("MUNIM_CREDENTIALS", str(tmp_path / "credentials.json"))
     # The remembered tool list is the third file munim writes to ~/.munim.
     monkeypatch.setenv("MUNIM_TOOL_CACHE", str(tmp_path / "tools.json"))
+    # A person's answer about one plan. This door matters more than the others:
+    # a decision file left behind in a real home is a standing approval on a
+    # real plan, waiting for the next run to find it and write somebody's DNS.
+    monkeypatch.setenv("MUNIM_DECISIONS", str(tmp_path / "decisions"))
     for name in ("MUNIM_AI", "MUNIM_AI_HOST", "MUNIM_PREFER",
                  "MUNIM_BEDROCK_MODEL", "MUNIM_GEMINI_MODEL",
                  "MUNIM_ANTHROPIC_MODEL", "GEMINI_API_KEY", "GOOGLE_API_KEY",
@@ -127,3 +131,9 @@ def _no_test_may_touch_the_real_credentials(tmp_path, monkeypatch):
     resolved = vault.path()
     assert tmp_path in resolved.parents, \
         f"the credential store escaped the sandbox: {resolved}"
+
+    from munim import approval
+
+    where = approval.directory()
+    assert tmp_path in where.parents or where.parent == tmp_path, \
+        f"the decision store escaped the sandbox: {where}"

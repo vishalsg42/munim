@@ -38,6 +38,12 @@ lets a credential reach anywhere it was not meant to go. Specifically:
   (D6), and any route past that is a finding.
 - Anything that makes the tool authenticate as one client while reporting
   another.
+- **Anything that approves a change the operator did not approve.** The control
+  room can now record one decision, and `apply_repair` writes a client's live
+  DNS on the strength of it. A way to get an approval recorded without a person
+  clicking, or to make one approval count for a different plan or a later run,
+  is a finding. So is a way for the agent itself to record one: nothing under
+  `src/munim/agent/` may call `approval.record`, and a test asserts it.
 
 ## What is already known, and is not a vulnerability
 
@@ -61,6 +67,20 @@ vulnerability and this paragraph does not cover it.
 **Cloudflare's `execute` runs JavaScript against the account.** That is
 Cloudflare's tool and Cloudflare's boundary. Munim forwards it with one client's
 credential and records the call.
+
+**The control room's decision endpoint is unauthenticated.** `POST
+/api/decisions/{run_id}/{plan_id}` writes one small local JSON file. That is
+acceptable only because of two things together, and neither alone would do it.
+The room binds `127.0.0.1` explicitly and a test pins that line, so another
+machine cannot reach it. And the endpoint refuses cross-site requests, because
+loopback does not stop another *tab*: any page the operator's browser visits
+while the room is open could otherwise approve a client's DNS change. A hosted
+room would need a real token, and this paragraph would not survive it.
+
+An approval is also scoped rather than standing. It is keyed by run **and**
+plan, so an answer given about one change cannot be spent on another, and it
+goes stale after fifteen minutes, because somebody looked at two records and
+said yes to those.
 
 **A tool result reaches whichever model the coding agent runs on.** Munim is an
 MCP server, so anything it returns crosses that boundary by construction. It is

@@ -5,8 +5,13 @@ kills on every reconnect, config reload and session exit. An HTTP listener livin
 inside it would go dark mid-demo and then fail to rebind on respawn.
 
 So the room is its own process. It tails the run log the agent writes and serves
-it as Server-Sent Events. Nothing here talks to a provider, holds a credential,
-or mutates anything: the room is a window, not an interface (D18).
+it as Server-Sent Events.
+
+It has exactly one thing it can do back: record a person's answer when the agent
+has stopped and is waiting to be told whether to replace a record somebody
+already published. That is the affordance D18 specified and nothing ever wired
+up, and it writes one small local file. Nothing here talks to a provider, holds
+a credential, or can start a run. The room is a window with one button (D34).
 """
 
 import argparse
@@ -30,6 +35,7 @@ from starlette.responses import (
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
+from munim import approval
 from munim.report import REPORTS_DIR
 from munim.runlog import RUNS_DIR, RunLog, all_runs, latest_run
 
@@ -132,6 +138,60 @@ async def run_events(request: Request) -> Response:
     )
 
 
+def _same_site(request: Request) -> bool:
+    """Whether this POST came from the room's own page.
+
+    Binding to loopback stops another machine. It does not stop another page:
+    any site the operator's browser visits while the room is open can POST to
+    127.0.0.1 and, without this, approve somebody's DNS change. The room is
+    unauthenticated because it is single-user and local, and that reasoning only
+    holds with an origin check in front of it.
+
+    `Sec-Fetch-Site` is sent by every browser that can run this page and is the
+    direct answer. `Origin` is the fallback, and an absent Origin is refused
+    rather than trusted, because a request with no origin is not one the room's
+    own page made.
+    """
+    fetch_site = request.headers.get("sec-fetch-site")
+    if fetch_site is not None:
+        return fetch_site in ("same-origin", "none")
+    origin = request.headers.get("origin")
+    if not origin:
+        return False
+    host = request.headers.get("host", "")
+    return origin in (f"http://{host}", f"https://{host}")
+
+
+async def decide(request: Request) -> JSONResponse:
+    """The one thing the room can do.
+
+    D18 said the room "has exactly one interactive element in the whole
+    application, the confirmation button, and it appears only when the agent has
+    stopped and needs a person". This is that button finally reaching something.
+    It writes one small local file. It holds no credential, reaches no provider,
+    and cannot start a run, so the room is still a window with one button rather
+    than a place you go to do work.
+    """
+    if not _same_site(request):
+        return JSONResponse({"error": "cross-site requests are refused"},
+                            status_code=403)
+    try:
+        body = await request.json()
+    except (ValueError, TypeError):
+        return JSONResponse({"error": "expected a JSON body"}, status_code=400)
+
+    answer = body.get("decision")
+    if answer not in ("approve", "reject"):
+        return JSONResponse(
+            {"error": "decision must be 'approve' or 'reject'"}, status_code=400)
+
+    made = approval.record(request.path_params["run_id"],
+                           request.path_params["plan_id"],
+                           approved=answer == "approve", by="room")
+    return JSONResponse({"approved": made.approved, "by": made.by,
+                         "at": made.at})
+
+
 async def report(request: Request) -> Response:
     """Serve a launch report. The owner-facing page lives next to the run it
     came from, so a link in an email and a link in the room are the same page."""
@@ -172,6 +232,9 @@ def build_app(runs_dir: Path | None = None,
     routes = [
         Route("/api/runs", list_runs),
         Route("/api/runs/{run_id}/events", run_events),
+        # In the initial list, not appended. `/{path:path}` below swallows
+        # everything that reaches it, so a route added after it never runs.
+        Route("/api/decisions/{run_id}/{plan_id}", decide, methods=["POST"]),
         Route("/reports/{run_id}", report),
     ]
     assets = BUILD_DIR / "assets"

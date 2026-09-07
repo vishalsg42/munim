@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 
 from munim.checks.dns import CheckResult
 from munim.container import Container
+from munim import words
 
 
 class VercelError(RuntimeError):
@@ -97,6 +98,56 @@ class Vercel:
             for e in payload.get("envs", [])
         ]
 
+    async def domains(self, project: str) -> list[str]:
+        """The domains attached to one project."""
+        payload = await self._get(f"/v9/projects/{project}/domains")
+        return [d["name"] for d in payload.get("domains", []) if d.get("name")]
+
+    async def project_for(self, domain: str, *, look_at: int = 10) -> str:
+        """Which project serves this domain, or empty if it cannot be told.
+
+        `projects()` returns no domains, so nothing in this codebase could map
+        a client's domain to a project, which is why the three checks below
+        have sat unreachable since they were written.
+
+        Two steps, cheapest first, and bounded. Vercel's search matches on the
+        project name, which is usually the apex label, so one call answers most
+        of the time. Only if that fails does it ask each project what it serves,
+        capped at `look_at` so a busy account cannot turn one check into fifty
+        round trips.
+
+        Returns empty rather than guessing. A wrong project would report
+        somebody else's stale deploy as this client's, and a check that fires
+        wrongly is worth less than no check at all (D20).
+        """
+        label = domain.split(".")[0].lower()
+        # Deliberately not caught. "Vercel would not answer" and "no project
+        # serves this domain" are different facts, and reporting the first as
+        # the second tells an operator something untrue about their client's
+        # account. The caller separates them; swallowing it here would make
+        # that impossible.
+        found = await self._get("/v9/projects", search=label, limit=20)
+        candidates = found.get("projects", [])
+
+        for project in candidates:
+            if project.get("name", "").lower() == label:
+                try:
+                    if any(d == domain or d.endswith(f".{domain}")
+                           or domain.endswith(f".{d}")
+                           for d in await self.domains(project["id"])):
+                        return project["id"]
+                except VercelError:
+                    continue
+
+        everything = await self.projects()
+        for project in everything[:look_at]:
+            try:
+                if domain in await self.domains(project["id"]):
+                    return project["id"]
+            except VercelError:
+                continue
+        return ""
+
     async def check_deploy_current(self, project: str) -> CheckResult:
         """Is the site people see the site you last built?"""
         deployments = await self.deployments(project, limit=10)
@@ -144,7 +195,8 @@ class Vercel:
                                "Your settings are live on the site.")
         return CheckResult(
             "env_applied", "fail",
-            f"{len(stale)} production variable(s) changed after the last build "
+            f"{words.count(len(stale), 'production variable')} changed "
+            f"after the last build "
             f"({', '.join(e.key for e in stale)}); Vercel bakes build-time values "
             "in, so the running site still uses the old ones.",
             "A setting was changed but never applied - your live site is still "
@@ -162,7 +214,7 @@ class Vercel:
                                "Your settings apply to the live site, not just to tests.")
         return CheckResult(
             "env_scoped", "fail",
-            f"{len(preview_only)} variable(s) exist only on Preview: "
+            f"{words.count(len(preview_only), 'variable')} exist only on Preview: "
             f"{', '.join(e.key for e in preview_only)}.",
             "Something is configured for your test site but not the real one, so "
             "it works when we check it and not when a customer arrives.",

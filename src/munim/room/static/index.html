@@ -163,6 +163,27 @@
         font-family: inherit; cursor: pointer; transition: background-color .15s;
       }
       #confirm button:hover { background: var(--stone-700); }
+      #confirm .buttons { display: flex; gap: 8px; align-items: center; }
+      /* "Not now" is not the same weight of act as approving somebody's DNS
+         change, and it should not look like it is. */
+      #confirm button.quiet {
+        background: transparent; color: var(--stone-600);
+        box-shadow: inset 0 0 0 1px var(--stone-300);
+      }
+      #confirm button.quiet:hover { background: var(--stone-200); }
+      /* Pressed, waiting for the write to land. Both go flat so a second
+         click is neither possible nor invited. */
+      #confirm button:disabled,
+      #confirm button.quiet:disabled {
+        opacity: .45; cursor: default; background: var(--stone-300);
+        color: var(--stone-600); box-shadow: none;
+      }
+      #confirm pre {
+        margin-top: 12px; padding: 10px 12px; border-radius: 6px;
+        background: #fff; box-shadow: inset 0 0 0 1px var(--amber-300);
+        font-family: var(--mono); font-size: 11px; line-height: 1.6;
+        color: var(--amber-950); white-space: pre-wrap; word-break: break-all;
+      }
 
       #log { margin-top: 40px; border-top: 1px solid var(--stone-200); padding-top: 16px; }
       #lines {
@@ -353,9 +374,57 @@
         whose.append("This changes ", name,
           "’s live DNS. It is their account, not yours.");
         box.appendChild(whose);
-        const button = document.createElement("button");
-        button.textContent = "Approve for " + text(event.client);
-        box.appendChild(button);
+
+        // What would change, with the value that is published now above the
+        // value it would become. A person deciding from a sentence is not
+        // deciding; they are agreeing. These are DNS records, public by
+        // construction, so there is nothing here to withhold.
+        const changes = (event.detail && event.detail.changes) || [];
+        for (const change of changes) {
+          const pre = document.createElement("pre");
+          const now = (change.current || []).join("\n");
+          pre.textContent =
+            text(change.purpose) + "  " + text(change.name) + "\n" +
+            (now ? "now:  " + now + "\n" : "now:  (nothing published)\n") +
+            "next: " + text(change.content);
+          box.appendChild(pre);
+          if (change.note) box.appendChild(el("p", "who", text(change.note)));
+        }
+
+        // The two buttons. Both disable the moment either is pressed, because
+        // a button that still looks live after a click reads as one that did
+        // nothing, and the answer cannot be changed once it is given anyway.
+        const planId = (event.detail && event.detail.plan_id) || "";
+        const row = document.createElement("p");
+        row.className = "buttons";
+        for (const [value, label] of [["approve", "Approve for " + text(event.client)],
+                                      ["reject", "Not now"]]) {
+          const button = document.createElement("button");
+          button.textContent = label;
+          button.className = value === "reject" ? "quiet" : "";
+          button.disabled = Boolean(state.deciding);
+          button.onclick = () => answer(event.run_id, planId, value);
+          row.appendChild(button);
+        }
+        box.appendChild(row);
+      }
+
+      // "Not now" rather than "Reject": the plan is still on disk and can be
+      // applied later, so the softer word is the true one.
+      async function answer(runId, planId, value) {
+        dispatch({ type: "decide", value });
+        try {
+          await fetch("/api/decisions/" + encodeURIComponent(runId) + "/" +
+                      encodeURIComponent(planId),
+                      { method: "POST",
+                        headers: { "content-type": "application/json" },
+                        body: JSON.stringify({ decision: value }) });
+        } catch (err) {
+          // The agent is the thing waiting, and it polls the file rather than
+          // this response, so a failed POST means the answer never landed.
+          // Re-enable rather than leaving a dead card.
+          dispatch({ type: "decide", value: null });
+        }
       }
 
       function el(tag, cls, content) {

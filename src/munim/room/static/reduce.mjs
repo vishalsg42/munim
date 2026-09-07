@@ -15,15 +15,18 @@
 // step that hung rather than one that does not exist. `cert_www`,
 // `env_redeployed`, `return_path`, `site_responds` and `ssl_mode` are gone.
 //
-// `deploy_current` and `env_scoped` stay: they come from the Vercel adapter,
-// so they are idle on a DNS-only check and real on a launch with Vercel
-// connected. `tests/room/reduce.test.mjs` pins this list against the producers.
+// The three Vercel ones now have a producer. For most of this project's life
+// they did not: the checks existed in the adapter, were tested, and nothing in
+// src/ called them, while this comment claimed they were "real on a launch with
+// Vercel connected". `munim/checks/hosting.py` is what made that true, and it
+// resolves the project from the domain, which is the line that was missing.
+// `tests/room/reduce.test.mjs` pins this list against the producers.
 export const CHECKS = [
   "spf_single", "spf_lookups", "dkim_present", "dkim_chunking",
   "dmarc_present", "dmarc_policy", "mx_present",
   "ns_delegated", "cert_valid", "caa_allows",
   "apex_resolves", "www_redirect", "https_enforced",
-  "deploy_current", "env_scoped",
+  "deploy_current", "env_applied", "env_scoped",
 ];
 
 export const CHECK_LABELS = {
@@ -36,13 +39,30 @@ export const CHECK_LABELS = {
   apex_resolves: "Apex resolves", www_redirect: "www → apex",
   https_enforced: "HTTPS enforced", ssl_mode: "SSL mode",
   deploy_current: "Deploy current", env_scoped: "Env scope",
-  env_redeployed: "Env applied", site_responds: "Site responds",
+  env_applied: "Env applied", site_responds: "Site responds",
 };
 
 // `diagnose` is where the agent works out what a failure means. It was missing
 // once, so the one step that makes this an agent rather than a DNS script never
 // appeared in the rail: its events reached the log and nothing else.
-export const STAGES = ["deploy", "domain", "dns", "mail", "verify", "diagnose"];
+// Same rule the chip list above already follows, applied to the rail: only
+// stages something actually emits. `deploy` and `domain` were listed here and
+// **nothing in src/ has ever written either**, across every run ever recorded.
+// Two cells that can only ever be grey, and a grey cell reads as a step that
+// hung rather than one that does not exist - which is the exact confusion the
+// seven ghost chips were removed for. `dns` stays: `adapters/cloudflare.py`
+// emits it. `tests/room/reduce.test.mjs` pins this against the producers now,
+// so the next one cannot be added by hand and left unwired.
+// In the order a `fix` run touches them. `dns` and `mail` are **nested inside**
+// `repair`: mailplan hardcodes stage="mail" in a dozen places and the
+// Cloudflare adapter emits "dns", and threading a stage-override through tested
+// code to make a rail look tidier is the wrong trade. So the rail can light 4
+// and 5 while 3 is still current. That is honest about what is happening.
+//
+// A `check` run touches only `verify` and `diagnose`, which is what CHECK_ONLY
+// below is for: it is a check, not a launch, and the room says so rather than
+// leaving four cells looking like steps that hung.
+export const STAGES = ["verify", "diagnose", "repair", "dns", "mail", "recheck"];
 
 // A check run emits `verify`, and `diagnose` too once something fails and the
 // agent is asked to explain it. Neither is deploying anything, so calling
@@ -57,6 +77,12 @@ export const initialState = {
   // it: five clients used to render as one heading and one card, whichever
   // arrived last. Keyed by client, and `across` is the stage that fills it.
   byClient: {}, question: null,
+  // `deciding` is set the moment a button is pressed and before the POST comes
+  // back, so both buttons disable and a second click cannot ask again. The
+  // server refuses a second answer anyway, but a button that looks live after
+  // being pressed reads as a button that did nothing.
+  // `decided` is what actually happened, once an event confirms it.
+  deciding: null, decided: null,
   events: [], done: false, connected: false,
 };
 
@@ -65,6 +91,9 @@ export const initialState = {
 export function reduce(state, action) {
   if (action.type === "reset") return initialState;
   if (action.type === "connected") return { ...state, connected: action.value };
+  // Pressed, not yet answered. Local: the answer itself arrives as an event
+  // like everything else, so this is only about the moment in between.
+  if (action.type === "decide") return { ...state, deciding: action.value };
 
   const e = action.event;
   const next = {
@@ -118,9 +147,20 @@ export function reduce(state, action) {
       // prompt clears when the change lands rather than lingering as a stale
       // card asking for something already approved.
       next.awaitingConfirm = null;
+      next.deciding = null;
+      next.decided = "approve";
       break;
     case "escalated":
       next.escalated = e;
+      // A refusal and a run that nobody answered in time both arrive here, and
+      // both have to stop the card waiting. Without this a timed-out prompt
+      // sits on screen forever asking for something that can no longer be
+      // given, which is the same lie as a permanently grey stage cell.
+      if (e.detail && e.detail.decision) {
+        next.awaitingConfirm = null;
+        next.deciding = null;
+        next.decided = e.detail.decision;
+      }
       // A cross-client escalation is "the agent named an account it never
       // read". It belongs beside that client rather than replacing the single
       // escalation slot, which a launch uses for something else entirely.
@@ -134,6 +174,7 @@ export function reduce(state, action) {
     case "run_done":
       next.done = true;
       next.awaitingConfirm = null;
+      next.deciding = null;
       break;
   }
   return next;
