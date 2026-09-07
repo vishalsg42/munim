@@ -24,6 +24,7 @@ from munim.agent.model import AgentsDisabled, build_model
 from munim.checks.dns import (CheckResult, query, run_all_async,
                              run_reachability_async, spf_single)
 from munim.runlog import RunLog, new_run_id
+from munim import words
 
 SYSTEM = """You are Munim, an agent that looks after small businesses' web and email setup.
 
@@ -119,7 +120,8 @@ def _connected_toolsets(client_id: str, label: str, log: RunLog) -> list:
             except Exception:
                 pass
         log.append(client=label, stage="diagnose", kind="observation",
-                   human_text=f"{held} provider tool(s) available for {label}",
+                   human_text=f"{words.count(held, 'provider tool')} available "
+                              f"for {label}",
                    detail={"providers": [t._prefix for t in ready],
                            "tools": held})
     return ready

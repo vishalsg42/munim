@@ -53,7 +53,16 @@ export const CHECK_LABELS = {
 // seven ghost chips were removed for. `dns` stays: `adapters/cloudflare.py`
 // emits it. `tests/room/reduce.test.mjs` pins this against the producers now,
 // so the next one cannot be added by hand and left unwired.
-export const STAGES = ["dns", "mail", "verify", "diagnose"];
+// In the order a `fix` run touches them. `dns` and `mail` are **nested inside**
+// `repair`: mailplan hardcodes stage="mail" in a dozen places and the
+// Cloudflare adapter emits "dns", and threading a stage-override through tested
+// code to make a rail look tidier is the wrong trade. So the rail can light 4
+// and 5 while 3 is still current. That is honest about what is happening.
+//
+// A `check` run touches only `verify` and `diagnose`, which is what CHECK_ONLY
+// below is for: it is a check, not a launch, and the room says so rather than
+// leaving four cells looking like steps that hung.
+export const STAGES = ["verify", "diagnose", "repair", "dns", "mail", "recheck"];
 
 // A check run emits `verify`, and `diagnose` too once something fails and the
 // agent is asked to explain it. Neither is deploying anything, so calling

@@ -27,7 +27,7 @@ that, so these render as findings in the stream instead.
 import asyncio
 import logging
 
-from munim import health
+from munim import health, words
 from munim.checks.dns import CheckResult
 
 logger = logging.getLogger(__name__)
@@ -40,15 +40,6 @@ TIMEOUT = 12.0
 
 def name_for(provider: str) -> str:
     return f"account_{provider}"
-
-
-def _tools(count: int) -> str:
-    """Written out rather than "tool(s)".
-
-    A parenthesised plural is the sound of a program that could not be bothered,
-    and these strings are read by the person whose client's account it is.
-    """
-    return "tool" if count == 1 else "tools"
 
 
 def _result(client: str, status) -> CheckResult:
@@ -65,7 +56,7 @@ def _result(client: str, status) -> CheckResult:
         return CheckResult(
             name_for(status.provider), "pass",
             f"{status.provider} answered, and published "
-            f"{status.tools} {_tools(status.tools)}.",
+            f"{words.count(status.tools, 'tool')}.",
             f"Your {status.provider} connection is working.",
             detail={"provider": status.provider, "tools": status.tools})
 

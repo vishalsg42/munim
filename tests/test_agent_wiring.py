@@ -498,7 +498,7 @@ async def test_a_toolset_with_no_tools_is_not_counted_as_one(
 
     counted = [e for e in written if "available" in (e.get("human_text") or "")]
     assert counted, "nothing was reported at all"
-    assert "0 provider tool(s)" in counted[0]["human_text"], \
+    assert "0 provider tools" in counted[0]["human_text"], \
         f"an empty toolset was counted as available: {counted[0]['human_text']}"
 
 

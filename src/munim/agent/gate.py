@@ -15,7 +15,7 @@ import logging
 from strands.hooks import HookProvider, HookRegistry
 from strands.hooks.events import BeforeNodeCallEvent, BeforeToolCallEvent
 
-from munim import approval
+from munim import approval, words
 from munim.agent.model import agents_off
 from munim.agent.repair import WRITES, RepairRun
 
@@ -24,15 +24,6 @@ logger = logging.getLogger(__name__)
 # The word the person's answer becomes on the way back in. Anything else, and
 # anything absent, is a refusal.
 YES = "approve"
-
-
-def records(count: int) -> str:
-    """One record, or three records, but never a parenthesised plural.
-
-    This sentence is shown to the person deciding whether to change a client's
-    live DNS, and it should read like it was written by someone.
-    """
-    return "1 record" if count == 1 else f"{count} records"
 
 
 class ApprovalGate(HookProvider):
@@ -86,7 +77,7 @@ class ApprovalGate(HookProvider):
         if answer != YES:
             event.cancel_tool = (
                 f"{self.run.client} did not approve replacing "
-                f"{records(len(plan.needs_approval))} on {plan.domain}")
+                f"{words.count(len(plan.needs_approval), 'record')} on {plan.domain}")
 
     def _ask(self, plan) -> None:
         """Post the question where a person can see it, once.
@@ -104,7 +95,7 @@ class ApprovalGate(HookProvider):
         waiting = len(changes)
         self.run.log.append(
             client=self.run.client, stage="repair", kind="awaiting_confirm",
-            human_text=(f"{records(waiting)} on {plan.domain} already exist. "
+            human_text=(f"{words.count(waiting, 'record')} on {plan.domain} already exist. "
                         f"Replacing them is {self.run.client}'s decision."),
             detail={"plan_id": plan.plan_id, "domain": plan.domain,
                     "changes": changes})

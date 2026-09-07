@@ -175,7 +175,9 @@ const STAGES_EMITTED = [
   "dns",       // adapters/cloudflare.py
   "mail",      // agent/mailplan.py, agent/mail.py, server.py
   "verify",    // agent/launch.py, server.py
-  "diagnose",  // agent/launch.py
+  "diagnose",  // agent/launch.py, agent/watch.py (the triage node)
+  "repair",    // agent/gate.py, agent/graph.py, agent/watch.py
+  "recheck",   // agent/watch.py (the recheck node)
 ];
 
 test("every stage in the rail has something that emits it", () => {

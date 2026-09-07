@@ -176,6 +176,26 @@ async def wait_for(run_id: str, plan_id: str, *,
         await asyncio.sleep(POLL)
 
 
+def pending(run_id: str) -> list[dict]:
+    """Questions asked during this run that nobody has answered yet.
+
+    An operator has a run id, because that is what every tool result and every
+    line of the run log carries. They do not have a plan id, and asking them to
+    go and find one before they can say yes is the kind of step that makes a
+    person reach for the dashboard instead.
+    """
+    folder = _folder()
+    out = []
+    for path in sorted(folder.glob(f"{_safe(run_id)}.*.ask.json")):
+        try:
+            asked = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if read(asked.get("run_id", ""), asked.get("plan_id", "")) is None:
+            out.append(asked)
+    return out
+
+
 def forget(run_id: str, plan_id: str) -> None:
     """Drop both files. For tests, and for a run that ended another way."""
     folder = _folder()

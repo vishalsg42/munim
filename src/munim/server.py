@@ -31,6 +31,7 @@ from munim.registry import ClientRecord, Registry
 from munim.remote.session import NeedsLogin, NoRemoteServer
 from munim.report import write as write_report
 from munim.runlog import RunLog, all_runs, new_run_id
+from munim import words
 
 # Tools that change a client's account. The test suite asserts each one takes an
 # explicit `client`; adding a mutating tool without it fails the build.
@@ -308,8 +309,8 @@ def build_server(backend=None, registry=None, runs_dir=None,
         log.append(client="all clients", stage="verify", kind="run_done",
                    human_text=(f"{len(clean)} of {len(records)} clients clean"
                                if not needs_attention else
-                               f"{len(needs_attention)} thing(s) need attention "
-                               f"across {len(records) - len(clean)} client(s)"))
+                               f"{words.things(len(needs_attention))} need attention "
+                               f"across {words.count(len(records) - len(clean), 'client')}"))
 
         return {
             "checked": len(records),

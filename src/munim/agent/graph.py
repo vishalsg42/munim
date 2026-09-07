@@ -30,9 +30,8 @@ from strands import Agent
 from strands.multiagent import GraphBuilder
 
 from munim.agent import repair as repair_mod
-from munim import approval
-from munim.agent.gate import (YES, ApprovalGate, WriteGuard, records,
-                              refused_in)
+from munim import approval, words
+from munim.agent.gate import YES, ApprovalGate, WriteGuard, refused_in
 from munim.agent.model import agents_off, build_model
 from munim.agent.repair import RepairRun
 from munim.agent.watch import RunLogHooks
@@ -265,7 +264,7 @@ async def fix(domain: str, client: str, *, client_id: str, container,
                            detail={"plan_id": plan.plan_id,
                                    "decision": "timed out"})
                 out["why"] = (
-                    f"{records(len(plan.needs_approval))} already exist "
+                    f"{words.count(len(plan.needs_approval), 'record')} already exist "
                     f"and nobody approved replacing them.")
                 out["or_call"] = (f'apply_mail_setup("{client}", '
                                   f'"{plan.plan_id}", approved=true)')

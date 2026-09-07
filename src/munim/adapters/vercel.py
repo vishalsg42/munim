@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 
 from munim.checks.dns import CheckResult
 from munim.container import Container
+from munim import words
 
 
 class VercelError(RuntimeError):
@@ -194,7 +195,8 @@ class Vercel:
                                "Your settings are live on the site.")
         return CheckResult(
             "env_applied", "fail",
-            f"{len(stale)} production variable(s) changed after the last build "
+            f"{words.count(len(stale), 'production variable')} changed "
+            f"after the last build "
             f"({', '.join(e.key for e in stale)}); Vercel bakes build-time values "
             "in, so the running site still uses the old ones.",
             "A setting was changed but never applied - your live site is still "
@@ -212,7 +214,7 @@ class Vercel:
                                "Your settings apply to the live site, not just to tests.")
         return CheckResult(
             "env_scoped", "fail",
-            f"{len(preview_only)} variable(s) exist only on Preview: "
+            f"{words.count(len(preview_only), 'variable')} exist only on Preview: "
             f"{', '.join(e.key for e in preview_only)}.",
             "Something is configured for your test site but not the real one, so "
             "it works when we check it and not when a customer arrives.",
