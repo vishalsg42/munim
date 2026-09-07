@@ -366,6 +366,12 @@ def _reconnect(record, status, *, keys=None):
     from munim.cli import connect, connect_via_mcp
     from munim.remote.servers import server_for
 
+    # `connect_via_mcp` drops the stored token before connecting, which is what
+    # makes this a login rather than a look: the SDK runs the browser flow only
+    # when it has no usable token, so this row used to reconnect a working
+    # session, succeed, ask nobody anything, and simply redraw the screen. It
+    # also puts the token back if the login does not happen, so that lives in
+    # one place rather than being repeated here.
     runs = (connect_via_mcp if server_for(status.provider) is not None
             else connect)
     with suspended():

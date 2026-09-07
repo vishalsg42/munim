@@ -278,3 +278,47 @@ class KeychainTokenStorage(TokenStorage):
         if info.client_secret and not info.token_endpoint_auth_method:
             info.token_endpoint_auth_method = CONFIDENTIAL_AUTH_METHOD
         self._write("client", info)
+
+
+class SessionNeedingLogin:
+    """A vault view where one session's token looks absent.
+
+    Reconnecting has to actually ask a person. The MCP SDK runs the browser
+    flow only when storage hands it no usable token, so re-connecting a
+    provider whose session still worked opened it, succeeded, and asked nobody
+    anything: the row said "Reconnect" and behaved like "check".
+
+    The obvious fix is to delete the token first. That was written, shipped and
+    was wrong, for the reason an operator gave straight back: an incomplete
+    reconnect had already removed the account from their list. Deleting first
+    means every failure path has to put it back, and the first version missed
+    one, because `KeyboardInterrupt` is a BaseException and the restore was
+    under `except Exception`. Closing the browser and pressing Ctrl+C
+    disconnected the account being fixed.
+
+    So nothing is removed. Reads of the token answer None, which is what makes
+    the SDK log in; every other read, and every write, goes to the real store
+    untouched. A login that completes overwrites the token through the same
+    path it always would. A login that is cancelled, refused or interrupted
+    writes nothing, and the old session is still there because it was never
+    touched.
+    """
+
+    def __init__(self, client: str, provider: str, keyring=None) -> None:
+        self._inner = keyring if keyring is not None else vault
+        self._hidden = f"{SERVICE}:{provider}:tokens"
+        self._client = client
+
+    def get_password(self, service: str, account: str):
+        # Only this client's token for this provider. Hiding the service for
+        # every account would make one reconnect look like a mass logout to
+        # anything else reading the store during it.
+        if service == self._hidden and account == self._client:
+            return None
+        return self._inner.get_password(service, account)
+
+    def set_password(self, service: str, account: str, secret: str) -> None:
+        self._inner.set_password(service, account, secret)
+
+    def delete_password(self, service: str, account: str) -> None:
+        self._inner.delete_password(service, account)
