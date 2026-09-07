@@ -127,14 +127,23 @@ def _connected_toolsets(client_id: str, label: str, log: RunLog) -> list:
 
 async def run_checks(domain: str, client: str, log: RunLog,
                      dkim_selector: str = "resend",
-                     container=None) -> list[CheckResult]:
+                     container=None, client_id: str | None = None,
+                     keyring=None) -> list[CheckResult]:
     """Deterministic. Each result is written to the run log as it lands.
 
-    `container` is keyword-with-a-default so no existing caller breaks. With
-    one, the three Vercel checks run too and the catalogue stops being DNS-only.
-    Without one they return `skip`, which is what a client with no Vercel
-    credential should read as.
+    Three families now, and the extra arguments are keyword-with-a-default so
+    no existing caller breaks:
+
+      thirteen about DNS, which need no credential and no account
+      three about Vercel hosting, when `container` holds a Vercel key
+      one per connected provider, when `client_id` is given
+
+    Without those arguments the extra families return `skip` or nothing, which
+    is what a client who has connected nothing should read as. This is what
+    stops the catalogue being DNS-only, which it was by accident rather than by
+    design: the Vercel checks were written and reachable from nowhere.
     """
+    from munim.checks.accounts import run_accounts_async
     from munim.checks.hosting import run_hosting_async
 
     log.append(client=client, stage="verify", kind="stage_start",
@@ -142,6 +151,12 @@ async def run_checks(domain: str, client: str, log: RunLog,
     results = await run_all_async(domain, dkim_selector=dkim_selector)
     results += await run_reachability_async(domain)
     results += await run_hosting_async(container, domain)
+    if client_id:
+        from munim.agent.within import connected_providers
+
+        results += await run_accounts_async(
+            client_id, client, connected_providers(client_id, keyring),
+            keyring=keyring)
     for r in results:
         if r.status == "skip":
             continue

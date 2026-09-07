@@ -150,3 +150,34 @@ A capability that is not implemented is absent from the tool list rather than
 present and inert. Resend, for example, has no OAuth flow anywhere in this
 codebase because Resend publishes no authorization endpoint, not because it was
 skipped.
+
+**The rule was being broken in two places, and neither was found by reading.**
+The control room rendered an "Approve" button with no click handler attached,
+and three Vercel checks existed, tested, called by nothing outside `tests/`. A
+test calling a function looks exactly like production calling it, and a rendered
+button looks exactly like a working one. Both are fixed (D36, D37), and both now
+have a guard, because a rule this file states and nothing enforces is a rule
+that gets broken again.
+
+## `fix`: three agents, and a boundary that is not a prompt
+
+`check` explains. `fix` repairs, and because repairing changes something in
+somebody else's account, the design question is not which agent does the work.
+
+```
+run_checks(domain)  ->  results  ──┐  deterministic, before any model runs
+                                   ▼
+  entry ──► triage ──[can this be repaired?]──► repair ──[did it write?]──► recheck
+            reads only                          3 tools                     reads only
+```
+
+The predicate on the first edge reads those results and never reads what a model
+said. Every term is deterministic: is there a failure this path can produce a
+record for, does the client have the API keys the repair needs, is the domain
+theirs to change. The repair node holds three tools and no provider toolsets,
+and the two that write take no arguments at all, so the model chooses whether to
+act and never on what.
+
+A graph rather than a swarm, because in a swarm the diagnosing model decides to
+hand off, which would put the write boundary inside the model's discretion. See
+D34 and D35.

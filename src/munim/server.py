@@ -696,7 +696,7 @@ def build_server(backend=None, registry=None, runs_dir=None,
         shaped = await run_fix(target_domain, record.name,
                                client_id=record.id, container=container,
                                log=log, dkim_selector=dkim_selector,
-                               toolsets=toolsets)
+                               toolsets=toolsets, keyring=keyring)
         report = write_report(log, domain=target_domain, business=record.name,
                               out_dir=reports)
         return {**shaped,

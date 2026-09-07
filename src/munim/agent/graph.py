@@ -31,7 +31,8 @@ from strands.multiagent import GraphBuilder
 
 from munim.agent import repair as repair_mod
 from munim import approval
-from munim.agent.gate import YES, ApprovalGate, WriteGuard, refused_in
+from munim.agent.gate import (YES, ApprovalGate, WriteGuard, records,
+                              refused_in)
 from munim.agent.model import agents_off, build_model
 from munim.agent.repair import RepairRun
 from munim.agent.watch import RunLogHooks
@@ -184,7 +185,7 @@ def task_for(run: RepairRun) -> str:
 
 async def fix(domain: str, client: str, *, client_id: str, container,
               log, dkim_selector: str = "resend", toolsets=None,
-              timeout: float | None = None) -> dict:
+              keyring=None, timeout: float | None = None) -> dict:
     """Check, repair what can be repaired, and wait for a person if asked.
 
     Every exit path writes `run_done`, and that is not tidiness. The control
@@ -197,7 +198,8 @@ async def fix(domain: str, client: str, *, client_id: str, container,
     from munim.agent.launch import run_checks
 
     results = await run_checks(domain, client, log, dkim_selector,
-                               container=container)
+                               container=container, client_id=client_id,
+                               keyring=keyring)
     run = RepairRun(run_id=log.run_id, client=client, client_id=client_id,
                     domain=domain, log=log, container=container,
                     results=results)
@@ -263,8 +265,8 @@ async def fix(domain: str, client: str, *, client_id: str, container,
                            detail={"plan_id": plan.plan_id,
                                    "decision": "timed out"})
                 out["why"] = (
-                    f"{len(plan.needs_approval)} record(s) already exist and "
-                    f"nobody approved replacing them.")
+                    f"{records(len(plan.needs_approval))} already exist "
+                    f"and nobody approved replacing them.")
                 out["or_call"] = (f'apply_mail_setup("{client}", '
                                   f'"{plan.plan_id}", approved=true)')
             elif not decided.approved:

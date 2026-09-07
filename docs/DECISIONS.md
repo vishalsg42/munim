@@ -1172,3 +1172,176 @@ False, and a REST call there rides the session rather than asking for a second
 credential. Refresh belongs to the SDK and only happens inside a session, and
 `Container` is synchronous, so `session.freshen` opens and closes one first.
 
+
+---
+
+## D34: A graph, because the edge is the boundary
+
+`check` explains what is wrong. `fix` acts on it, and the difference is that
+something in somebody else's account changes, so the question worth designing
+is not which agent does the repairing. It is what decides whether the repairing
+agent is reached at all.
+
+The thirteen checks run before the graph, as they already did, and the predicate
+on the `triage -> repair` edge reads their results. It never reads what a model
+said. Every term of it is deterministic: is there a failure this repair path can
+actually produce a record for, does this client have the API keys the repair
+needs, and is this a domain anybody is allowed to change. A model that is
+confident, wrong, or talked into it cannot traverse an edge, because the edge is
+not listening to it.
+
+**Why not a swarm**, since `strands.multiagent` ships one and it would have been
+easy. In a swarm the diagnosing model decides to hand off to the repairing one.
+That is model-chosen control flow, and it is the one thing this product must not
+have: D5 says reads may span clients and writes may not, D7 says enumeration is
+deterministic and only judgement is model work. A swarm puts the write boundary
+inside the model's discretion; a graph puts it in a predicate over DNS answers.
+The contest analysis this project was planned against warns that "a swarm that a
+single agent would have done better is a worse answer, not a richer one", and
+that warning applies to picking either one for the wrong reason.
+
+**The first version of this predicate was wrong, and a review caught it.** It
+read `bool(findings)` where `findings` was the return of `run_checks`, which
+returns every result regardless of status. It was a constant `True`: an `if`
+statement wearing a graph, which would have routed every clean domain into the
+repair node. There is now a test for a domain where everything passes,
+specifically.
+
+**A skipped repair says why.** An edge that does not traverse is silent, and in
+the room's rail a silent step looks exactly like one that hung. That is the bug
+the ghost stage cells were, and reintroducing it one layer up would be worse,
+because here there really was a decision and it really had a reason.
+
+**One correction to the SDK's naming, verified in the installed source.**
+`cancel_node` does not skip a node. `graph.py:1010` raises `RuntimeError` after
+yielding its cancel event, and that escapes `stream_async`, so `invoke_async`
+never returns a result at all. The guard marks its own refusals so a deliberate
+policy stop is not reported to the operator as a crash.
+
+---
+
+## D35: The model may not approve its own change
+
+`mailplan.apply` has always refused to replace a record somebody published
+without `approved=true`. The question this raises, once an agent rather than a
+person is calling it, is where that boolean comes from.
+
+**The two writing tools take no arguments at all.** Not a style choice. If
+`apply_repair(plan_id)` existed, the model could pass the id of a plan approved
+earlier, sitting in `~/.munim/plans/`, and inherit somebody's answer about a
+different domain. With no parameters, the only influence the model has over the
+write is whether to call it, and calling it is what raises the question rather
+than answering it.
+
+Four enforcement points, deliberately redundant, because the interesting failure
+is a guard that silently stopped being registered:
+
+1. **Schema.** No tool the model can see has an approval-shaped parameter, and
+   a test asserts it against the schema Strands generates rather than against
+   the source, because the schema is what the model is shown.
+2. **The gate hook**, on `BeforeToolCallEvent`, which raises Strands' own
+   interrupt and sets `cancel_tool` on a refusal.
+3. **The tool body**, which re-reads the decision from disk rather than trusting
+   the hook. A mis-registered hook must not become an approval.
+4. **`mailplan.apply`**, unchanged, still refusing before any network call.
+
+**An earlier draft failed this outright**, and it is worth recording because the
+prose was already written and the code did not match it. The repair node was
+given the provider's own write-capable toolsets alongside the gated tool, so the
+model could have called `cloudflare_dns_update` and never touched the approval
+path. Its tool set is now pinned by a test, because an allowlist that is only a
+comment is not an allowlist.
+
+**A plan that only creates records is not gated.** `Change.needs_a_person`
+already draws that line and is already tested. Creating something absent is not
+a judgement call; replacing something somebody put there on purpose is.
+
+---
+
+## D36: The room gets the one button it was always specified to have *(amends D18)*
+
+D18 says the control room "has exactly one interactive element in the whole
+application, the confirmation button, and it appears only when the agent has
+stopped and needs a person". That element was written, styled and rendered in
+`index.html`, and no click handler was ever attached to it. It has been shipping
+as a dead control: a judge clicking it in a demo would have seen nothing happen.
+
+So this is not a reversal of D18. It is the affordance D18 specified, finally
+reaching something, and it is the second capability in this repository found
+"present and inert" against the rule `ARCHITECTURE.md` states.
+
+**D18's test still passes**, and keeping it passing is the constraint that
+shaped the design. Its test is *"if the room were removed, nothing about how the
+product is used would change."* A browser-only approval would break that, so the
+decision has two writers: the room's button, and the existing
+`apply_mail_setup(client, plan_id, approved=true)` from the coding agent. Both
+write the same record. The room stays a window with one button rather than a
+place you go to do work.
+
+**A file, and no lock.** The room is a separate process on purpose, because the
+MCP server is a stdio subprocess the coding agent kills on every reconnect. A
+file is the only channel that survives one of them dying mid-question: if the
+server is killed while waiting, the click still lands and the next
+`apply_mail_setup` reads it. `record` renames a complete file into place, and
+`os.replace` is atomic, so a reader sees nothing or everything and never half.
+The 8.07 seconds of dead server this project shipped once had its root cause in
+reaching for a locking primitive at all; the absence of one here is the fix.
+
+**Running out of time is never approval.** Nobody said yes, so the answer is
+absent, and the caller treats it as a refusal that can be retried.
+
+**Loopback is not the same as safe.** Binding to 127.0.0.1 stops another
+machine; it does not stop another tab. Any page the operator's browser visits
+while the room is open could otherwise POST an approval for a client's DNS
+change. The endpoint refuses cross-site requests, and that is what makes "it is
+unauthenticated because it is local and single-user" a defensible sentence
+rather than a hopeful one.
+
+---
+
+## D37: The check catalogue was DNS-only by accident, not by design
+
+Asked why munim only looks at DNS, the honest answer turned out not to be a
+design decision at all.
+
+`adapters/vercel.py` has contained three deterministic checks since it was
+written. They return the same `CheckResult` type as the thirteen DNS ones, and
+they are tested. **Nothing in `src/` ever called them.** The only callers
+anywhere were in `tests/test_vercel.py`, which is why nobody noticed: a test
+calling a function looks exactly like production calling it. The control room
+went further and reserved chips for two of them, with a comment claiming they
+were "real on a launch with Vercel connected".
+
+What was missing was not the checks. `Vercel.projects()` returns names and ids
+and no domains, so nothing could answer "which project serves this domain".
+That is one method, and it is now there, bounded so a busy account cannot turn
+one check into fifty round trips, and refusing to match on a project name alone
+because a project called `acme` serving a different domain is somebody else's
+site.
+
+**Three families now, and the labels are the honest part:**
+
+  - **Thirteen about DNS**, needing no credential and no account. Anyone can run
+    them against any domain.
+  - **Three about Vercel hosting**, when a client has a Vercel key.
+  - **One per connected provider**, asking the only party who can answer whether
+    that account is still reachable. This is the family that generalises across
+    all eleven with no per-provider code, and *"your Sentry connection expired
+    on 14 August, so nobody has seen an error from your site in three weeks"* is
+    a real finding nothing else here would have produced.
+
+**Skip, never fail**, everywhere the answer is not known. D20 exists because a
+check that fires wrongly is worth less than no check, and a test caught this
+project committing exactly that: the first version reported "Vercel is down" as
+"no project serves this domain". Both skip, only one is true, and an operator
+acts differently on each.
+
+**Per-provider check families for the other eight are declined**, rather than
+deferred. There is no version of that which finishes and is defensible, and
+inventing checks nobody measured is what this repository refuses everywhere
+else.
+
+Two guards so the orphan class cannot recur: every `check_*` in `adapters/` must
+be named somewhere outside `adapters/`, and every hosting check must have a chip
+in the room. The chip list is hand-maintained JavaScript and the checks are
+Python; nothing else connected them.
