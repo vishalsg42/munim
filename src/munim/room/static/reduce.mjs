@@ -42,7 +42,15 @@ export const CHECK_LABELS = {
 // `diagnose` is where the agent works out what a failure means. It was missing
 // once, so the one step that makes this an agent rather than a DNS script never
 // appeared in the rail: its events reached the log and nothing else.
-export const STAGES = ["deploy", "domain", "dns", "mail", "verify", "diagnose"];
+// Same rule the chip list above already follows, applied to the rail: only
+// stages something actually emits. `deploy` and `domain` were listed here and
+// **nothing in src/ has ever written either**, across every run ever recorded.
+// Two cells that can only ever be grey, and a grey cell reads as a step that
+// hung rather than one that does not exist - which is the exact confusion the
+// seven ghost chips were removed for. `dns` stays: `adapters/cloudflare.py`
+// emits it. `tests/room/reduce.test.mjs` pins this against the producers now,
+// so the next one cannot be added by hand and left unwired.
+export const STAGES = ["dns", "mail", "verify", "diagnose"];
 
 // A check run emits `verify`, and `diagnose` too once something fails and the
 // agent is asked to explain it. Neither is deploying anything, so calling
@@ -57,6 +65,12 @@ export const initialState = {
   // it: five clients used to render as one heading and one card, whichever
   // arrived last. Keyed by client, and `across` is the stage that fills it.
   byClient: {}, question: null,
+  // `deciding` is set the moment a button is pressed and before the POST comes
+  // back, so both buttons disable and a second click cannot ask again. The
+  // server refuses a second answer anyway, but a button that looks live after
+  // being pressed reads as a button that did nothing.
+  // `decided` is what actually happened, once an event confirms it.
+  deciding: null, decided: null,
   events: [], done: false, connected: false,
 };
 
@@ -65,6 +79,9 @@ export const initialState = {
 export function reduce(state, action) {
   if (action.type === "reset") return initialState;
   if (action.type === "connected") return { ...state, connected: action.value };
+  // Pressed, not yet answered. Local: the answer itself arrives as an event
+  // like everything else, so this is only about the moment in between.
+  if (action.type === "decide") return { ...state, deciding: action.value };
 
   const e = action.event;
   const next = {
@@ -118,9 +135,20 @@ export function reduce(state, action) {
       // prompt clears when the change lands rather than lingering as a stale
       // card asking for something already approved.
       next.awaitingConfirm = null;
+      next.deciding = null;
+      next.decided = "approve";
       break;
     case "escalated":
       next.escalated = e;
+      // A refusal and a run that nobody answered in time both arrive here, and
+      // both have to stop the card waiting. Without this a timed-out prompt
+      // sits on screen forever asking for something that can no longer be
+      // given, which is the same lie as a permanently grey stage cell.
+      if (e.detail && e.detail.decision) {
+        next.awaitingConfirm = null;
+        next.deciding = null;
+        next.decided = e.detail.decision;
+      }
       // A cross-client escalation is "the agent named an account it never
       // read". It belongs beside that client rather than replacing the single
       // escalation slot, which a launch uses for something else entirely.
@@ -134,6 +162,7 @@ export function reduce(state, action) {
     case "run_done":
       next.done = true;
       next.awaitingConfirm = null;
+      next.deciding = null;
       break;
   }
   return next;
