@@ -157,28 +157,23 @@ def build_server(backend=None, registry=None, runs_dir=None,
 
     # ---- read across -----------------------------------------------------
 
+    # `connected` means the session opens right now, not that a credential is
+    # filed. Reporting the second as the first is how two dead sessions read as
+    # connected for a day: nothing local can tell them apart, because OAuth
+    # grants a token and then says nothing more about it.
     @server.tool()
     async def list_clients(
         check: Annotated[bool, Says("Ask each provider whether the session still opens. False reports only what is stored, which is instant.")] = True,
     ) -> list[dict]:
-        """List every client and which providers each can actually reach.
+        """List every client and what each one can actually reach.
 
-        `connected` means the session opens right now, not that a credential is
-        filed. Those are different facts, and reporting the second as the first
-        is how two dead sessions read as connected for a day: nothing local can
-        tell them apart, because OAuth grants a token and never says another
-        word about it.
+        Returns one row per client with their domain, `stored` (every provider
+        with a credential filed), `api_key` and `mcp_session` saying which store
+        each came from, and `connected`, `needs_login` and `unreachable` from
+        asking each provider live. Pass `check=false` to skip the live probes and
+        report only what is stored, which is instant.
 
-        So this asks each provider, concurrently. Pass `check=false` to skip
-        that and report only what is stored, which is instant and was the old
-        behaviour.
-
-        `stored` is the union of two different things and says which is which.
-        `api_key` is a pasted key, used by the REST adapters; `mcp_session` is
-        an OAuth session, used by the provider's own tools. A provider can have
-        one and not the other, which is how `plan_mail_setup` refused a client
-        that `client_status` had just called connected. Neither list is a claim
-        that the credential works: it is a claim that one is filed.
+        Use `client_status` for one client in the same shape.
         """
         from munim import health
 
@@ -202,11 +197,15 @@ def build_server(backend=None, registry=None, runs_dir=None,
     async def find_across_clients(
         need: Annotated[str, Says("What to look for, as one of the catalogue check names, for example spf_single or dmarc_policy.")],
     ) -> list[dict]:
-        """Answer one question across every client at once.
+        """Run one named check across every client at once.
 
-        Read-only by design: this is the one place that spans containers, so it
-        can never mutate. `need` is one of: "email_unprotected", "no_dmarc",
-        "domain_unresolved".
+        Returns one row per client with that check's result and the evidence
+        behind it. Read-only, and it never writes.
+
+        `need` is a check name from the catalogue, such as `spf_single`,
+        `dmarc_policy` or `dkim_present`. Use `audit_all_clients` to run the whole
+        catalogue instead of one check, and `ask_across_clients` when the question
+        is open-ended rather than one of these.
         """
         wanted = {
             "email_unprotected": ("spf_single", "dkim_present"),
@@ -282,21 +281,23 @@ def build_server(backend=None, registry=None, runs_dir=None,
             shaped["discarded"] = [f.model_dump() for f in discarded]
         return shaped
 
+    # Silent when everything passes, because the failures this catches break
+    # nothing visible and therefore survive for weeks. Nobody runs thirteen
+    # checks by hand across a dozen clients.
     @server.tool()
     async def audit_all_clients(
         dkim_selector: Annotated[str, Says("The DKIM selector to look for. Change it only if the client sends through something other than Resend.")] = "resend",
     ) -> dict:
-        """Check every client at once and report only what needs attention.
+        """Run the whole check catalogue against every client, reporting only what
+        needs attention.
 
-        The thing an operator actually wants running: silent when everything
-        passes, and a list when it does not. Nobody runs thirteen checks by
-        hand on a dozen clients, which is why the failures that break nothing
-        visible survive for weeks.
+        Returns one entry per client that has something wrong, naming the client
+        beside each failing check, plus a `run_id`. Clients that pass are omitted
+        entirely, so an empty result means every client is healthy.
 
-        Read-only across every client, like `find_across_clients`. It answers
-        the whole catalogue rather than one question, and it names the client
-        beside every finding, because a finding without one is useless to
-        somebody looking after a dozen.
+        Read-only across every client, and it never writes. Use `check` for one
+        client with a report, and `find_across_clients` when you want one
+        specific check across everybody rather than the whole catalogue.
         """
         records = [r for r in registry.clients() if r.domain]
         if not records:
@@ -353,21 +354,25 @@ def build_server(backend=None, registry=None, runs_dir=None,
             "report": f"http://127.0.0.1:8977/reports/{log.run_id}",
         }
 
+    # The other half of read across, write within (D5). Naming the client is
+    # what unlocks writing, and the isolation is structural rather than a rule:
+    # the agent holds one container's sessions and no others.
     @server.tool()
     async def work_on_client(
         client: Annotated[str, Says("The client to act on, by the name you registered them under. A write resolves this one client's credentials and no other.")],
         request: Annotated[str, Says("What to do, in plain English, for example add a TXT record for domain verification. The agent uses only this client's provider tools.")],
     ) -> dict:
-        """Do something inside one client's accounts, using their own tools.
+        """Carry out a request inside one named client's provider accounts.
 
-        The other half of read across, write within. `ask_across_clients` spans
-        every client and can only read; this is one client and can act, and
-        naming them is what unlocks it.
+        Returns what was done in the agent's own words, and which providers it
+        had available. Every change is written to the run log as it happens, so
+        `launch_status` reads it back.
 
-        The agent is built with that client's sessions and no others, so a
-        request needing a second account has nothing to reach with rather than
-        a rule telling it not to. Every change is written to the run log as it
-        happens: open the control room to watch, or read it back afterwards.
+        The agent is built with only this client's sessions, so a request needing
+        a second account has nothing to reach with. Use `ask_across_clients` to
+        read across every client instead, and `fix` when the job is repairing DNS
+        or mail, which is deterministic and stops for a person before replacing a
+        record somebody published.
         """
         from munim.agent.model import agents_off
         from munim.agent.within import work_on
@@ -383,6 +388,9 @@ def build_server(backend=None, registry=None, runs_dir=None,
 
     # ---- the provider's own tools ----------------------------------------
 
+    # There is no per-operation tool to look for, because modelling one
+    # provider's tools as another tool's parameters is a losing game:
+    # Cloudflare's `execute` takes JavaScript.
     @server.tool()
     async def list_provider_tools(
         client: Annotated[str, Says("The client to act on, by the name you registered them under. A write resolves this one client's credentials and no other.")],
@@ -390,27 +398,20 @@ def build_server(backend=None, registry=None, runs_dir=None,
         names_only: Annotated[bool, Says("Return names and read-only flags only. Resend publishes 121KB of schemas and 2KB of names.")] = False,
         matching: Annotated[str, Says("Only tools whose name, description or argument schema contains this. Searching the schema is how you find every tool that takes a teamId.")] = "",
     ) -> dict:
-        """What this client's account with this provider can actually be asked to do.
+        """List the tools this client's account with this provider actually
+        publishes.
 
-        Every provider here runs its own MCP server with its own tools, and
-        this returns them: the name, what it does, its argument schema, and
-        whether the provider marks it read-only. Pair it with
-        `call_provider_tool`, which invokes one.
+        Returns each tool's name, description, argument schema, and whether the
+        provider marks it read-only. `read_only` is what the provider says about
+        its own tool; null means it said nothing, and it is reported rather than
+        enforced.
 
-        This is how you do work Munim has no verb for. There is no per-operation
-        tool to look for, because modelling one provider's tools as another
-        tool's parameters is a losing game: Cloudflare's `execute` takes
-        JavaScript. Read this list, then call what it names.
-
-        `read_only` is what the provider says about its own tool, and null means
-        it said nothing. It is reported, not enforced; naming a client is what
-        unlocks writing (D5).
-
-        `names_only` returns the name and `read_only` and nothing else, which
-        for Resend is 2KB against 122KB. Use it first: the full listing has
-        exceeded a caller's response limit outright. `matching` filters on the
-        name, the description **and** the argument schema, so "which tools take
-        a teamId" is answerable, which it is not by name and description alone.
+        Read this before `call_provider_tool`, which invokes one of them. Start
+        with `names_only`, which returns names and read-only flags alone: for
+        Resend that is 2KB against 122KB, and the full listing has exceeded a
+        caller's response limit outright. `matching` filters on the name, the
+        description and the argument schema, so "which tools take a teamId" is
+        answerable.
         """
         from munim.remote.passthrough import known_providers, narrow, tools_for
 
@@ -445,17 +446,14 @@ def build_server(backend=None, registry=None, runs_dir=None,
     ) -> dict:
         """Call one of a provider's own tools with one client's credentials.
 
-        The write half of the passthrough. `tool` and `arguments` come from
-        `list_provider_tools`; the arguments are forwarded to the provider
-        untouched, so anything that server accepts is reachable.
+        Returns the provider's own result, plus a `run_id`. Arguments are
+        forwarded untouched, so anything that server accepts is reachable. Take
+        `tool` and `arguments` from `list_provider_tools` rather than guessing.
 
-        Munim's part is the credential: the call names a client and resolves
-        that client's session alone, so one call touches exactly one account,
-        and it is recorded in the run log with the tool and the arguments it
-        was given. Read `launch_status` afterwards to see what was done.
-
-        No language model is involved, which is the point. This works with
-        `munim config ai off`.
+        One call resolves one named client's session and touches no other
+        account, and the tool and its arguments go to the run log; read it back
+        with `launch_status`. No model is involved, so this works with agents
+        off.
         """
         from munim.remote.passthrough import (
             MissingArguments, UnknownTool, call_tool, known_providers)
@@ -486,6 +484,10 @@ def build_server(backend=None, registry=None, runs_dir=None,
         # under, and handing an id back would be Munim's bookkeeping leaking.
         return {**result, "client": record.name, "run_id": log.run_id}
 
+    # The path is validated before the request is built and the built request's
+    # host is compared with the provider's before anything is sent, because
+    # httpx's `base_url` does not contain an absolute URL: it would leave with
+    # the client's bearer token attached (D33).
     @server.tool()
     async def call_provider_api(
         client: Annotated[str, Says("The client to act on, by the name you registered them under. A write resolves this one client's credentials and no other.")],
@@ -495,24 +497,19 @@ def build_server(backend=None, registry=None, runs_dir=None,
         query: Annotated[dict | None, Says("Query string parameters, as an object.")] = None,
         body: Annotated[dict | None, Says("JSON request body, as an object.")] = None,
     ) -> dict:
-        """One HTTP call to a provider's own API, with one client's credential.
+        """Make one HTTP call to a provider's own REST API with one client's
+        credential.
 
-        The way down a layer when a provider's MCP server does not publish what
-        you need. Vercel's publishes no environment-variable write and no way to
-        attach a domain to a project, so those are reachable through no tool at
-        any layer; this is how they become reachable.
+        Returns the status and the parsed body, plus a `run_id`. Every call is
+        recorded as a mutation whatever the method, because an HTTP verb is a
+        convention rather than a guarantee, and the response body is never written
+        to the log.
 
-        `path` is a path, not a URL, and that is enforced rather than assumed:
-        an absolute URL would send this client's credential to whatever host it
-        named. The provider's host is asserted before anything is sent.
-
-        Every call is recorded as a mutation whatever the method, because an
-        HTTP verb is a convention and not an annotation, and this will not claim
-        a read on the strength of one. The response body is deliberately **not**
-        logged: a raw environment endpoint returns secret values.
-
-        Works for cloudflare, vercel and resend, the three whose REST base URL
-        and header shape Munim knows. It is not a universal escape hatch.
+        Use this only when the provider's MCP server publishes no tool for the
+        job: `list_provider_tools` first, `call_provider_tool` if it names one.
+        Vercel publishes no environment-variable write and no project-domain
+        attach, which is what this exists for. Works for cloudflare, vercel and
+        resend, the three whose REST shape Munim knows.
         """
         from munim.container import UnknownCredential, UnsupportedProvider
         from munim.remote.rawcall import UnsafePath, call as raw, providers
@@ -550,15 +547,16 @@ def build_server(backend=None, registry=None, runs_dir=None,
         client: Annotated[str, Says("The client to act on, by the name you registered them under. A write resolves this one client's credentials and no other.")],
         domain: Annotated[str, Says("The domain to send mail from, for example acme.example. Uses the client's registered domain when omitted.")],
     ) -> dict:
-        """What setting up email for this client's domain would change.
+        """Work out what setting up email for this client's domain would change.
 
-        Reads what is already published and returns every record with the
-        action it would take: create, update, merge or unchanged. Changes no
-        DNS. Pair it with `apply_mail_setup`, which needs the plan id.
+        Returns a `plan_id` and every record that would be created or replaced,
+        each with its current published value beside the proposed one, and a count
+        of how many need a person to approve them. Touches no client DNS.
 
-        The one write here is creating the sending domain in the operator's own
-        Resend account, because Resend does not publish the DKIM and SPF values
-        a plan is made of until it exists. That adds nothing to anyone's DNS.
+        One honest note: planning creates the sending domain in your own Resend
+        account, because Resend publishes no DKIM values until the domain exists.
+        Pass the `plan_id` to `apply_mail_setup` to carry it out, or use `fix`,
+        which plans and applies in one call and stops for approval in between.
         """
         from munim.agent.mailplan import plan as make_plan
         from munim.container import UnknownCredential
@@ -585,10 +583,13 @@ def build_server(backend=None, registry=None, runs_dir=None,
     ) -> dict:
         """Carry out a plan from `plan_mail_setup`.
 
-        `approved` is required when the plan would replace or combine a record
-        somebody put there on purpose. Creating one that does not exist is not
-        a judgement call; changing one that does is, and it is someone else's
-        live mail. Show the plan to the operator, then call this.
+        Returns what was published and what was left unchanged, plus a `run_id`.
+        When approval is needed and not given it returns `needs_approval` and
+        changes nothing, so calling it again with `approved=true` is safe.
+
+        `approved` is required only for records that already exist. Creating one
+        that is absent is not a judgement call; replacing one somebody published
+        is theirs to make, so show them the plan first.
         """
         from munim.agent.mailplan import NotApproved, apply as run_plan, load
 
@@ -619,21 +620,38 @@ def build_server(backend=None, registry=None, runs_dir=None,
         name: Annotated[str, Says("What you call this client, for example Acme Ltd. Used in tool names, so two clients cannot differ only by punctuation.")],
         domain: Annotated[str, Says("Their primary domain, if you know it. It can be added later by naming it in a check.")] = "",
     ) -> dict:
-        """Register a client. Holds no credential - only a name and a domain."""
+        """Register a client by name. Holds no credential, only a name and a domain.
+
+        Returns the client's id, name and domain.
+
+        Use this to write a client down before connecting anything. You do not
+        need it first: naming a domain in `check` or `fix` registers it on the
+        spot. Connecting a provider is a separate step, `connect_provider`.
+        """
         registry.add(ClientRecord(name=name, domain=domain or None))
         return {"client": name, "domain": domain or None}
 
+    # `connected` is asked live rather than inferred, for the same reason as
+    # `list_clients`: a token on disk looks identical whether or not the
+    # provider will still accept it.
     @server.tool()
     async def client_status(
         client: Annotated[str, Says("The client to act on, by the name you registered them under. A write resolves this one client's credentials and no other.")],
         check: Annotated[bool, Says("Ask each provider whether the session still opens, rather than only reporting what is stored.")] = True,
     ) -> dict:
-        """What is known about one client. Never returns a credential.
+        """What is known about one client: their domain, what is stored, and
+        what actually opens right now.
 
-        `connected` is the live answer, for the same reason as `list_clients`.
-        `api_key` and `mcp_session` say which store each entry in `stored` came
-        from, because a client can have one and not the other and the two are
-        not interchangeable.
+        Returns the client's name and domain; `stored`, every provider with a
+        credential filed; `api_key` and `mcp_session`, saying which of the two
+        stores each one came from; and `connected`, `needs_login` and
+        `unreachable`, from asking each provider live. Never includes a
+        credential value.
+
+        Use this for one client and `list_clients` for all of them. The two
+        stores are not interchangeable: `api_key` is what the mail tools call
+        REST APIs with, `mcp_session` is what a provider's own tools run on, and
+        a client can have one without the other.
         """
         from munim import health
 
@@ -660,11 +678,14 @@ def build_server(backend=None, registry=None, runs_dir=None,
         provider: Annotated[str, PROVIDER],
         credential: Annotated[str, Says("The API key or token, pasted. It is stored and never returned by any tool.")],
     ) -> dict:
-        """Connect one provider for one client using a credential you paste.
+        """Store a pasted API key for one client and one provider.
 
-        Prefer `munim connect` for providers that publish an OAuth flow: it
-        opens a browser, and no secret passes through the coding agent at all.
-        This exists for providers that offer nothing else - Resend, for one.
+        Returns which provider was connected, never the credential itself.
+
+        Use this only for providers with no browser login, or when a REST API key
+        is needed alongside a session: the mail tools call REST APIs and a browser
+        session is a different credential. `munim connect` at the terminal does
+        the browser login.
         """
         # Unregistered fails before a secret is stored. Filed under the id, not
         # the name the caller used: reads go by id, and storing under a label
@@ -680,14 +701,17 @@ def build_server(backend=None, registry=None, runs_dir=None,
         target: Annotated[str, Says("A client name, or a bare domain. A domain nobody has mentioned before is registered as a new client, because a DNS lookup is public and reveals nothing.")],
         dkim_selector: Annotated[str, Says("The DKIM selector to look for. Change it only if the client sends through something other than Resend.")] = "resend",
     ) -> dict:
-        """Check a client or a domain. Registers it on first mention.
+        """Run the deterministic check catalogue against one client or one domain.
 
-        `target` can be a client you have already added, a domain belonging to
-        one, or a domain nobody has mentioned before - there is no setup step.
-        What passed or failed is decided by live DNS, never by a model. What a
-        failure *means* is the agent's part: it reads more records if it needs
-        them and writes the explanation the owner gets. Open the control room
-        to watch, or read the report afterwards.
+        Returns the failing checks with an owner-facing sentence for each, counts
+        of what was checked and skipped, a `run_id`, and a link to a report. DNS
+        decides pass or fail, never a model; with agents on, a model adds the
+        explanation and nothing else.
+
+        `target` may be a client name, a domain belonging to one, or a domain
+        nobody has mentioned before, which registers it: there is no setup step.
+        Use `audit_all_clients` to run the same catalogue across every client at
+        once, and `fix` to repair what it finds rather than only reporting it.
         """
         record = resolve(target)
         client = record.name
@@ -778,10 +802,13 @@ def build_server(backend=None, registry=None, runs_dir=None,
     def launch_status(
         run_id: Annotated[str, Says("The run to read, as returned by check, fix or call_provider_tool. The newest run when omitted.")] = "",
     ) -> dict:
-        """Read a run without waiting on it.
+        """Read a run back without waiting on it.
 
-        A launch polls DNS and can outlast a single tool call, so progress is
-        read from the run log rather than held open.
+        Returns that run's events in order: what was checked, what changed, what
+        is waiting on a person. Defaults to the newest run.
+
+        A check or a repair can outlast a single tool call, so progress is read
+        from the run log rather than held open.
         """
         known = all_runs(runs)
         if not known:
