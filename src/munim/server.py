@@ -662,6 +662,49 @@ def build_server(backend=None, registry=None, runs_dir=None,
         }
 
     @server.tool()
+    async def fix(target: str, dkim_selector: str = "resend") -> dict:
+        """Check a client's domain, then repair what can be repaired safely.
+
+        `check` explains what is wrong. This acts on it. The same thirteen
+        deterministic checks run first and are still never decided by a model;
+        what a model decides is which repair to reach for, out of a set of tools
+        that cannot do anything else.
+
+        Anything that would replace a record somebody already published stops
+        and waits for a person. Approve it in the control room, or call
+        `apply_mail_setup` with `approved=true`. Creating a record that is
+        absent is not a judgement call and does not stop.
+
+        With agents off the checks still run and their findings still stand,
+        exactly as `check` degrades: only the repair needs a model.
+        """
+        from munim.agent.graph import fix as run_fix
+        from munim.agent.launch import _connected_toolsets
+
+        record = resolve(target)
+        target_domain = record.domain or target
+        log = RunLog(new_run_id(), runs)
+
+        try:
+            container = container_for(record.name)
+        except Exception:
+            # A client with nothing stored is a reason to refuse the repair,
+            # not a reason to skip the checks. The graph reports why.
+            container = None
+
+        toolsets = _connected_toolsets(record.id, record.name, log)
+        shaped = await run_fix(target_domain, record.name,
+                               client_id=record.id, container=container,
+                               log=log, dkim_selector=dkim_selector,
+                               toolsets=toolsets)
+        report = write_report(log, domain=target_domain, business=record.name,
+                              out_dir=reports)
+        return {**shaped,
+                "report": f"http://127.0.0.1:8977/reports/{log.run_id}",
+                "report_file": str(report),
+                "watch": "http://127.0.0.1:8977"}
+
+    @server.tool()
     def launch_status(run_id: str = "") -> dict:
         """Read a run without waiting on it.
 
