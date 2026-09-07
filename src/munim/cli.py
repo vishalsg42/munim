@@ -1237,12 +1237,38 @@ def connect_via_mcp(client: str | None, provider: str) -> int:
         print(f"The consent screen will name the application "
               f"\"Munim ({client})\".", file=sys.stderr)
 
+    # Make this actually be a login, without removing anything first.
+    #
+    # Opening a session is not authenticating: the SDK runs the browser flow
+    # only when storage hands it no usable token. Re-running this on a provider
+    # whose session still worked printed "Opening your browser", opened none,
+    # and reported success, so there was no way to re-authenticate at all.
+    #
+    # `SessionNeedingLogin` answers None for this one token and passes
+    # everything else, reads and writes, straight through. Nothing is deleted.
+    # A login that completes overwrites the token the way it always would; one
+    # that is closed, refused or interrupted writes nothing and leaves the old
+    # session exactly where it was. The first version of this deleted the token
+    # up front and put it back on failure, which removed an operator's account
+    # from their list the moment they cancelled.
+    from munim.remote.storage import SessionNeedingLogin
+
+    fresh = SessionNeedingLogin(working_key, provider) if record else None
+
     try:
         tools, account = asyncio.run(
-            connect_and_identify(working_key, provider, label=client or PROVISIONAL))
+            connect_and_identify(working_key, provider,
+                                 label=client or PROVISIONAL,
+                                 **({"keyring": fresh} if fresh else {})))
     except NoRemoteServer as exc:
         print(str(exc), file=sys.stderr)
         return 2
+    except KeyboardInterrupt:
+        # Closing the browser and pressing Ctrl+C is the most likely way this
+        # ends. Nothing was removed, so there is nothing to undo.
+        print("\nCancelled. Your existing session is untouched.",
+              file=sys.stderr)
+        return CANCELLED
 
     # Remember which account this turned out to be. Without it, connecting the
     # same account under a second label makes a second client and nothing can
@@ -1424,6 +1450,20 @@ def connect(client: str, provider: str) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Every command, with Ctrl+C as an answer rather than a stack trace.
+
+    Interrupting a browser login used to print sixty lines of asyncio
+    internals ending in KeyboardInterrupt. Backing out is a normal thing to
+    do, and a tool that shouts when you do it teaches you not to.
+    """
+    try:
+        return _run(argv)
+    except KeyboardInterrupt:
+        print("\nCancelled.", file=sys.stderr)
+        return CANCELLED
+
+
+def _run(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="munim", description=DESCRIPTION,
         formatter_class=argparse.RawDescriptionHelpFormatter)
