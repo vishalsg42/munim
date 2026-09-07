@@ -73,3 +73,91 @@ that reason.
 
 So the model's own first sentence is printed beside every verdict. The reader is
 the judge; the table is a way of noticing that something moved.
+
+---
+
+# The first time the repair graph ran
+
+Run on **2026-09-07**, against a real client's live domain, through the MCP
+tool rather than a script. The client's name and domain are replaced here with
+the usual placeholders: they did not consent to a public repository, and this
+file is public.
+
+Every line below is the run log the framework wrote, not a transcript anybody
+composed.
+
+```
+ 1  diagnose  observation   0 provider tools available for Acme Ltd
+ 2  verify    stage_start   Checking acme.example
+ 3  verify    observation   Your outgoing mail is correctly claimed by one sender policy   spf_single
+ 4  verify    observation   Your sender policy is within the limits mail servers enforce   spf_lookups
+ 5  verify    finding       Your mail is not signed, so receivers cannot prove it really   dkim_present
+                            came from you.
+ 6  verify    observation   You have told other mail servers what to do with messages      dmarc_present
+ 7  verify    finding       Anyone can still send mail pretending to be you: the policy    dmarc_policy
+                            is set to watch, not to act.
+ 8  verify    observation   Mail sent to your address can be delivered.                    mx_present
+ 9  verify    observation   This domain is under your control.                             ns_delegated
+10  verify    observation   Typing your address into a browser reaches your site.          apex_resolves
+11  verify    observation   Nothing is blocking your security certificate                  caa_allows
+12  verify    observation   Your address works with or without www.                        www_redirect
+13  verify    observation   Visitors always arrive on the secure version of your site.     https_enforced
+14  verify    observation   Your site is secure and the certificate is not close to        cert_valid
+                            expiring.
+15  verify    observation   Your cloudflare connection is working.                         account_cloudflare
+16  verify    observation   Your supabase connection is working.                           account_supabase
+17  verify    observation   Your vercel connection is working.                             account_vercel
+18  verify    stage_done    13 of 15 checks passed
+19  repair    observation   Not repairing acme.example: Acme Ltd has no API key for
+                            cloudflare and resend. A browser session is not the same
+                            credential: the repair calls their REST API.
+20  diagnose  stage_start   Working out what is wrong with acme.example        node=triage
+21  diagnose  stage_done    <the agent's answer>                               node=triage
+22  repair    run_done      Finished with acme.example.
+```
+
+## What this is evidence of
+
+**The check catalogue is not DNS-only any more.** Lines 15 to 17 are the family
+that asks each connected provider whether that account still works, and it is
+why the run says fifteen checks rather than thirteen. Until this run those had
+never executed anywhere outside a test, and neither had the three Vercel
+hosting checks that were written, tested and called by nothing (D37).
+
+**The run log is written by the framework.** Lines 20 and 21 carry `node=triage`
+and were produced by a Strands `AfterNodeCallEvent`, not by a hand-placed
+`log.append`. The control room's rail is a rendering of that rather than a
+parallel narration of it.
+
+**The write boundary held, and said so.** Line 19 is the interesting one. Two
+checks failed and one of them, `dkim_present`, is in the set the repair path can
+produce a record for, so the only thing that stopped the repair was the
+credential. The edge condition read that, refused, and wrote down why.
+
+That last part matters more than a refusal usually would. An edge that does not
+traverse is silent, and in the room's rail a silent step is indistinguishable
+from one that hung. This is the same failure the ghost stage cells were, one
+layer up, and it is the reason a skipped repair is required to produce a
+sentence.
+
+## What this is not evidence of
+
+**Nobody has approved anything yet.** `~/.munim/decisions` is empty, the
+control room's button has never been clicked in anger, and the `repair` node has
+never been entered. The gate, the interrupt, the resume and the approval file
+are covered by tests and by the day-one gate script against a real model, and
+that is a weaker claim than this page otherwise makes.
+
+The reason is the one in line 19, and it is a real seam rather than a missing
+credential. `mailplan` reaches Cloudflare and Resend through their REST APIs,
+and a browser session is a different credential from an API key: measured, an
+MCP session token sent at the matching REST API answers 403 for Resend and 400
+for Cloudflare. Only Vercel accepts its own (D33). So a client connected the
+normal way, in a browser, cannot be repaired until somebody also pastes a key.
+
+Everything that goes through a provider's *own* MCP server writes happily on the
+browser session alone, including Cloudflare's `execute`. The split is not read
+against write. It is which server is being talked to, and from an operator's
+point of view that is arbitrary. Routing the mail repair through Resend's MCP
+server, which publishes domain create and verify among its tools, would remove
+the seam entirely. It is priced and declined in the plan rather than overlooked.
