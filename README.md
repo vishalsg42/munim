@@ -4,6 +4,7 @@
 [![Python](https://img.shields.io/pypi/pyversions/munim)](https://pypi.org/project/munim/)
 [![Tests](https://github.com/vishalsg42/munim/actions/workflows/tests.yml/badge.svg)](https://github.com/vishalsg42/munim/actions/workflows/tests.yml)
 [![Licence](https://img.shields.io/pypi/l/munim)](LICENSE)
+[![Glama](https://glama.ai/mcp/servers/vishalsg42/munim/badges/score.svg)](https://glama.ai/mcp/servers/vishalsg42/munim)
 
 **One MCP server holding a live session with every client's account at once.**
 
