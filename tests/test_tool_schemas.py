@@ -113,3 +113,45 @@ def test_an_argument_that_recurs_reads_the_same_way_everywhere(tools):
               if name != "call_provider_api"}
     assert len(set(others.values())) == 1, \
         f"the same argument is described {len(set(others.values()))} ways"
+
+
+def test_a_tool_description_says_more_than_its_name(tools):
+    """`add_client` was eighty characters and one of them.
+
+    A model choosing between sixteen tools has the description and nothing
+    else. Not a length contest: this is a floor, and the four highest-scoring
+    descriptions in this surface are among the shortest.
+    """
+    thin = [f"{t.name} ({len(t.description or '')} chars)"
+            for t in tools if len(t.description or "") < 150]
+
+    assert thin == [], f"these say too little to choose between: {', '.join(thin)}"
+
+
+def test_no_tool_description_is_an_essay(tools):
+    """The other direction, and the one this codebase is actually prone to.
+
+    Glama's evaluation called `work_on_client` "overly metaphorical" and scored
+    every long description down for conciseness. The design reasoning belongs
+    in comments beside the code, where a reader keeps it; the description is
+    read by a model deciding which tool to call.
+    """
+    long = [f"{t.name} ({len(t.description or '')} chars)"
+            for t in tools if len(t.description or "") > 1000]
+
+    assert long == [], f"these are essays, not descriptions: {', '.join(long)}"
+
+
+def test_the_tools_that_could_be_confused_point_at_each_other(tools):
+    """Four tools read across clients or inspect them read-only, and an agent
+    going on names alone could pick the wrong one. Each says which sibling to
+    use instead."""
+    said = {t.name: (t.description or "") for t in tools}
+
+    assert "audit_all_clients" in said["check"]
+    assert "fix" in said["check"]
+    assert "find_across_clients" in said["audit_all_clients"]
+    assert "audit_all_clients" in said["find_across_clients"]
+    assert "client_status" in said["list_clients"]
+    assert "list_clients" in said["client_status"]
+    assert "call_provider_tool" in said["call_provider_api"]
