@@ -111,7 +111,13 @@ async def test_naming_a_new_domain_registers_it_and_checks_it(tmp_path, monkeypa
     lookup is public and there is nothing to protect on a read."""
     from munim.checks import dns as checks
     monkeypatch.setattr(checks, "query", lambda *a, **k: [])
-    monkeypatch.setattr(checks, "run_reachability", lambda d: [])
+    # The async one, which is what `check` actually calls. Patching the
+    # sync twin did nothing: `run_reachability_async` gathers the three
+    # connection checks directly rather than going through it, so these
+    # tests were opening real sockets and passing for the wrong reason.
+    async def _no_reachability(domain):
+        return []
+    monkeypatch.setattr(checks, "run_reachability_async", _no_reachability)
 
     server, registry, keychain = _server(tmp_path)
     assert [c.name for c in registry.clients()] == ["acme"]
@@ -123,7 +129,13 @@ async def test_naming_a_new_domain_registers_it_and_checks_it(tmp_path, monkeypa
 async def test_naming_the_same_domain_twice_does_not_duplicate_it(tmp_path, monkeypatch):
     from munim.checks import dns as checks
     monkeypatch.setattr(checks, "query", lambda *a, **k: [])
-    monkeypatch.setattr(checks, "run_reachability", lambda d: [])
+    # The async one, which is what `check` actually calls. Patching the
+    # sync twin did nothing: `run_reachability_async` gathers the three
+    # connection checks directly rather than going through it, so these
+    # tests were opening real sockets and passing for the wrong reason.
+    async def _no_reachability(domain):
+        return []
+    monkeypatch.setattr(checks, "run_reachability_async", _no_reachability)
 
     server, registry, keychain = _server(tmp_path)
     await server.call_tool("check", {"target": "newclient.example"})
@@ -136,7 +148,13 @@ async def test_an_existing_client_is_found_by_its_domain(tmp_path, monkeypatch):
     not create a second one under a different name."""
     from munim.checks import dns as checks
     monkeypatch.setattr(checks, "query", lambda *a, **k: [])
-    monkeypatch.setattr(checks, "run_reachability", lambda d: [])
+    # The async one, which is what `check` actually calls. Patching the
+    # sync twin did nothing: `run_reachability_async` gathers the three
+    # connection checks directly rather than going through it, so these
+    # tests were opening real sockets and passing for the wrong reason.
+    async def _no_reachability(domain):
+        return []
+    monkeypatch.setattr(checks, "run_reachability_async", _no_reachability)
 
     server, registry, keychain = _server(tmp_path)   # acme, domain acme.example
     await server.call_tool("check", {"target": "acme.example"})

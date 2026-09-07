@@ -126,12 +126,22 @@ def _connected_toolsets(client_id: str, label: str, log: RunLog) -> list:
 
 
 async def run_checks(domain: str, client: str, log: RunLog,
-                     dkim_selector: str = "resend") -> list[CheckResult]:
-    """Deterministic. Each result is written to the run log as it lands."""
+                     dkim_selector: str = "resend",
+                     container=None) -> list[CheckResult]:
+    """Deterministic. Each result is written to the run log as it lands.
+
+    `container` is keyword-with-a-default so no existing caller breaks. With
+    one, the three Vercel checks run too and the catalogue stops being DNS-only.
+    Without one they return `skip`, which is what a client with no Vercel
+    credential should read as.
+    """
+    from munim.checks.hosting import run_hosting_async
+
     log.append(client=client, stage="verify", kind="stage_start",
                human_text=f"Checking {domain}")
     results = await run_all_async(domain, dkim_selector=dkim_selector)
     results += await run_reachability_async(domain)
+    results += await run_hosting_async(container, domain)
     for r in results:
         if r.status == "skip":
             continue

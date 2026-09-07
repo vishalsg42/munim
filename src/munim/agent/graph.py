@@ -196,7 +196,8 @@ async def fix(domain: str, client: str, *, client_id: str, container,
     """
     from munim.agent.launch import run_checks
 
-    results = await run_checks(domain, client, log, dkim_selector)
+    results = await run_checks(domain, client, log, dkim_selector,
+                               container=container)
     run = RepairRun(run_id=log.run_id, client=client, client_id=client_id,
                     domain=domain, log=log, container=container,
                     results=results)

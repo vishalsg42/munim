@@ -139,8 +139,11 @@ const EMITTED = [
   "dmarc_present", "dmarc_policy", "mx_present", "ns_delegated",
   "cert_valid", "caa_allows", "apex_resolves", "www_redirect",
   "https_enforced",
-  // munim/adapters/vercel.py, produced on a launch with Vercel connected
-  "deploy_current", "env_scoped",
+  // munim/checks/hosting.py, which is what finally calls the three checks in
+  // munim/adapters/vercel.py. They were written, tested, and reachable from
+  // nothing in src/ for the life of the project, while this list already
+  // claimed two of them were "produced on a launch with Vercel connected".
+  "deploy_current", "env_applied", "env_scoped",
 ];
 
 test("every chip has something that can light it", () => {

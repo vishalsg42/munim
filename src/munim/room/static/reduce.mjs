@@ -15,15 +15,18 @@
 // step that hung rather than one that does not exist. `cert_www`,
 // `env_redeployed`, `return_path`, `site_responds` and `ssl_mode` are gone.
 //
-// `deploy_current` and `env_scoped` stay: they come from the Vercel adapter,
-// so they are idle on a DNS-only check and real on a launch with Vercel
-// connected. `tests/room/reduce.test.mjs` pins this list against the producers.
+// The three Vercel ones now have a producer. For most of this project's life
+// they did not: the checks existed in the adapter, were tested, and nothing in
+// src/ called them, while this comment claimed they were "real on a launch with
+// Vercel connected". `munim/checks/hosting.py` is what made that true, and it
+// resolves the project from the domain, which is the line that was missing.
+// `tests/room/reduce.test.mjs` pins this list against the producers.
 export const CHECKS = [
   "spf_single", "spf_lookups", "dkim_present", "dkim_chunking",
   "dmarc_present", "dmarc_policy", "mx_present",
   "ns_delegated", "cert_valid", "caa_allows",
   "apex_resolves", "www_redirect", "https_enforced",
-  "deploy_current", "env_scoped",
+  "deploy_current", "env_applied", "env_scoped",
 ];
 
 export const CHECK_LABELS = {
@@ -36,7 +39,7 @@ export const CHECK_LABELS = {
   apex_resolves: "Apex resolves", www_redirect: "www → apex",
   https_enforced: "HTTPS enforced", ssl_mode: "SSL mode",
   deploy_current: "Deploy current", env_scoped: "Env scope",
-  env_redeployed: "Env applied", site_responds: "Site responds",
+  env_applied: "Env applied", site_responds: "Site responds",
 };
 
 // `diagnose` is where the agent works out what a failure means. It was missing
