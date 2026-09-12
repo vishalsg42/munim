@@ -129,12 +129,40 @@ class _Sessions:
         self.store.pop((service, account), None)
 
 
-def test_a_provider_connected_by_oauth_says_so_rather_than_no_credential():
+def test_a_provider_connected_by_oauth_is_used_rather_than_refused():
     """An operator was told by `client_status` that resend was connected and by
     `plan_mail_setup` that it had no resend credential, in the same minute.
-    Both were true, about different stores, and neither said so."""
-    from munim.container import Container, UnknownCredential
+    Both were true, about different stores, and neither said so.
 
+    The message that fixed the confusion is no longer the answer. The session
+    is the connection, and the repair goes out over it: the adapter gets a
+    client whose requests leave as that provider's own MCP tool calls. Asking
+    somebody to paste a second credential for an account they have already
+    connected was the thing to remove, not to explain better.
+    """
+    from munim.container import Container
+    from munim.remote.rest import ResendOverMCP
+
+    box = Container("c_1", Backend(), keyring=_Sessions())
+
+    http = box.http("resend")
+
+    assert isinstance(http._transport, ResendOverMCP)
+    # No key exists, so nothing may be claiming there is one.
+    assert "authorization" not in {k.lower() for k in http.headers}
+
+
+def test_the_refusal_still_names_both_stores_where_there_is_no_route(monkeypatch):
+    """The longer message earned its place and keeps it.
+
+    Every provider that has an MCP route now takes it, so this is what a
+    provider with a session and no route says. It has to go on naming both
+    stores, because that is still the confusion it was written for.
+    """
+    from munim.container import Container, UnknownCredential
+    from munim.remote import rest
+
+    monkeypatch.setattr(rest, "transport_for", lambda *a, **k: None)
     box = Container("c_1", Backend(), keyring=_Sessions())
 
     with pytest.raises(UnknownCredential) as caught:
@@ -165,13 +193,12 @@ def test_the_session_lookup_names_only_this_client():
     """The isolation property, extended to the second store. `test_isolation`
     watches the injected backend and would have kept passing while a session
     read went to the module default and asked about anyone."""
-    from munim.container import Container, UnknownCredential
+    from munim.container import Container
 
     sessions = _Sessions()
     box = Container("c_1", Backend(), keyring=sessions)
 
-    with pytest.raises(UnknownCredential):
-        box.http("resend")
+    box.http("resend")
 
     assert sessions.asked, "the session store was never consulted"
     assert all(account == "c_1" for _, account in sessions.asked), \

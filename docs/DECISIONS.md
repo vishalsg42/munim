@@ -1413,3 +1413,71 @@ rather than offered and broken.
 
 A picker of the fifty newest runs, and a report link when there is a report.
 This is navigation, not a dashboard: it is for finding the run you just did.
+
+---
+
+## D41: The session is the credential *(closes the seam D33 measured)*
+
+Connecting a client filed an OAuth session. Repairing that client asked for a
+pasted API key for the same two accounts. Both statements were true and together
+they undo the claim this project is built on: one connection per client.
+
+D33 measured why. `mailplan` reaches Cloudflare and Resend through their REST
+APIs, and those APIs refuse the token their own MCP servers issue: 400 from
+Cloudflare, 403 from Resend, 200 from Vercel, which is why
+`RemoteServer.rest_takes_session` is set for Vercel alone. The answer at the
+time was a clearer error message naming both stores. `RESULTS.md` went further
+and wrote down that everything reaching a provider's own MCP server writes
+happily on the session, and that the split is not read against write but which
+server is being talked to. It priced routing the repair that way and declined
+it.
+
+**Asked live on 2026-09-12, both servers can carry it.** Cloudflare publishes
+three tools and `execute` is a general one: it runs a JavaScript arrow function
+calling `cloudflare.request({method, path, query, body})` and returns the
+Cloudflare API's own response object, `success`/`errors`/`result`, unchanged.
+Resend publishes 104 tools including `list-domains`, `get-domain`,
+`create-domain` and `verify-domain`, which is exactly the four endpoints
+`mailplan` uses.
+
+**So it is a transport, not a rewrite.** `Container.http` hands the adapters an
+httpx client whose requests leave as MCP tool calls, and
+`adapters/cloudflare.py` and `adapters/resend.py` are unchanged. The
+read-before-write on `(type, name)`, the refusal to append beside an existing
+record, the SPF merge and every test over them go on being true. That is the
+only reason this was worth doing two days from a deadline: the part that writes
+to somebody's DNS is the part that did not change.
+
+**The model is not in this path.** The JavaScript is fixed and written here,
+with the request serialised into it as ASCII JSON, so a record value is data
+inside a string and never program text. The repairing agent still sees two tools
+that take no arguments (D35).
+
+**Resend answers in prose, and that is the risk.** A DKIM key arrives as an
+indented line under a heading, and a third party's presentation layer can change
+without notice. The failure that matters is not a crash: it is a value that
+parses into something plausible and wrong and then gets published into a
+client's zone. So `remote/resendtext.py` refuses rather than guesses. A records
+section that parses to nothing is an error rather than an empty list, because an
+empty list means "nothing to publish" and that reads as success. A value whose
+shape contradicts its own heading, a DKIM key not starting `p=`, a policy not
+starting `v=spf1`, stops the run with the text that failed.
+
+**Two things this found in code that was already there.** `Resend.find` returned
+a domain from `GET /domains`, which carries no `records` array, so a client
+whose sending domain already existed produced a plan with nothing in it. Only
+the second run was affected, and only a fixture that included records where the
+real API omits them let that pass. And the repair edge asked `container.has`,
+which reads the pasted-key store alone, so it would have refused the very
+clients this now serves. It asks `container.can_reach` now: a key, a session the
+REST API accepts, or a session with a route.
+
+**Measured after building it**, against a live client with an empty key store:
+the plan came back with two records `unchanged` and one to create, which means
+the DKIM key parsed out of prose matched the one published in the zone byte for
+byte. See `RESULTS.md`.
+
+**What is not claimed.** The four Resend endpoints are the four `mailplan` uses;
+anything else returns 501 naming `--token`, because pretending otherwise would
+fail deeper in. And this has proved a *plan*. Nothing has yet been written to a
+zone through it.

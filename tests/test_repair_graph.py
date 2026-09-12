@@ -37,6 +37,12 @@ class _Keys:
     def has(self, provider):
         return provider in self.held
 
+    def can_reach(self, provider):
+        # What the edge asks now. A pasted key is one way to reach a provider
+        # and an MCP session is another, so the question stopped being "is
+        # there a key" and became "is there a route".
+        return provider in self.held
+
 
 def _run(tmp_path, *, results=(), holds=("cloudflare", "resend"),
          domain="acme.example"):

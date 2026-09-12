@@ -162,9 +162,15 @@ async def test_a_merge_that_would_still_fail_escalates(tmp_path, monkeypatch):
 async def test_running_it_twice_changes_nothing_the_second_time(tmp_path, monkeypatch):
     """Idempotent, so an interrupted setup is safe to re-run."""
     monkeypatch.setattr(checks, "query", lambda *a, **k: [])
+    # The list endpoint carries no records; the by-id one does. That is what
+    # Resend returns, and a fixture claiming otherwise is what hid the re-run
+    # bug in `Resend.find`.
     respx.get(f"{RS}/domains").mock(return_value=httpx.Response(200, json={
         "data": [{"id": "d1", "name": DOMAIN, "status": "verified",
-                  "records": RESEND_RECORDS}]}))
+                  "region": "us-east-1"}]}))
+    respx.get(f"{RS}/domains/d1").mock(return_value=httpx.Response(200, json={
+        "id": "d1", "name": DOMAIN, "status": "verified",
+        "records": RESEND_RECORDS}))
     respx.post(f"{RS}/domains/d1/verify").mock(
         return_value=httpx.Response(200, json={"status": "verified"}))
     create_domain = respx.post(f"{RS}/domains")

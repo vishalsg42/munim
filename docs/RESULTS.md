@@ -148,16 +148,48 @@ never been entered. The gate, the interrupt, the resume and the approval file
 are covered by tests and by the day-one gate script against a real model, and
 that is a weaker claim than this page otherwise makes.
 
-The reason is the one in line 19, and it is a real seam rather than a missing
+The reason was the one in line 19, and it was a real seam rather than a missing
 credential. `mailplan` reaches Cloudflare and Resend through their REST APIs,
 and a browser session is a different credential from an API key: measured, an
 MCP session token sent at the matching REST API answers 403 for Resend and 400
 for Cloudflare. Only Vercel accepts its own (D33). So a client connected the
-normal way, in a browser, cannot be repaired until somebody also pastes a key.
+normal way, in a browser, could not be repaired until somebody also pasted a key.
 
 Everything that goes through a provider's *own* MCP server writes happily on the
-browser session alone, including Cloudflare's `execute`. The split is not read
-against write. It is which server is being talked to, and from an operator's
-point of view that is arbitrary. Routing the mail repair through Resend's MCP
-server, which publishes domain create and verify among its tools, would remove
-the seam entirely. It is priced and declined in the plan rather than overlooked.
+browser session alone, including Cloudflare's `execute`. The split was never
+read against write. It is which server is being talked to, and from an
+operator's point of view that is arbitrary.
+
+**That seam is closed** (D41). `Container.http` now hands the adapters a client
+whose requests leave as the provider's own MCP tool calls where there is a
+session and no key, so the repair runs on the connection the operator already
+made.
+
+## Proof, 2026-09-12: a mail plan built with no API key anywhere
+
+A client connected in a browser to Cloudflare and Resend, with an empty
+pasted-key store, against their live accounts:
+
+```
+cloudflare  key=False  route=True
+resend      key=False  route=True
+
+unchanged DKIM  TXT   resend._domainkey.<domain>
+unchanged SPF   MX    send.<domain>
+create    SPF   TXT   send.<domain>
+          next: v=spf1 include:amazonses.com ~all
+```
+
+Two of the three read `unchanged`, and that is the part worth keeping. Resend's
+MCP server answers in prose, so the DKIM public key was parsed out of a
+formatted block and compared against what is actually published in the zone.
+`unchanged` means a 216 character base64 key survived that round trip byte for
+byte. A parser that truncated or re-wrapped anything would have said `update`
+and proposed publishing a key nobody holds.
+
+The third is a genuine finding: the sender policy for the sending subdomain is
+not published, and the plan is to create it.
+
+The repair edge opens for that client now and refuses for a client connected to
+Cloudflare and not Resend, naming the provider that is missing rather than
+asking for a key.

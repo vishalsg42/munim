@@ -239,16 +239,23 @@ async def test_every_tool_that_changes_something_names_its_client(tmp_path):
         assert "client" in tools[name].inputSchema.get("required", []), name
 
 
-async def test_a_mail_plan_without_the_rest_key_returns_the_fix_not_a_traceback(
-        tmp_path):
-    """The reported confusion, end to end. `client_status` said resend was
-    connected, `plan_mail_setup` said there was no resend credential, and both
-    were reading a different store. It now says which one and how to add it,
-    as a result with a `fix` rather than a raised ToolError, because a caller
-    reading "Error executing tool" has to decide whether something broke."""
+async def test_a_mail_plan_over_the_session_needs_no_pasted_key(tmp_path, monkeypatch):
+    """The reported confusion, end to end, and the shape of its fix.
+
+    `client_status` said resend was connected and `plan_mail_setup` said there
+    was no resend credential, in the same minute, both reading a different
+    store. The first answer was a clearer refusal naming both stores. This is
+    the second: the session is the connection, so the plan is built over it and
+    there is nothing to paste.
+
+    The provider answers here are the ones their live servers gave on
+    2026-09-12, prose from Resend and the Cloudflare API's own JSON from
+    Cloudflare's `execute`.
+    """
     import json
 
     from munim.registry import ClientRecord, Registry
+    from munim.remote import rest
     from munim.server import build_server
 
     class Ring:
@@ -267,12 +274,45 @@ async def test_a_mail_plan_without_the_rest_key_returns_the_fix_not_a_traceback(
         def set(self, client, provider, secret):
             self._ring.set_password(f"munim:{provider}", client, secret)
 
+    DOMAIN_BLOCK = ("Name: acme.example\nID: d1\nStatus: verified\n"
+                    "Region: us-east-1\nSending: enabled")
+    RECORD_BLOCK = (
+        "DNS Records:\n\nDKIM (TXT):\n  Name: resend._domainkey\n"
+        "  Value: p=MIGfMA0GCSqGSIb3DQEB\n  TTL: Auto\n  Status: verified\n\n"
+        "SPF (MX):\n  Name: send\n  Value: feedback-smtp.us-east-1.amazonses.com\n"
+        "  TTL: Auto\n  Status: verified\n  Priority: 10\n\n"
+        "SPF (TXT):\n  Name: send\n  Value: v=spf1 include:amazonses.com ~all\n"
+        "  TTL: Auto\n  Status: verified")
+
+    asked = []
+
+    async def fake_call(client, provider, tool, arguments=None, **kw):
+        asked.append((provider, tool))
+        if provider == "resend" and tool == "list-domains":
+            return {"failed": False, "result": ["Found 1 domain:", DOMAIN_BLOCK]}
+        if provider == "resend" and tool == "get-domain":
+            return {"failed": False, "result": [DOMAIN_BLOCK, RECORD_BLOCK]}
+        if provider == "cloudflare" and tool == "execute":
+            code = (arguments or {}).get("code", "")
+            if "/zones/" in code and "dns_records" in code:
+                result = []
+            else:
+                result = [{"id": "z1", "name": "acme.example"}]
+            return {"failed": False,
+                    "result": {"success": True, "errors": [], "messages": [],
+                               "result": result, "status": 200}}
+        raise AssertionError(f"unexpected call: {provider}.{tool}")
+
+    monkeypatch.setattr(rest, "call_tool", fake_call)
+
     reg = Registry(tmp_path / "r.json")
     reg.add(ClientRecord(name="Acme Ltd", domain="acme.example"))
     record = reg.clients()[0]
 
-    # An MCP session for resend, and no pasted key: exactly the shape reported.
-    ring = Ring({("munim-mcp:resend:tokens", record.id): '{"a": 1}'})
+    # An MCP session for both, and no pasted key anywhere: exactly the shape
+    # that used to refuse.
+    ring = Ring({("munim-mcp:resend:tokens", record.id): '{"a": 1}',
+                 ("munim-mcp:cloudflare:tokens", record.id): '{"a": 1}'})
     server = build_server(backend=Keys(ring), registry=reg,
                           runs_dir=tmp_path / "runs",
                           reports_dir=tmp_path / "reports", keyring=ring)
@@ -282,10 +322,13 @@ async def test_a_mail_plan_without_the_rest_key_returns_the_fix_not_a_traceback(
     blocks = result[0] if isinstance(result, tuple) else result
     shaped = json.loads((blocks[0] if isinstance(blocks, list) else blocks).text)
 
-    assert "MCP session" in shaped["error"], \
-        "it did not mention the session that does exist"
-    assert "REST API" in shaped["error"], "it did not say what this path needs"
-    assert shaped["fix"] == 'munim connect "Acme Ltd" resend --token'
+    assert "error" not in shaped, shaped
+    assert shaped["changes"], "a plan with nothing in it is not a plan"
+    # The DKIM key came out of prose and has to arrive intact.
+    dkim = [c for c in shaped["changes"] if c["purpose"] == "DKIM"]
+    assert dkim and dkim[0]["content"] == "p=MIGfMA0GCSqGSIb3DQEB"
+    assert ("resend", "get-domain") in asked, "the records were never read back"
+    assert ("cloudflare", "execute") in asked, "Cloudflare was not reached"
 
 
 # ---- links into the control room ----------------------------------------

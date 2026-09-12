@@ -51,15 +51,44 @@ async def test_creating_a_domain_returns_the_records_to_publish():
 async def test_an_existing_domain_is_not_created_twice():
     """A re-run must not mint a second set of DKIM keys: the published record
     would then not match the key the client's mail is signed with."""
+    # The list endpoint carries no records. This is what Resend actually
+    # returns, and the fixture used to include them, which is why the bug
+    # below could not be seen from here.
     respx.get(f"{API}/domains").mock(return_value=httpx.Response(200, json={
         "data": [{"id": "d1", "name": "ivyandfern.example",
-                  "status": "verified", "records": RECORDS}]}))
+                  "status": "verified", "region": "us-east-1"}]}))
+    respx.get(f"{API}/domains/d1").mock(return_value=httpx.Response(200, json={
+        "id": "d1", "name": "ivyandfern.example", "status": "verified",
+        "records": RECORDS}))
     create = respx.post(f"{API}/domains")
 
     domain, action = await _r().ensure_domain("ivyandfern.example")
     assert action == "unchanged"
     assert domain.verified
     assert not create.called
+
+
+@respx.mock
+async def test_a_domain_that_already_exists_still_knows_what_to_publish():
+    """The bug this catches only appears on the second run.
+
+    `GET /domains` returns id, name, status and region and no `records` array.
+    A domain found in that list therefore arrived with nothing to publish, so
+    a re-run against a client whose sending domain already existed produced a
+    plan with no changes in it and reported the domain fine. The first run was
+    unaffected, because `POST /domains` does return the records.
+    """
+    respx.get(f"{API}/domains").mock(return_value=httpx.Response(200, json={
+        "data": [{"id": "d1", "name": "ivyandfern.example",
+                  "status": "verified", "region": "us-east-1"}]}))
+    respx.get(f"{API}/domains/d1").mock(return_value=httpx.Response(200, json={
+        "id": "d1", "name": "ivyandfern.example", "status": "verified",
+        "records": RECORDS}))
+
+    domain, _ = await _r().ensure_domain("ivyandfern.example")
+
+    assert [r.purpose for r in domain.records], "nothing to publish on a re-run"
+    assert {r.purpose for r in domain.records} == {"SPF", "DKIM"}
 
 
 def test_relative_names_become_absolute_for_cloudflare():

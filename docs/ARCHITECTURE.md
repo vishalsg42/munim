@@ -185,8 +185,8 @@ run_checks(domain)  ->  results  ──┐  deterministic, before any model runs
 
 The predicate on the first edge reads those results and never reads what a model
 said. Every term is deterministic: is there a failure this path can produce a
-record for, does the client have the API keys the repair needs, is the domain
-theirs to change. The repair node holds three tools and no provider toolsets,
+record for, can this client's credentials reach both providers at all, is the
+domain theirs to change. The repair node holds three tools and no provider toolsets,
 and the two that write take no arguments at all, so the model chooses whether to
 act and never on what.
 
