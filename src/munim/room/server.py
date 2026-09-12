@@ -63,8 +63,18 @@ def _runs_dir(request: Request) -> Path:
 
 
 async def list_runs(request: Request) -> JSONResponse:
+    """Every run, the newest one, and which of them have a report.
+
+    `reports` is here so the page can hide the report link rather than offer one
+    that 404s. The reports have been written and served since the beginning and
+    nothing linked to them, because nothing knew which existed.
+    """
     directory = _runs_dir(request)
-    return JSONResponse({"runs": all_runs(directory), "latest": latest_run(directory)})
+    reports = request.app.state.reports_dir
+    have = sorted(p.stem for p in reports.glob("*.html")) if reports.is_dir() else []
+    return JSONResponse({"runs": all_runs(directory),
+                         "latest": latest_run(directory),
+                         "reports": have})
 
 
 async def run_events(request: Request) -> Response:

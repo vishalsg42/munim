@@ -32,6 +32,7 @@ from munim.env import load as load_env
 from munim.registry import ClientRecord, Registry
 from munim.remote.session import NeedsLogin, NoRemoteServer
 from munim.report import write as write_report
+from munim.room.link import links as room_links
 from munim.runlog import RunLog, all_runs, new_run_id
 from munim import words
 
@@ -351,7 +352,7 @@ def build_server(backend=None, registry=None, runs_dir=None,
             "needs_attention": needs_attention,
             "unreachable": unreachable,
             "run_id": log.run_id,
-            "report": f"http://127.0.0.1:8977/reports/{log.run_id}",
+            **room_links(log.run_id),
         }
 
     # The other half of read across, write within (D5). Naming the client is
@@ -704,7 +705,10 @@ def build_server(backend=None, registry=None, runs_dir=None,
         """Run the deterministic check catalogue against one client or one domain.
 
         Returns the failing checks with an owner-facing sentence for each, counts
-        of what was checked and skipped, a `run_id`, and a link to a report. DNS
+        of what was checked and skipped, a `run_id`, and `report_file`, the path
+        the report was written to. `watch` and `report` are URLs and are present
+        only when the control room is actually running, because a link nobody is
+        serving is worse than no link. DNS
         decides pass or fail, never a model; with agents on, a model adds the
         explanation and nothing else.
 
@@ -748,8 +752,8 @@ def build_server(backend=None, registry=None, runs_dir=None,
             "checked": sum(1 for r in results if r.status != "skip"),
             "not_applicable": sum(1 for r in results if r.status == "skip"),
             "failing": [{"check": r.check, "says": r.human_text} for r in failures],
-            "report": f"http://127.0.0.1:8977/reports/{log.run_id}",
             "report_file": str(report),
+            **room_links(log.run_id),
         }
 
     @server.tool()
@@ -768,6 +772,10 @@ def build_server(backend=None, registry=None, runs_dir=None,
         and waits for a person. Approve it in the control room, or call
         `apply_mail_setup` with `approved=true`. Creating a record that is
         absent is not a judgement call and does not stop.
+
+        `report_file` is always written. `watch` and `report` are URLs into the
+        control room and appear only when it is running; if they are missing,
+        `munim room` starts it and `munim approve` answers without it.
 
         With agents off the checks still run and their findings still stand,
         exactly as `check` degrades: only the repair needs a model.
@@ -794,9 +802,8 @@ def build_server(backend=None, registry=None, runs_dir=None,
         report = write_report(log, domain=target_domain, business=record.name,
                               out_dir=reports)
         return {**shaped,
-                "report": f"http://127.0.0.1:8977/reports/{log.run_id}",
                 "report_file": str(report),
-                "watch": "http://127.0.0.1:8977"}
+                **room_links(log.run_id)}
 
     @server.tool()
     def launch_status(

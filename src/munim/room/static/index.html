@@ -194,6 +194,17 @@
       #lines .seq { color: var(--stone-300); }
       #lines .stage { color: var(--stone-400); }
 
+      /* The picker and the report link sit beside the live dot because they
+         answer the same question: which run am I looking at, and where is the
+         rest of it. Quiet by default; this is not the point of the page. */
+      .status select, .status a {
+        font: inherit; font-size: 12px; color: var(--stone-500);
+        background: none; border: 1px solid var(--stone-200);
+        border-radius: 6px; padding: 2px 6px; margin-right: 10px;
+      }
+      .status a { text-decoration: none; }
+      .status select:hover, .status a:hover { color: var(--ink); }
+
       #empty { display: grid; place-items: center; padding: 128px 32px; text-align: center; }
       #empty .a { color: var(--stone-500); }
       #empty .b { margin-top: 8px; font-size: 13px; color: var(--stone-400); }
@@ -204,13 +215,20 @@
       <div class="brand">
         <b>Munim</b><span>multi-account MCP server</span>
       </div>
-      <span class="status"><i class="dot" id="dot"></i><span id="badge">waiting</span></span>
+      <span class="status">
+        <a id="report" href="#" hidden>report</a>
+        <select id="runs" title="which run to watch">
+          <option value="latest">latest run</option>
+        </select>
+        <i class="dot" id="dot"></i><span id="badge">waiting</span>
+      </span>
     </header>
 
     <div id="empty">
       <div>
-        <p class="a">No launch running.</p>
-        <p class="b">Ask your coding agent to launch a client. This window follows along.</p>
+        <p class="a">Nothing running.</p>
+        <p class="b">Ask your coding agent to check or fix a client. This window
+          follows along. Earlier runs are in the list above.</p>
       </div>
     </div>
 
@@ -227,7 +245,7 @@
 
     <script type="module">
       import {
-        CHECKS, CHECK_LABELS, STAGES, CHECK_ONLY, initialState, reduce,
+        CHECKS, CHECK_LABELS, STAGES, initialState, reduce, shape,
       } from "./reduce.mjs";
 
       const $ = (id) => document.getElementById(id);
@@ -266,12 +284,16 @@
         $("main").hidden = !live;
         if (!live) return;
 
-        $("eyebrow").textContent =
-          state.stagesSeen.length > 0 && state.stagesSeen.every((s) => CHECK_ONLY.includes(s))
-            ? "Checking"
-            : "Launching";
+        // What this run is, decided by what it emitted. A disconnect is not a
+        // launch and has no stages to draw, so it says so and the rail and the
+        // chips stay off the screen rather than sitting grey.
+        const look = shape(state);
+        $("eyebrow").textContent = look.eyebrow;
+        $("stages").hidden = !look.rail;
+        $("chips").hidden = !look.chips;
         $("client").textContent = state.stagesSeen.includes("across")
           ? "Across every client" : text(state.client);
+        showReport(state.runId);
 
         for (const stage of STAGES) {
           const done = state.stagesDone.includes(stage);
@@ -440,18 +462,80 @@
         render(state);
       }
 
+      // ---- which run -------------------------------------------------------
+      //
+      // The server has served /api/runs since the first day and nothing ever
+      // called it, so the page could only ever show the newest run: 493 of them
+      // in the log and 492 unreachable. The report pages had the same problem
+      // from the other end, written to disk, served at /reports/<id>, and linked
+      // from nowhere.
+
+      // Which runs have a report. The link is hidden rather than 404ing,
+      // because a link that fails teaches people not to click the one that works.
+      let reports = new Set();
+
+      function showReport(runId) {
+        const link = $("report");
+        const has = runId !== null && reports.has(runId);
+        link.hidden = !has;
+        if (has) link.href = "/reports/" + encodeURIComponent(runId);
+      }
+
+      // Newest first, and only a screenful: this is for finding the run you
+      // just did, not for browsing a year of them.
+      async function refreshRuns() {
+        let data;
+        try {
+          data = await (await fetch("/api/runs")).json();
+        } catch (err) {
+          return;  // the list is a convenience; the stream is the page
+        }
+        reports = new Set(data.reports || []);
+        const picker = $("runs");
+        const keep = picker.value;
+        picker.replaceChildren();
+        picker.appendChild(new Option("latest run", "latest"));
+        for (const id of (data.runs || []).slice().reverse().slice(0, 50)) {
+          picker.appendChild(new Option(id, id));
+        }
+        picker.value = keep;
+        showReport(state.runId);
+      }
+
+      // ---- the stream ------------------------------------------------------
+      //
       // Replay then follow. The file holds the history; SSE has none, which is
       // why the room can be opened mid-launch or refreshed without losing a run.
-      const source = new EventSource("/api/runs/latest/events");
-      source.onopen = () => dispatch({ type: "connected", value: true });
-      source.onerror = () => dispatch({ type: "connected", value: false });
-      source.addEventListener("launch", (m) =>
-        dispatch({ type: "event", event: JSON.parse(m.data) }));
-      // The server closes the stream once the run is done. An EventSource
-      // treats any close as a dropped connection and reconnects, which would
-      // flip the badge back to "live" on a run that finished minutes ago.
-      source.addEventListener("done", () => source.close());
+      let source = null;
 
+      function connect(which) {
+        if (source) source.close();
+        // A new run means a new screen. Without the reset the previous run's
+        // chips, cards and log lines stay up under the new run's heading.
+        $("lines").replaceChildren();
+        rendered = 0;
+        dispatch({ type: "reset" });
+
+        source = new EventSource("/api/runs/" + encodeURIComponent(which) + "/events");
+        source.onopen = () => dispatch({ type: "connected", value: true });
+        source.onerror = () => dispatch({ type: "connected", value: false });
+        source.addEventListener("launch", (m) =>
+          dispatch({ type: "event", event: JSON.parse(m.data) }));
+        // The server closes the stream once the run is done. An EventSource
+        // treats any close as a dropped connection and reconnects, which would
+        // flip the badge back to "live" on a run that finished minutes ago.
+        source.addEventListener("done", () => {
+          source.close();
+          // A run that just finished is a run that may now have a report, and
+          // the next run may already exist.
+          refreshRuns();
+        });
+      }
+
+      $("runs").addEventListener("change", (e) => connect(e.target.value));
+
+      refreshRuns();
+      connect("latest");
       render(state);
     </script>
   </body>

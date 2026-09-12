@@ -65,11 +65,59 @@ export const CHECK_LABELS = {
 export const STAGES = ["verify", "diagnose", "repair", "dns", "mail", "recheck"];
 
 // A check run emits `verify`, and `diagnose` too once something fails and the
-// agent is asked to explain it. Neither is deploying anything, so calling
-// either a launch would claim work the run never did.
+// agent is asked to explain it. Neither repairs anything, so calling either a
+// repair would claim work the run never did.
 export const CHECK_ONLY = ["verify", "diagnose"];
 
+// Runs that are one action rather than a pipeline.
+//
+// The rail above is the `check` and `fix` path and nothing else, but it was
+// drawn for every run, and most runs are not that path: of the 493 recorded so
+// far, 344 are a disconnect and 105 are a single provider tool call. Those runs
+// drew six grey cells and sixteen grey chips describing work that was never
+// going to happen, under the word "Launching", which was not what they were
+// doing either.
+//
+// So a run whose stages are all in here has no rail and no chips. There is no
+// sequence to draw and nothing to check, and drawing them anyway is the same
+// lie as a permanently grey cell, told about a whole run instead of one step.
+// The value is what the run is, in the words an owner would use.
+export const ERRANDS = {
+  disconnect: "Removing credentials",
+  passthrough: "Running a provider tool",
+  api: "Calling a provider API",
+  across: "Asking every client",
+  work: "Working on one client",
+};
+
+/** What the page should draw for this run: the heading, and whether the rail
+ *  and the chips belong on screen at all.
+ *
+ *  Derived from the stages the run has actually emitted, so a run is described
+ *  by what it did rather than by which tool was called. A run that has emitted
+ *  nothing yet gets the rail, because the common case is a check about to
+ *  start and an empty screen reads worse than one waiting.
+ */
+export function shape(state) {
+  const seen = state.stagesSeen;
+  if (seen.length > 0 && seen.every((s) => s in ERRANDS)) {
+    return { eyebrow: ERRANDS[seen[0]], rail: false, chips: false };
+  }
+  // A stage that was reached and deliberately not run does not get to name the
+  // run. A `fix` on a domain with nothing repairable reaches `repair`, is
+  // refused by the edge, and renders the cell dashed with a reason: calling
+  // that run "Repairing" over a rail that says the repair did not happen is the
+  // rail and the heading disagreeing in public.
+  const ran = seen.filter((s) => !state.stagesOff.includes(s));
+  const worked = ran.some((s) => !CHECK_ONLY.includes(s));
+  return { eyebrow: worked ? "Repairing" : "Checking", rail: true, chips: true };
+}
+
 export const initialState = {
+  // The run being watched. The page follows `latest` by default and can be
+  // pointed at any run in the log, so "which run is this" stops being
+  // something only the server knows.
+  runId: null,
   client: null, stage: null, stagesDone: [], stagesSeen: [], stagesOff: [],
   checks: {},
   finding: null, awaitingConfirm: null, escalated: null,
@@ -98,6 +146,7 @@ export function reduce(state, action) {
   const e = action.event;
   const next = {
     ...state,
+    runId: e.run_id || state.runId,
     client: e.client || state.client,
     // Every stage the run has touched, not just the completed ones. A run that
     // only ever touches `verify` is a check, not a launch, and the room says so.

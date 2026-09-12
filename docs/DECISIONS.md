@@ -1345,3 +1345,71 @@ Two guards so the orphan class cannot recur: every `check_*` in `adapters/` must
 be named somewhere outside `adapters/`, and every hosting check must have a chip
 in the room. The chip list is hand-maintained JavaScript and the checks are
 Python; nothing else connected them.
+
+---
+
+## D38: The room describes the run it is watching, not the run it hoped for
+
+The room drew one shape for every run: a six step rail, sixteen check chips,
+and the word "Launching". Most runs are not that shape. Of the 493 in the log,
+344 are a disconnect and 105 are a single provider tool call, and every one of
+them rendered as six grey cells and sixteen grey chips describing work that was
+never going to happen, under a heading naming work it was not doing.
+
+That is the same fault as the seven ghost chips and the `deploy` and `domain`
+ghost cells, told about a whole run instead of one step, and it survived both
+of those fixes because both were fixed by hand-writing the producers into a
+list. The list then went wrong in the other direction: it named six stages,
+`src/` emits eleven, and the five it omitted are the ones most runs are made
+of.
+
+**Two kinds of run, and the room says which it has.** A `check` or a `fix` is a
+pipeline, and gets the rail and the chips. A disconnect, a provider tool call, a
+raw API call, a cross-client question, and `work_on_client` are one action each.
+They get a heading saying what they are and no rail at all, because there is no
+sequence to draw and inventing one is the lie the grey cells were.
+
+**The heading is derived from what the run emitted**, not from which tool was
+called, so it cannot disagree with the rail underneath it. A stage that was
+reached and deliberately not run does not get to name the run either: a `fix`
+whose repair edge refused says "Checking" over a rail that shows the repair
+cell dashed, rather than "Repairing" over a rail saying no repair happened.
+
+**The list is read out of the source now.** `tests/room/reduce.test.mjs` scans
+`src/munim/**/*.py` for every way a stage gets set and asserts that each one is
+either a cell in the rail or a declared single-action run. A hand-written list
+of producers is a claim about the code that ages the moment someone adds a
+stage, and this project has now shipped that same claim wrong three times. One
+more test asserts the scan found something, because a regex that matches
+nothing makes every assertion built on it pass forever.
+
+## D39: A link into the control room only when the control room is up
+
+`fix` returned `watch: http://127.0.0.1:8977` on every call and `check` and
+`audit_all_clients` returned a `report` URL the same way. The room is a separate
+process, deliberately, so that it outlives the MCP server the coding agent kills
+on every reconnect. Nobody starts it for you. Most of those links went nowhere.
+
+A link that fails teaches people not to click the one that works, and it costs
+more than the missing link saves. The links are absent rather than empty, since
+a caller checks for the key. `report_file` is a local path, is always written,
+and is always true.
+
+One place knows where the room is, which is what makes `--port` and
+`$MUNIM_ROOM_PORT` mean anything: the three inline URLs could not follow a port
+that moved. A test asserts no tool builds that URL by hand again.
+
+## D40: Every run is reachable, and so is its report
+
+The room could only ever show the newest run. `GET /api/runs` has returned all
+of them since the first day and nothing called it: the page subscribed to
+`/api/runs/latest/events` and that was the whole of its navigation. 493 runs,
+492 of them unreachable.
+
+The reports had the same fault from the other end. They are written to disk,
+they are served at `/reports/{run_id}`, and nothing linked to one, because
+nothing knew which existed. `/api/runs` now says which do, so the link is hidden
+rather than offered and broken.
+
+A picker of the fifty newest runs, and a report link when there is a report.
+This is navigation, not a dashboard: it is for finding the run you just did.

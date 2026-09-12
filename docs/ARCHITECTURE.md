@@ -159,6 +159,18 @@ button looks exactly like a working one. Both are fixed (D36, D37), and both now
 have a guard, because a rule this file states and nothing enforces is a rule
 that gets broken again.
 
+**Present and inert has a mirror image: built, served, and reachable from
+nothing.** `GET /api/runs` listed every run and no page called it, so the room
+could only show the newest of 493. The reports were written to disk and served
+at `/reports/{run_id}` and nothing linked to one. Both are now in the page
+(D40). The rail had the third version of the fault, drawing six steps and
+sixteen checks over runs that were going to emit neither, which is why the room
+now describes the run it has rather than the run it expected (D38).
+
+**A URL is a promise that something answers it.** The room is a separate process
+nobody starts for you, so tool results name it only when it is listening
+(D39).
+
 ## `fix`: three agents, and a boundary that is not a prompt
 
 `check` explains. `fix` repairs, and because repairing changes something in

@@ -1,7 +1,9 @@
 // Run with: node --test tests/room/ - no install, no build, no dependencies.
 import assert from "node:assert";
 import { test } from "node:test";
-import { CHECKS, CHECK_LABELS, STAGES, initialState, reduce } from "../../src/munim/room/static/reduce.mjs";
+import {
+  CHECKS, CHECK_LABELS, STAGES, ERRANDS, initialState, reduce, shape,
+} from "../../src/munim/room/static/reduce.mjs";
 
 
 const ev = (seq, kind, detail = {}, stage = "mail") => ({
@@ -163,22 +165,65 @@ test("every chip has a label", () => {
   assert.deepEqual(unlabelled, []);
 });
 
-// ---- the rail, pinned the same way the chips are -------------------------
+// ---- the rail, pinned against the source rather than against a list ------
 //
 // The chip list was pinned against its producers after seven ghost cells shipped
-// and sat grey on camera. The stage rail had exactly the same bug and nobody
-// looked: it declared `deploy` and `domain`, and **nothing in src/ has ever
-// emitted either**, across every run in the log. Two permanently grey cells,
-// reading as steps that hung. Same rule, same test.
+// and sat grey on camera. The stage rail had exactly the same bug: it declared
+// `deploy` and `domain` and nothing in src/ emitted either. That was fixed by
+// writing the producers down here by hand, which fixed the instance and left
+// the class alone, and the hand-written list then quietly went wrong in the
+// other direction: it named six stages, src/ emits eleven, and the five it
+// omitted are the ones most runs are made of. A run of any of them drew six
+// grey cells and sixteen grey chips for work that was never going to happen.
+//
+// So the list is read out of the source now. A stage that anything emits has to
+// be somewhere the page can show it: a cell in the rail, or an errand, which is
+// a run with no pipeline to draw. Adding a stage and forgetting the room fails
+// here rather than on camera.
 
-const STAGES_EMITTED = [
-  "dns",       // adapters/cloudflare.py
-  "mail",      // agent/mailplan.py, agent/mail.py, server.py
-  "verify",    // agent/launch.py, server.py
-  "diagnose",  // agent/launch.py, agent/watch.py (the triage node)
-  "repair",    // agent/gate.py, agent/graph.py, agent/watch.py
-  "recheck",   // agent/watch.py (the recheck node)
-];
+import fs from "node:fs";
+import path from "node:path";
+
+function pythonFiles(dir) {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      return entry.name === "__pycache__" ? [] : pythonFiles(full);
+    }
+    return entry.name.endsWith(".py") ? [full] : [];
+  });
+}
+
+/** Every stage name src/ can write into a run log.
+ *
+ *  Three ways one gets set, all of them literal at the call site:
+ *  `stage="mail"`, a default `stage: str = "api"`, and the node-to-stage map in
+ *  agent/watch.py, which is how the graph's nodes are named in the log.
+ */
+function stagesInSource() {
+  const found = new Set();
+  for (const file of pythonFiles(path.join("src", "munim"))) {
+    const source = fs.readFileSync(file, "utf8");
+    for (const m of source.matchAll(/\bstage(?::\s*str)?\s*=\s*"([a-z_]+)"/g)) {
+      found.add(m[1]);
+    }
+    for (const map of source.matchAll(/STAGE\s*=\s*\{([^}]*)\}/g)) {
+      for (const m of map[1].matchAll(/:\s*"([a-z_]+)"/g)) found.add(m[1]);
+    }
+  }
+  return [...found].sort();
+}
+
+const STAGES_EMITTED = stagesInSource();
+
+test("the scan finds the stages, so the two tests below mean something", () => {
+  // A regex that matched nothing would make both of them pass forever.
+  assert.ok(STAGES_EMITTED.length >= 8,
+    `only found ${STAGES_EMITTED.join(", ")}, the scan is broken`);
+  for (const stage of ["verify", "diagnose", "repair", "mail", "disconnect"]) {
+    assert.ok(STAGES_EMITTED.includes(stage), `scan missed ${stage}`);
+  }
+});
 
 test("every stage in the rail has something that emits it", () => {
   const ghosts = STAGES.filter((s) => !STAGES_EMITTED.includes(s));
@@ -186,10 +231,75 @@ test("every stage in the rail has something that emits it", () => {
     `nothing writes these stages, so their cells can only ever be grey: ${ghosts.join(", ")}`);
 });
 
-test("every stage that is emitted has a cell in the rail", () => {
-  const missing = STAGES_EMITTED.filter((s) => !STAGES.includes(s));
-  assert.deepEqual(missing, [],
-    `emitted but never shown: ${missing.join(", ")}`);
+test("every stage that is emitted is either a cell or an errand", () => {
+  const homeless = STAGES_EMITTED.filter(
+    (s) => !STAGES.includes(s) && !(s in ERRANDS));
+  assert.deepEqual(homeless, [],
+    `emitted and the room has nowhere to put it: ${homeless.join(", ")}`);
+});
+
+test("nothing is both a step in the rail and a run of its own", () => {
+  const both = STAGES.filter((s) => s in ERRANDS);
+  assert.deepEqual(both, [], `both a cell and an errand: ${both.join(", ")}`);
+});
+
+// ---- what the page draws for a run ---------------------------------------
+
+const seeing = (...stages) => stages.reduce(
+  (s, stage) => reduce(s, {
+    type: "event",
+    event: { run_id: "r", seq: 1, ts: 0, client: "Acme", stage,
+             kind: "stage_start", human_text: "x", detail: {} },
+  }), initialState);
+
+test("a run that only checks says so", () => {
+  const look = shape(seeing("verify", "diagnose"));
+  assert.equal(look.eyebrow, "Checking");
+  assert.ok(look.rail && look.chips);
+});
+
+test("a run that repairs says so", () => {
+  assert.equal(shape(seeing("verify", "diagnose", "repair")).eyebrow, "Repairing");
+});
+
+test("a disconnect is not a launch and has no rail to draw", () => {
+  const look = shape(seeing("disconnect"));
+  assert.equal(look.eyebrow, "Removing credentials");
+  assert.equal(look.rail, false);
+  assert.equal(look.chips, false);
+});
+
+test("one provider tool call is not a launch either", () => {
+  assert.equal(shape(seeing("passthrough")).eyebrow, "Running a provider tool");
+});
+
+test("a repair that was switched off does not get to call itself one", () => {
+  let s = seeing("verify", "diagnose", "repair");
+  s = reduce(s, {
+    type: "event",
+    event: { run_id: "r", seq: 9, ts: 0, client: "Acme", stage: "repair",
+             kind: "observation", human_text: "agents are off",
+             detail: { agents: "off" } },
+  });
+  assert.equal(shape(s).eyebrow, "Checking");
+  assert.ok(shape(s).rail, "the rail still shows why it stopped");
+});
+
+test("a run that has emitted nothing yet still gets the rail", () => {
+  const look = shape(initialState);
+  assert.equal(look.eyebrow, "Checking");
+  assert.ok(look.rail);
+});
+
+test("an errand followed by real work stops being an errand", () => {
+  // `across` is an errand on its own. A run that then checks something has a
+  // pipeline again, and hiding it would be the same lie the other way round.
+  assert.ok(shape(seeing("across", "verify")).rail);
+});
+
+test("the run being watched is remembered, so the report can be linked", () => {
+  const s = seeing("verify");
+  assert.equal(s.runId, "r");
 });
 
 // ---- the one interactive element -----------------------------------------

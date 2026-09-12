@@ -286,3 +286,63 @@ async def test_a_mail_plan_without_the_rest_key_returns_the_fix_not_a_traceback(
         "it did not mention the session that does exist"
     assert "REST API" in shaped["error"], "it did not say what this path needs"
     assert shaped["fix"] == 'munim connect "Acme Ltd" resend --token'
+
+
+# ---- links into the control room ----------------------------------------
+#
+# The room is a separate process nobody starts for you, so most tool calls
+# happen with nothing listening. `check` still returned a `report` URL and `fix`
+# still returned `watch`, both pointing at a port with nothing behind it.
+
+async def test_check_offers_no_room_links_when_the_room_is_down(tmp_path, monkeypatch):
+    from munim.checks import dns as checks
+    monkeypatch.setattr(checks, "query", lambda *a, **k: [])
+
+    async def _no_reachability(domain):
+        return []
+    monkeypatch.setattr(checks, "run_reachability_async", _no_reachability)
+    monkeypatch.setattr("munim.room.link.is_up", lambda timeout=0.2: False)
+
+    server, _, _ = _server(tmp_path)
+    result = await server.call_tool("check", {"target": "acme.example"})
+    body = result[1] if isinstance(result, tuple) else result
+
+    assert "127.0.0.1" not in str(body), "offered a link to a room that is down"
+    # The file is written whatever the room is doing, and this is the line that
+    # has to stay true for the links to be droppable at all.
+    assert "report_file" in str(body)
+
+
+async def test_check_offers_them_when_it_is_up(tmp_path, monkeypatch):
+    from munim.checks import dns as checks
+    monkeypatch.setattr(checks, "query", lambda *a, **k: [])
+
+    async def _no_reachability(domain):
+        return []
+    monkeypatch.setattr(checks, "run_reachability_async", _no_reachability)
+    monkeypatch.setattr("munim.room.link.is_up", lambda timeout=0.2: True)
+
+    server, _, _ = _server(tmp_path)
+    result = await server.call_tool("check", {"target": "acme.example"})
+
+    assert "/reports/" in str(result)
+
+
+def test_no_tool_builds_the_room_url_by_hand():
+    """One place knows where the room is.
+
+    Three tool results built the URL inline, so the port that `munim-room
+    --port` and $MUNIM_ROOM_PORT actually move was hardcoded in three places
+    that could not move with it.
+    """
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "src" / "munim"
+    allowed = {root / "room" / "link.py", root / "room" / "server.py",
+               root / "cli.py"}
+    offenders = [
+        str(path.relative_to(root))
+        for path in root.rglob("*.py")
+        if path not in allowed and "127.0.0.1:8977" in path.read_text()
+    ]
+    assert offenders == [], f"hardcoded room URL in: {', '.join(offenders)}"
