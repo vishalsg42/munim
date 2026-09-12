@@ -219,7 +219,7 @@ Plus **0.6 bonus points for three builder.aws.com posts**. Write all three.
 **Day 5–8**
 - [ ] Product UI, built with the design skill invoked *before* the first component.
 - [ ] Evals with fixed fixtures and a printed failure table, per Agentic Cinema's `RESULTS.md`.
-- [ ] builder.aws.com post #1.
+- [x] builder.aws.com post #1. Published 2026-09-12, see `docs/posts/README.md`.
 - [ ] Adversarial review of the running code against the real schemas, D28's lesson: run
       `tools/list` before writing anything that constrains a tool.
 
@@ -228,7 +228,7 @@ Plus **0.6 bonus points for three builder.aws.com posts**. Write all three.
 - [ ] Devpost text: problem, audience, how it works, why it matters.
 - [ ] Public repo, MIT or Apache detectable in About. README with setup instructions.
 - [ ] Live demo URL up, spend alarm set, cost capped for the run to 2026-10-08.
-- [ ] builder.aws.com posts #2 and #3.
+- [x] builder.aws.com posts #2 and #3. Published 2026-09-12, see `docs/posts/README.md`.
 - [ ] Disclose AI tooling and any pre-existing code.
 - [ ] **Post-deadline freeze.** Same discipline as Passbook: after 2026-09-14 17:00 PDT, do not
       touch the repo, the entry or the deployment until judging ends 2026-10-08. Fork to keep
