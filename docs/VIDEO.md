@@ -10,175 +10,268 @@ costs nothing and is the difference between a recording and something authored.
 **Required by the rules (R8):** the pitch must state (1) the problem, (2) who it is for,
 (3) why it matters. All three land in the first 30 seconds and again in the last 20.
 
+**Target 4:40, hard cap 5:00.** The previous script ran to exactly 5:00 and had no room to
+cut when a beat ran long, which is the same as having no margin at all.
+
+---
+
+## Before you record: what has to be true
+
+Each of these was checked on 2026-09-13. Anything not on this list is not in the script.
+
+- [ ] `git log` on main shows `42523a7` or later, and `uv run pytest -q` passes.
+- [ ] The control room is running: `munim-room`, then `http://127.0.0.1:8977` answers.
+- [ ] `munim config` shows `agents on` and a model host that answers.
+- [ ] The client you film is connected. `munim clients` shows which, and
+      `can_reach` decides whether a repair can run at all.
+- [ ] **Decide whose domain is on camera.** See "The one thing to decide" below.
+
+---
+
+## The one thing to decide
+
+The repair beat needs a domain with a real fault that Munim can fix. Today there is exactly
+one, and it belongs to a real client:
+
+```
+balajiroofingindustries.com
+  FAIL dkim_present   Your mail is not signed, so receivers cannot prove it came from you.
+  FAIL dmarc_policy   Anyone can still send mail pretending to be you.
+```
+
+`dkim_present` is repairable. `dmarc_policy` is not, and the catalogue says so rather than
+pretending. But that client is connected to Cloudflare and not to Resend, so the repair
+edge refuses until `munim connect "<client>" resend` is run in a browser.
+
+**Three ways to shoot it, in order of preference:**
+
+1. **Ask the client.** One sentence of permission and the video shows a real fault on a
+   real domain being fixed. Strongest footage available and it needs no staging.
+2. **Film the refusal instead.** `fix` on that client names the missing connection and
+   stops. The submission checklist is blunt about this: footage of a product refusing
+   honestly is usually the most convincing you have. Costs the repair beat, keeps the
+   video entirely truthful, and can be shot in the next ten minutes.
+3. **Use a domain you own.** `grafison.com.au` passes all sixteen checks, so it shows the
+   healthy path and the honest refusal and no repair.
+
+Do not manufacture a fault to film. A removed record you then republish is staged, it will
+read as staged, and the production note below about breaking things the way they actually
+break exists because of exactly this temptation.
+
 ---
 
 ## Script
 
-### 0:00–0:14  Cold open. A spam folder.
+### 0:00–0:12  Cold open. A spam folder.
 
-*On screen:* Gmail spam folder, full screen. One message: **Invoice #1042, Ivy & Fern
-Studio.** No logo, no title card.
+*On screen:* a spam folder, full screen. One message: an invoice. No logo, no title card.
 
 > "This invoice sat in a customer's spam folder for six weeks.
-> The website was fine. The domain was fine. One DNS record was wrong.
+> The website was fine. The domain was fine. One DNS record was wrong,
 > and nothing broke. That is exactly why nobody found it."
 
-*Why first:* the problem, stated in human terms, before any software. Eight seconds to the
-hook.
+*The problem, in human terms, before any software. Eight seconds to the hook.*
 
-### 0:14–0:34  Who this is for.
+### 0:12–0:30  Who this is for.
 
-*On screen:* the control room at rest. Eleven client cards, different providers connected,
-different ages.
+*On screen:* a terminal. `munim clients`. One row per client, with what each one is
+connected to.
 
-> "Priya looks after the websites and email for eleven small businesses.
-> A bakery, a dentist, a yoga studio. She does not own those accounts.
-> they do. She just keeps them working."
+> "Priya looks after the websites and email for a dozen small businesses.
+> A bakery, a dentist, a roofing company. She does not own those accounts.
+> They do. She just keeps them working."
 
-*Covers R8 (2) and (3): who it is for, and why it matters: eleven businesses whose mail
-either arrives or does not.*
+*Covers R8 (2) and (3). Say the number you can actually show. If the estate on screen has
+four clients, say a dozen only if a dozen are on screen.*
 
-### 0:34–0:52  The wall.
+### 0:30–0:46  The wall.
 
-*On screen:* Vercel, logged in as one client. Log out. Log in as another. Cut back.
+*On screen:* a provider dashboard, logged in as one client. Log out. Log in as another.
 
 > "Every one of these providers allows one login at a time.
-> So the job is: log out, log in, log out. And the work itself crosses accounts.
-> what one company's dashboard gives you has to be typed into another's."
+> So the job is: log out, log in, log out. And the work crosses accounts,
+> because what one company's dashboard gives you has to be typed into another's."
 
-*Keep this fast. Friction shown too long becomes the viewer's friction.*
+*Keep it fast. Friction shown too long becomes the viewer's friction.*
 
-### 0:52–1:12  It is one MCP server.
+### 0:46–1:04  It is one MCP server.
 
-*On screen:* Claude Code. `claude mcp list` → `munim: ✔ Connected`. Then typed in plain
-English, not a command:
-
-```
-munim config ai on
-which of my clients has an unverified sending domain?
-```
-
-Answers span containers.
+*On screen:* Claude Code. `claude mcp list` → `munim: ✔ Connected`. Then `munim config ai on`.
 
 > "It is one MCP server, added once to whatever coding agent you already use.
-> Each client is a container. You can read across all of them at once,
-> which is a question she has never been able to ask before."
+> Each client is a container, and the agent is off until you turn it on."
 
-*The question changed, and the reason is worth knowing before re-scripting it.
-It used to be "which of my clients has a domain expiring this quarter?", which
-reads better and cannot be answered: registration expiry is not published by any
-provider's MCP server, and a cross-client toolset only holds tools the provider
-marks read-only. Resend's `list-domains` and `get-domain` are annotated and do
-answer this one. It is also the better story, because an unverified sending
-domain is the silent invoice failure the rest of the video is about, so the
-opening question and the closing repair become one thread.*
+*`munim config ai on` is on screen on purpose. Agents are off in a fresh install because
+Munim is local by default, and a tool that needs a model should say so rather than
+pretend. Show it; do not edit around it.*
 
-*`munim config ai on` is the first line on purpose. Agents are off in a fresh
-install, because Munim is local by default and the privacy page says so, and a
-tool that needs a model says so and names that command rather than pretending.
-Show it being turned on; do not edit around it.*
+### 1:04–1:24  Connect once. There is no second credential.
 
-*Type a sentence, never a magic word: a command reads as a script and undercuts the MCP claim.*
+*On screen:* `munim connect "<client>" cloudflare`. A browser opens, the provider's own
+consent screen, approve, the terminal confirms. Then `munim clients` again, showing the
+provider now connected.
 
-### 1:12–1:28  Write within.
+> "She connects the way she already logs in: their account, their consent screen,
+> in a browser. There is no API key to paste, and no second credential to keep
+> somewhere. The session she just made is the one the repair uses."
 
-*On screen:* typed, *"check ivyandfern.co.uk for Ivy & Fern Studio."* That card expands to
-fill the screen; the other ten dim and show a lock.
+*This beat is new and it is the one most likely to be underrated. Until 2026-09-12 the
+repair path reached both providers over their REST APIs, which refuse the token their own
+MCP servers issue, so connecting a client and repairing a client needed two different
+credentials for the same account. Both were true and together they undid the product's
+central claim. `Container.http` now sends those requests as the provider's own MCP tool
+calls (D41). Keep the shot on the consent screen: it is somebody else's account saying yes,
+which is the whole argument.*
+
+### 1:24–1:42  Read across.
+
+*On screen:* typed in plain English, not a command:
+
+```
+which of my clients has a stale deployment?
+```
+
+The answer spans containers and names clients.
+
+> "One question, every client at once. She has never been able to ask that,
+> because the answer lives in a dozen accounts she can only open one at a time."
+
+*Type a sentence, never a magic word: a command reads as a script and undercuts the MCP
+claim. Pick a question the connected providers can actually answer. Cross-client tools are
+built only from tools the provider marks read-only, and Cloudflare marks none of its three
+that way, so a Cloudflare question returns nothing and says why. Vercel and Resend answer.*
+
+### 1:42–1:56  Write within.
+
+*On screen:* typed, *"check <domain> for <client>."* The room fills with that one client.
 
 > "Writing is different. A change names one client,
 > and only that client's credentials are loaded. The others are not dimmed for show.
-> they are not in the room."
+> They are not in the room."
 
-*The design moment. Hold the transition a beat; it explains read-across/write-within with
-no narration.*
+*The design moment. Hold the transition a beat; it explains read-across and write-within
+with no narration.*
 
-### 1:28–2:20  The launch.
+### 1:56–2:30  The checks.
 
-*On screen:* stage rail: deploy → domain → dns. Real values crossing from one provider into
-another. One **labelled** time-cut for propagation, with the on-screen clock jumping to match.
+*On screen:* the control room. The stage rail lights `verify`, then the chip grid appears
+**all at once**, greyed, and lights up in place. No scrolling, no insertion.
 
-> "Deploy the site. Point the domain. Vercel hands back records
-> that have to be written into Cloudflare: a different company, a different login.
-> That handoff is the job."
+> "Then the checks. Sixteen of them, and none are difficult.
+> That is the point. Nobody runs sixteen checks by hand
+> on every domain for every client, so nobody runs them at all."
 
-### 2:20–2:56  The checks.
+*Sixteen, not thirteen: thirteen about DNS, three about hosting, plus one per connected
+provider asking whether that account is still reachable. The live run on 2026-09-13 read
+`16 of 16 checks passed`. Count what is on screen and say that number.*
 
-*On screen:* Resend emits DKIM and SPF. The chip grid appears **all at once**, greyed, then
-lights up in place. No scrolling, no insertion.
+### 2:30–2:52  The moment.
 
-> "Then the checks. None of them are difficult.
-> That is the point. Nobody runs thirteen checks by hand
-> on every launch for every client. So nobody runs them at all."
-
-### 2:56–3:18  The moment.
-
-*On screen:* **one chip goes red.** Everything else recedes. A card owns the screen. Raw
-resolver output beneath it, with the resolver named and timestamped.
+*On screen:* **a chip goes red.** Everything else recedes. The finding card owns the
+screen, with the raw resolver output beneath it, the resolver named and timestamped.
 
 > *(two seconds of silence)*
 >
-> "There was already an SPF record on this domain, from the mail provider
-> they used before. Adding a second one does not merge them.
-> Both are ignored, and mail from Ivy & Fern authenticates as neither."
+> "Their mail is not signed. Receivers cannot prove a message really came from them,
+> so it goes where unprovable mail goes."
 
-*Lands at 60%: enough setup behind it, enough runway for the payoff. The only silence in
-the video.*
+*The only silence in the video. Lands just past halfway: enough setup behind it, enough
+runway for the payoff.*
 
-### 3:18–3:48  Judgement, then a person.
+*Two chips are red on the real domain, not one. Say so, and say that the second one is not
+repairable: a DMARC policy set to monitoring is the owner's decision to change, not a
+missing record. A product that names the limit of what it will touch is more convincing
+than one that claims everything.*
 
-*On screen:* the agent returns a **plan**, not a change. Each record with what would happen
-to it: three to create, one to **merge**. The merge line names both policies and the senders
-it keeps. Then it stops, because a plan is all it can do on its own.
+### 2:52–3:26  Judgement, then a person.
 
-The operator approves. The chip turns.
+*On screen:* `fix` runs. The rail moves `verify → diagnose → repair`. The agent returns a
+**plan**, not a change: each record, with what would happen to it and what is there now.
 
-> "It does not add a record. It works out the merge, and then it stops.
+Then the two calls, filmed as two calls:
+
+```
+apply_mail_setup(client="<client>", plan_id="<id>")
+  -> refused: this changes records somebody already published. Re-run with approved=true.
+
+apply_mail_setup(client="<client>", plan_id="<id>", approved=true)
+```
+
+> "It works out what the record should be, and then it stops.
 > Applying it is a second instruction, because this is someone else's live DNS."
 
-*This is the Strands beat, placed at peak attention. Approval appears as a consequence, never
-as the headline.*
+*Film the refusal. It is the product declining to act, on screen, rather than a claim that
+it would. An earlier version of this script showed a confirmation dialog the product could
+not produce, which is the kind of thing found by whoever watches most carefully.*
 
-**Film the two calls, not a dialog box.** `plan_mail_setup` returns the plan;
-`apply_mail_setup` refuses without `approved=true` and says which records it would have
-touched. That refusal is worth a beat of its own: it is the product declining to act, on
-screen, rather than a claim that it would. An earlier version of this script showed a
-confirmation the exposed product could not produce, which is the kind of thing that gets
-found by whoever watches it most carefully.
+*The control room's Approve button is real and works, and it appears only when a change
+would **replace** a record somebody already published. Creating a record that is absent is
+not a judgement call and does not stop, by design. If the fault you film is a missing
+record, the two calls above are the approval beat and the button is not in this video. Do
+not cut to a button that this run did not raise.*
 
-### 3:48–4:16  Proof.
+### 3:26–3:46  Proof.
 
-*On screen:* the chip goes green. Then a **real received email**, headers open, full screen:
-`spf=pass dkim=pass dmarc=pass`.
+*On screen:* the chip turns green on the recheck. Then the record itself, queried from
+outside the product:
 
-> "Not asserted. Sent. This is the message, and those are its headers."
+```
+dig +short TXT resend._domainkey.<domain> @1.1.1.1
+```
 
-*Say the constraint out loud here:*
+> "Not asserted. Published. That is the record, read back from a public resolver,
+> not from anything I wrote."
 
-> "This is a demo estate I own. My clients' real accounts are not in this video.
-> The domain is on screen if you want to check the record yourself."
+*Say the constraint out loud here, and say whichever of these is true:*
 
-*Eight seconds, and it turns the biggest credibility liability into a credibility signal.*
+> "This is a real client's domain, filmed with their permission."
 
-### 4:16–4:42  What the client gets.
+*or*
 
-*On screen:* the site loading on the real domain, padlock visible. Then the **launch report**.
+> "This is a domain I own. No client's real account is in this video."
+
+*Eight seconds, and it turns the biggest credibility liability into a credibility signal.
+Do not claim the first one unless it happened.*
+
+### 3:46–4:04  What the client gets.
+
+*On screen:* the report page, opened from the link in the control room's header.
 
 > "And this is what Priya sends her client. Not a log.
-> 'Your site is live. Your email will reach inboxes.
-> Here is what we checked, and the one thing we fixed.'"
+> 'Here is what we checked, here is the one thing that was wrong,
+> and here is what we did about it.'"
 
-*This is where "a complete product experience" is actually earned, and where the theme is
-answered rather than claimed.*
+*This is where "a complete product experience" is earned rather than claimed. The report
+has been written to disk since the first week and nothing linked to it until 2026-09-12;
+the link in the header is new and it is what makes this shot a click rather than a file
+path.*
 
-### 4:42–4:52  How it works.
+### 4:04–4:22  It says no.
 
-*On screen:* the architecture diagram, held still. No motion.
+*On screen:* `fix` on a healthy domain. The rail lights `verify`, the repair cell renders
+dashed with its reason, and the run finishes.
 
-> "One server. One container per client.
-> The checks are deterministic, so the model cannot argue a failing check into passing.
-> What it does is work out why, and say it to someone who is not technical."
+```
+16 of 16 checks passed
+Not repairing <domain>: nothing is failing, so there is nothing to repair
+```
 
-### 4:52–5:00  Close.
+> "And when there is nothing wrong, it says so and stops.
+> The checks are code, not a model, so it cannot be talked into
+> calling a failing domain healthy, or a healthy one broken."
+
+*The deterministic boundary, shown rather than asserted, and the most convincing
+twenty seconds in the video. The refusal is an edge condition reading the check results:
+the model is not consulted and cannot traverse it.*
+
+### 4:22–4:34  How it works.
+
+*On screen:* the architecture diagram from `ARCHITECTURE.md`, held still. No motion.
+
+> "One server. One container per client. The checks are deterministic.
+> What the model does is work out why, and say it to someone who is not technical."
+
+### 4:34–4:44  Close.
 
 *On screen:* the same invoice, now in the **inbox**. Name and repo URL small beneath.
 
@@ -186,27 +279,54 @@ answered rather than claimed.*
 
 ---
 
+## What was cut, and why
+
+Kept here because the next person to edit this will otherwise put them back.
+
+**The launch sequence (was 1:28 to 2:20, 52 seconds).** It showed a stage rail of
+`deploy → domain → dns` and Vercel handing records to Cloudflare. **No code emits `deploy`
+or `domain`**, across every run ever recorded, and the room stopped drawing those cells on
+2026-09-12 because two permanently grey cells read as steps that hung. There is no launch
+flow in the exposed product: `work_on_client` exists, has never run, and is not something
+to film for the first time on camera.
+
+**The SPF merge as the climax.** It needed a domain carrying two sender policies. No client
+is in that state, `RESULTS.md` scores that fixture unreliable at 1 in 3, and manufacturing
+one is staging. The merge code is real, tested and reachable; it is a thing to write about
+in the Devpost description, not to fake in the video.
+
+**"Eleven client cards" at rest.** The control room has never had client cards. It follows
+one run, and at rest it says "Nothing running". `munim clients` in a terminal is the shot
+that actually exists.
+
+**"Thirteen checks".** It is sixteen.
+
+---
+
 ## Production notes
 
 **Break it the way it actually breaks.** Not a typo'd DKIM value. Nobody makes that
-mistake, so it reads staged. A leftover Google Workspace SPF record with Resend's added
-alongside is a mistake a competent person makes, and the fix requires judgement.
+mistake, so it reads staged. A domain that was never set up for signing in the first place
+is the fault a competent person actually leaves behind.
 
-**Exactly one red chip.** Zero looks scripted. Two looks broken.
+**Keep real latency, make waiting legible.** Sixteen checks resolving in 400ms reads as
+hardcoded. A check that sits at "querying 1.1.1.1" for two seconds, with the resolver
+named, reads as real. Do not normalise stage durations. A repair over MCP sessions is
+slower than over a REST key, because each call opens a session; that is honest and it is
+also why the checks should be on screen while it happens.
 
-**Keep real latency, make waiting legible.** Twenty checks resolving in 400ms reads as
-hardcoded. A check that sits at "querying 1.1.1.1…" for two seconds, with the resolver
-named, reads as real. Do not normalise stage durations.
-
-**Label every cut.** DNS propagation is 30s–5min against a 300-second budget. An on-screen
-"4 minutes later" card with the UI clock jumping to match reads as honest editing. A
-concealed cut, if spotted, reads as fabrication.
+**Label every cut.** An on-screen "four minutes later" card with the UI clock jumping to
+match reads as honest editing. A concealed cut, if spotted, reads as fabrication.
 
 **Never split-screen.** Both halves become illegible after compression. Full-screen one
 thing and cut between them.
 
+**Keep credentials out of frame.** The consent screen at 1:04 is the highest-risk shot in
+the video: plan the crop before you open the browser, and never show a token, an account
+id or a URL carrying either.
+
 **Before recording:** full-screen the app with no browser chrome, real favicon and title,
-do-not-disturb on, cursor hidden except when clicking, `localhost:8977` never in frame.
+do-not-disturb on, cursor hidden except when clicking.
 
 **Record voice separately** and mix under. Room-mic narration over live capture makes
 everything sound like a screen recording rather than a product.
@@ -215,8 +335,8 @@ everything sound like a screen recording rather than a product.
 
 Composed from the same frames, so they cost nothing extra:
 
-1. The estate at rest, eleven clients
-2. A launch mid-flight, check grid lighting up
-3. The SPF finding card with resolver output
-4. Passing email headers
-5. The launch report
+1. `munim clients`: the estate, and what each client is connected to
+2. The provider's own consent screen, mid-connect
+3. The chip grid with the red finding card open
+4. `apply_mail_setup` refusing without `approved=true`
+5. The report page a client would receive
