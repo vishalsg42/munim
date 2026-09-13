@@ -1,7 +1,5 @@
 # Why Bedrock returned INVALID_PAYMENT_INSTRUMENT on my Indian AWS account
 
-*Draft for builder.aws.com, post 1 of 3*
-
 I spent an hour of a hackathon deadline on an error whose cause was sitting in the
 API response the whole time. Writing it down because the fix is not obvious and
 the error message points somewhere misleading.

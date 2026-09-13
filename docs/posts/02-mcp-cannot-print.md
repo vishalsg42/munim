@@ -1,7 +1,5 @@
 # Your MCP server cannot print to stdout, and other things I learned building one
 
-*Draft for builder.aws.com, post 2 of 3*
-
 I wanted a live view of what my agent was doing: a browser page that fills in as
 the agent works. The obvious design was one sentence in a plan document, *"the
 agent emits one event stream; the terminal prints it and the browser renders
@@ -71,14 +69,27 @@ becomes literally true rather than something stdio makes impossible.
 
 ## The part that surprised me
 
-A run log is not only for display. Because every mutation is recorded, an
-interrupted run can resume from what it already did. That turned out to matter
-more than the live view: my agent writes DNS records, and a re-run that appended
-a second SPF record instead of resuming would have created **the exact fault the
-tool exists to detect**. Two SPF records mean receivers ignore both.
+A run log is not only for display. It is the audit record for a tool that
+changes somebody else's DNS, and once it existed, "what did this actually do to
+their zone" had an answer that did not depend on anyone remembering.
 
-I built the file for a browser page. It ended up being what makes the agent safe
-to re-run.
+What it did **not** give me for free is resumption, and I want to say that
+plainly because it is the obvious next thought and I made it myself. The log
+records enough to resume an interrupted run. Nothing reads it back for that
+purpose. It is still on the roadmap rather than in the product.
+
+What makes a re-run safe is a different property, and a duller one: every write
+reads what is there first and updates in place on `(type, name)`. Running the
+whole thing twice changes nothing the second time.
+
+That distinction is worth more than it sounds. My agent writes DNS records, and
+a re-run that appended instead of upserting would have added a second SPF record
+beside the first, producing **the exact fault the tool exists to detect**. Two
+SPF records mean receivers ignore both. Idempotency is what prevents that.
+Resumption would only have made it faster.
+
+I built the file for a browser page. What it gave me was a record I could point
+at afterwards.
 
 ## If you are starting one
 

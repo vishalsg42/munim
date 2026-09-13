@@ -1,7 +1,5 @@
 # The agent should not decide whether the check passed
 
-*Draft for builder.aws.com, post 3 of 3*
-
 I built an agent that inspects a small business's domain: is email
 authentication set up, will the certificate renew, does the site load. It writes
 DNS records when it finds something wrong.
@@ -58,14 +56,63 @@ exact fault the tool was built to detect.** A tool that causes the bug it report
 is worse than no tool.
 
 The fix was not a better prompt. It was making every mutation read-before-write
-and upsert on `(type, name)`, and recording each one so a resumed run skips what
-it already did. Tests assert it:
+and upsert on `(type, name)`, so running the whole thing twice changes nothing
+the second time. A test asserts it:
 
 ```python
 async def test_a_differing_record_is_updated_in_place_not_appended():
     ...
     assert not create.called, "appended instead of updating"
 ```
+
+## The boundary that had to be structural, not prompted
+
+The rule above settles what the model *decides*. It does not settle what the
+model is allowed to *authorise*, and those turned out to be different questions.
+
+Replacing a record somebody already published is the owner's decision. The
+obvious implementation is a parameter:
+
+```python
+apply_repair(plan_id, approved=True)
+```
+
+That is not a boundary. It is a field, and a field is something a model fills
+in. Worse, `plan_id` lets it name a plan approved earlier, for a different
+domain, and inherit somebody's answer to a different question.
+
+So the two tools that write take **no arguments at all**:
+
+```python
+@tool
+async def apply_repair() -> str:
+    """Carry out the plan you just made.
+
+    Takes no arguments, on purpose: it applies the plan from this run and
+    cannot be pointed at another.
+    """
+```
+
+The plan comes from the closure. The approval is read from a file that only a
+person's click in the browser, or a person's terminal, can write. There is no
+token the model can emit that approves anything, because there is nowhere to put
+one.
+
+One sentence, which is the whole design: **the model chooses whether to act,
+never on what, and never whether it was allowed to.**
+
+The test asserts it against the schema the SDK generates rather than against the
+source, because the schema is what the model is actually shown:
+
+```python
+props = apply_repair.tool_spec["inputSchema"]["json"]["properties"]
+assert not props
+```
+
+An earlier version of this failed. I had handed the repairing agent the
+provider's own write-capable tools alongside the gated one, so it could have
+made the same change by another route and never passed the gate. The prose was
+right and the code was not, which is the usual direction.
 
 ## What I would tell someone starting
 
