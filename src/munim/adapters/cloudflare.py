@@ -10,6 +10,7 @@ Writes are also idempotent for a second reason: a launch polls DNS and can
 outlive one tool call, so it must be safe to resume.
 """
 
+import re
 from dataclasses import dataclass
 
 from munim.container import Container
@@ -18,6 +19,49 @@ from munim.runlog import RunLog
 
 class CloudflareError(RuntimeError):
     pass
+
+
+# A TXT value is one or more quoted strings in a zone file, and Cloudflare
+# hands back whichever form the record was created in: quoted for anything
+# added in the dashboard, bare for anything added through the API. Measured on
+# a live zone on 2026-09-13, one zone carried both at once, and the SPF records
+# were the quoted ones.
+#
+# Everything downstream compares these against what a policy should be, and
+# against what a resolver reports. A resolver reports neither the quotes nor
+# the split. So `"v=spf1 include:amazonses.com ~all"` failed
+# `startswith("v=spf1")` and a published sender policy became invisible:
+#
+#   - `mailplan.plan` saw no policy and offered to **create** one that was
+#     already published, which is the duplicate-SPF fault this tool exists to
+#     detect, proposed by the tool itself.
+#   - `merge_spf`, whose whole job is to leave exactly one policy, could not
+#     see the other one to remove it.
+#   - and its read-back guard, written for precisely that failure, counted with
+#     the same blind spot and reported success.
+#
+# Normalised here, at the one place every record enters this codebase, rather
+# than at each comparison. A comparison that has to remember is a comparison
+# somebody will write without remembering.
+QUOTED = re.compile(r'"((?:[^"\\]|\\.)*)"')
+
+TEXTUAL = frozenset({"TXT", "SPF"})
+
+
+def unquoted(content: str) -> str:
+    """A TXT value as a resolver reports it: no quotes, no split.
+
+    Left alone unless the value actually starts with a quote, so a policy that
+    merely contains one is not mangled by a rule about how it was stored.
+    """
+    text = content.strip()
+    if not text.startswith('"'):
+        return content
+    parts = QUOTED.findall(text)
+    if not parts:
+        return content
+    return "".join(part.replace('\\"', '"').replace("\\\\", "\\")
+                   for part in parts)
 
 
 @dataclass
@@ -31,8 +75,11 @@ class Record:
 
     @classmethod
     def from_api(cls, payload: dict) -> "Record":
+        content = payload["content"]
+        if str(payload.get("type", "")).upper() in TEXTUAL:
+            content = unquoted(content)
         return cls(id=payload["id"], type=payload["type"], name=payload["name"],
-                   content=payload["content"], ttl=payload.get("ttl", 1),
+                   content=content, ttl=payload.get("ttl", 1),
                    proxied=payload.get("proxied", False))
 
 
