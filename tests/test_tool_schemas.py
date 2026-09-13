@@ -13,6 +13,8 @@ better to be told than to guess.
 import os
 import tempfile
 
+from inspect import cleandoc
+
 import pytest
 
 
@@ -135,9 +137,16 @@ def test_no_tool_description_is_an_essay(tools):
     every long description down for conciseness. The design reasoning belongs
     in comments beside the code, where a reader keeps it; the description is
     read by a model deciding which tool to call.
+
+    Measured on the cleaned text, because the raw length is not the same number
+    on every Python. 3.13 strips a docstring's common leading whitespace at
+    compile time and 3.12 does not, so an eight-space indent counts as content
+    on one and vanishes on the other: this passed locally on 3.13 at 840
+    characters and failed on CI's 3.12 at 1008, for the same source. A test
+    whose threshold moves with the interpreter is measuring the interpreter.
     """
-    long = [f"{t.name} ({len(t.description or '')} chars)"
-            for t in tools if len(t.description or "") > 1000]
+    long = [f"{t.name} ({len(cleandoc(t.description or ''))} chars)"
+            for t in tools if len(cleandoc(t.description or "")) > 1000]
 
     assert long == [], f"these are essays, not descriptions: {', '.join(long)}"
 
