@@ -206,18 +206,58 @@ class Container:
         return secret
 
     def has(self, provider: str) -> bool:
-        """Whether a credential exists, without revealing it."""
+        """Whether a pasted key exists, without revealing it."""
         return self._backend.get(self._client, provider) is not None
+
+    def can_reach(self, provider: str) -> bool:
+        """Whether `http()` would produce a client that can actually call out.
+
+        Three ways that is true and `has()` only knows about one: a pasted key,
+        a session whose token the provider's own REST API accepts, and a
+        session whose MCP server can carry the request. Anything asking "could
+        a repair run for this client" wants this rather than `has`, which
+        answered no for a client connected by OAuth to both providers, on a
+        path that now works.
+        """
+        if provider not in _AUTH:
+            return False
+        if self.has(provider) or self._session_token(provider) is not None:
+            return True
+        if not self._has_session(provider):
+            return False
+        from munim.remote.rest import transport_for
+
+        return transport_for(provider, self._client, keyring=self._keyring) is not None
 
     def http(self, provider: str) -> httpx.AsyncClient:
         """An authenticated client for one provider, scoped to this container.
 
         The token is injected into the header here and never returned, so it
         never exists as a value anywhere an adapter could log it.
+
+        Where there is no pasted key and there is an MCP session, the requests
+        go out as that provider's own MCP tool calls instead, over the session
+        the operator already has. The adapter above is unchanged and cannot
+        tell, which is the point: one connection per client was the claim, and
+        "log in, then also paste an API key" was not that. See
+        `remote/rest.py`.
         """
         if provider not in _AUTH:
             raise UnsupportedProvider(f"no auth profile for provider {provider!r}")
         base_url, header, template = _AUTH[provider]
+
+        if self._backend.get(self._client, provider) is None \
+                and self._session_token(provider) is None \
+                and self._has_session(provider):
+            from munim.remote.rest import transport_for
+
+            through = transport_for(provider, self._client, keyring=self._keyring)
+            if through is not None:
+                # No Authorization header: there is no key to put in one, and
+                # the session never becomes a value on this side.
+                return httpx.AsyncClient(base_url=base_url, transport=through,
+                                         timeout=httpx.Timeout(60.0))
+
         return httpx.AsyncClient(
             base_url=base_url,
             headers={header: template.format(self._credential(provider))},

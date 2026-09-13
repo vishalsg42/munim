@@ -101,10 +101,29 @@ class Resend:
                        records=[DnsRecord.from_api(r) for r in d.get("records", [])])
                 for d in payload.get("data", [])]
 
+    async def get(self, domain_id: str) -> Domain:
+        """One domain, with the records to publish.
+
+        A separate call because the list endpoint does not carry them. Resend's
+        `GET /domains` returns id, name, status and region per domain and no
+        `records` array, so a domain found in the list arrives with nothing to
+        publish. That is only visible on the second run, when the sending
+        domain already exists: the first run creates it and `POST /domains`
+        does return the records.
+        """
+        async with self._container.http("resend") as http:
+            payload = self._ok(await http.get(f"/domains/{domain_id}"))
+        return Domain(id=payload["id"], name=payload["name"],
+                      status=payload.get("status", ""),
+                      records=[DnsRecord.from_api(r)
+                               for r in payload.get("records", [])])
+
     async def find(self, domain: str) -> Domain | None:
         for existing in await self.domains():
             if existing.name.lower() == domain.lower():
-                return existing
+                # Read it back by id. What the list gives is enough to know it
+                # is there and not enough to do anything about it.
+                return await self.get(existing.id)
         return None
 
     async def ensure_domain(self, domain: str, region: str = "us-east-1") -> tuple[Domain, str]:

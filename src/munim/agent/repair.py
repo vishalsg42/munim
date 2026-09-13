@@ -76,28 +76,28 @@ class RepairRun:
     def can_write(self) -> bool:
         """Whether a repair could even be attempted for this client.
 
-        `mailplan` reaches both providers through `Container.http`, which reads
-        the pasted-key store. A client connected only by OAuth has a session
-        with Resend's MCP server and no API key, and those are not the same
-        credential: measured, an MCP token sent to Resend's REST API returns
-        403. So this is a real precondition and not a formality.
+        `container.can_reach` rather than `container.has`, and the difference
+        is the whole of this edge. `has` answers about the pasted-key store
+        alone, so a client connected by OAuth to both providers, whose repair
+        now runs over those sessions, was refused here on a precondition that
+        had stopped being true. An edge that guards against the wrong thing is
+        worse than no edge: it refuses quietly and correctly-looking.
         """
         if self.container is None:
             return False
-        return self.container.has("cloudflare") and self.container.has("resend")
+        return all(self.container.can_reach(p) for p in ("cloudflare", "resend"))
 
     def why_not(self) -> str:
         """Why a repair cannot run, in words, or empty when it can."""
         if self.container is None:
             return "no credentials are loaded for this client"
         missing = [p for p in ("cloudflare", "resend")
-                   if not self.container.has(p)]
+                   if not self.container.can_reach(p)]
         if missing:
             names = " and ".join(missing)
-            return (f"{self.client} has no API key for {names}. A browser "
-                    f"session is not the same credential: the repair calls "
-                    f"their REST API. Fix with: munim connect "
-                    f'"{self.client}" {missing[0]} --token')
+            return (f"{self.client} is not connected to {names}, so there is "
+                    f"nothing to repair through. Connect with: munim connect "
+                    f'"{self.client}" {missing[0]}')
         return ""
 
 

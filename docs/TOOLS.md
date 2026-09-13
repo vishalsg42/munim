@@ -129,8 +129,8 @@ It is a Strands `Graph` of three agents:
 **The thirteen checks run before the graph**, exactly as they do for `check`,
 and the predicate on the first edge reads those results. It never reads what a
 model said. Every term of it is deterministic: is there a failure this repair
-path can actually produce a record for, does this client have the API keys the
-repair needs, and is this a domain anybody is allowed to change. A model that is
+path can actually produce a record for, can this client's credentials reach
+both providers at all, and is this a domain anybody is allowed to change. A model that is
 confident, wrong, or talked into it cannot traverse an edge, because the edge is
 not listening to it.
 

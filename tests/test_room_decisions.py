@@ -142,3 +142,37 @@ def test_reading_a_run_still_works(room, tmp_path):
 
     assert reply.status_code == 200
     assert "runs" in json.loads(reply.text)
+
+
+# ---- which runs have a report -------------------------------------------
+#
+# The reports were written to disk and served at /reports/<id> from the first
+# week, and no page ever linked to one, because nothing told the page which
+# existed. Offering a link that 404s is worse than offering none, so the list
+# comes back with the runs.
+
+def test_the_run_list_names_the_runs_that_have_a_report(tmp_path):
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    (runs / "run-1.jsonl").write_text("")
+    (runs / "run-2.jsonl").write_text("")
+    reports = tmp_path / "reports"
+    reports.mkdir()
+    (reports / "run-2.html").write_text("<p>hello</p>")
+
+    body = TestClient(build_app(runs_dir=runs, reports_dir=reports)).get("/api/runs").json()
+
+    assert body["runs"] == ["run-1", "run-2"]
+    assert body["reports"] == ["run-2"]
+
+
+def test_no_reports_directory_is_an_empty_list_not_a_crash(tmp_path):
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    (runs / "run-1.jsonl").write_text("")
+
+    body = TestClient(
+        build_app(runs_dir=runs, reports_dir=tmp_path / "nothing-here")
+    ).get("/api/runs").json()
+
+    assert body["reports"] == []

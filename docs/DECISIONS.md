@@ -1345,3 +1345,139 @@ Two guards so the orphan class cannot recur: every `check_*` in `adapters/` must
 be named somewhere outside `adapters/`, and every hosting check must have a chip
 in the room. The chip list is hand-maintained JavaScript and the checks are
 Python; nothing else connected them.
+
+---
+
+## D38: The room describes the run it is watching, not the run it hoped for
+
+The room drew one shape for every run: a six step rail, sixteen check chips,
+and the word "Launching". Most runs are not that shape. Of the 493 in the log,
+344 are a disconnect and 105 are a single provider tool call, and every one of
+them rendered as six grey cells and sixteen grey chips describing work that was
+never going to happen, under a heading naming work it was not doing.
+
+That is the same fault as the seven ghost chips and the `deploy` and `domain`
+ghost cells, told about a whole run instead of one step, and it survived both
+of those fixes because both were fixed by hand-writing the producers into a
+list. The list then went wrong in the other direction: it named six stages,
+`src/` emits eleven, and the five it omitted are the ones most runs are made
+of.
+
+**Two kinds of run, and the room says which it has.** A `check` or a `fix` is a
+pipeline, and gets the rail and the chips. A disconnect, a provider tool call, a
+raw API call, a cross-client question, and `work_on_client` are one action each.
+They get a heading saying what they are and no rail at all, because there is no
+sequence to draw and inventing one is the lie the grey cells were.
+
+**The heading is derived from what the run emitted**, not from which tool was
+called, so it cannot disagree with the rail underneath it. A stage that was
+reached and deliberately not run does not get to name the run either: a `fix`
+whose repair edge refused says "Checking" over a rail that shows the repair
+cell dashed, rather than "Repairing" over a rail saying no repair happened.
+
+**The list is read out of the source now.** `tests/room/reduce.test.mjs` scans
+`src/munim/**/*.py` for every way a stage gets set and asserts that each one is
+either a cell in the rail or a declared single-action run. A hand-written list
+of producers is a claim about the code that ages the moment someone adds a
+stage, and this project has now shipped that same claim wrong three times. One
+more test asserts the scan found something, because a regex that matches
+nothing makes every assertion built on it pass forever.
+
+## D39: A link into the control room only when the control room is up
+
+`fix` returned `watch: http://127.0.0.1:8977` on every call and `check` and
+`audit_all_clients` returned a `report` URL the same way. The room is a separate
+process, deliberately, so that it outlives the MCP server the coding agent kills
+on every reconnect. Nobody starts it for you. Most of those links went nowhere.
+
+A link that fails teaches people not to click the one that works, and it costs
+more than the missing link saves. The links are absent rather than empty, since
+a caller checks for the key. `report_file` is a local path, is always written,
+and is always true.
+
+One place knows where the room is, which is what makes `--port` and
+`$MUNIM_ROOM_PORT` mean anything: the three inline URLs could not follow a port
+that moved. A test asserts no tool builds that URL by hand again.
+
+## D40: Every run is reachable, and so is its report
+
+The room could only ever show the newest run. `GET /api/runs` has returned all
+of them since the first day and nothing called it: the page subscribed to
+`/api/runs/latest/events` and that was the whole of its navigation. 493 runs,
+492 of them unreachable.
+
+The reports had the same fault from the other end. They are written to disk,
+they are served at `/reports/{run_id}`, and nothing linked to one, because
+nothing knew which existed. `/api/runs` now says which do, so the link is hidden
+rather than offered and broken.
+
+A picker of the fifty newest runs, and a report link when there is a report.
+This is navigation, not a dashboard: it is for finding the run you just did.
+
+---
+
+## D41: The session is the credential *(closes the seam D33 measured)*
+
+Connecting a client filed an OAuth session. Repairing that client asked for a
+pasted API key for the same two accounts. Both statements were true and together
+they undo the claim this project is built on: one connection per client.
+
+D33 measured why. `mailplan` reaches Cloudflare and Resend through their REST
+APIs, and those APIs refuse the token their own MCP servers issue: 400 from
+Cloudflare, 403 from Resend, 200 from Vercel, which is why
+`RemoteServer.rest_takes_session` is set for Vercel alone. The answer at the
+time was a clearer error message naming both stores. `RESULTS.md` went further
+and wrote down that everything reaching a provider's own MCP server writes
+happily on the session, and that the split is not read against write but which
+server is being talked to. It priced routing the repair that way and declined
+it.
+
+**Asked live on 2026-09-12, both servers can carry it.** Cloudflare publishes
+three tools and `execute` is a general one: it runs a JavaScript arrow function
+calling `cloudflare.request({method, path, query, body})` and returns the
+Cloudflare API's own response object, `success`/`errors`/`result`, unchanged.
+Resend publishes 104 tools including `list-domains`, `get-domain`,
+`create-domain` and `verify-domain`, which is exactly the four endpoints
+`mailplan` uses.
+
+**So it is a transport, not a rewrite.** `Container.http` hands the adapters an
+httpx client whose requests leave as MCP tool calls, and
+`adapters/cloudflare.py` and `adapters/resend.py` are unchanged. The
+read-before-write on `(type, name)`, the refusal to append beside an existing
+record, the SPF merge and every test over them go on being true. That is the
+only reason this was worth doing two days from a deadline: the part that writes
+to somebody's DNS is the part that did not change.
+
+**The model is not in this path.** The JavaScript is fixed and written here,
+with the request serialised into it as ASCII JSON, so a record value is data
+inside a string and never program text. The repairing agent still sees two tools
+that take no arguments (D35).
+
+**Resend answers in prose, and that is the risk.** A DKIM key arrives as an
+indented line under a heading, and a third party's presentation layer can change
+without notice. The failure that matters is not a crash: it is a value that
+parses into something plausible and wrong and then gets published into a
+client's zone. So `remote/resendtext.py` refuses rather than guesses. A records
+section that parses to nothing is an error rather than an empty list, because an
+empty list means "nothing to publish" and that reads as success. A value whose
+shape contradicts its own heading, a DKIM key not starting `p=`, a policy not
+starting `v=spf1`, stops the run with the text that failed.
+
+**Two things this found in code that was already there.** `Resend.find` returned
+a domain from `GET /domains`, which carries no `records` array, so a client
+whose sending domain already existed produced a plan with nothing in it. Only
+the second run was affected, and only a fixture that included records where the
+real API omits them let that pass. And the repair edge asked `container.has`,
+which reads the pasted-key store alone, so it would have refused the very
+clients this now serves. It asks `container.can_reach` now: a key, a session the
+REST API accepts, or a session with a route.
+
+**Measured after building it**, against a live client with an empty key store:
+the plan came back with two records `unchanged` and one to create, which means
+the DKIM key parsed out of prose matched the one published in the zone byte for
+byte. See `RESULTS.md`.
+
+**What is not claimed.** The four Resend endpoints are the four `mailplan` uses;
+anything else returns 501 naming `--token`, because pretending otherwise would
+fail deeper in. And this has proved a *plan*. Nothing has yet been written to a
+zone through it.
