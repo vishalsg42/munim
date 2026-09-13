@@ -13,7 +13,8 @@ import httpx
 import pytest
 import respx
 
-from munim.adapters.cloudflare import Cloudflare, CloudflareError
+from munim.adapters.cloudflare import (Cloudflare, CloudflareError,
+                                       Record, unquoted)
 from munim.container import Container
 
 API = "https://api.cloudflare.com/client/v4"
@@ -234,3 +235,107 @@ async def test_a_domain_in_the_wrong_account_says_so_plainly():
     respx.get(f"{API}/zones").mock(return_value=_list([]))
     with pytest.raises(CloudflareError, match="wrong client"):
         await Cloudflare(_container()).zone_id("someone-elses.example")
+
+
+# ---- TXT values as a resolver sees them ---------------------------------
+#
+# Found on a live zone on 2026-09-13: the same zone returned SPF records quoted
+# and DKIM records bare, because Cloudflare hands back whichever form a record
+# was created in. Nothing normalised it, so `"v=spf1 ..."` failed
+# `startswith("v=spf1")` and a published policy was invisible to every piece of
+# code that looks for one.
+
+
+
+def test_a_quoted_value_reads_as_the_resolver_reports_it():
+    assert unquoted('"v=spf1 include:amazonses.com ~all"') == \
+        "v=spf1 include:amazonses.com ~all"
+
+
+def test_a_bare_value_is_left_alone():
+    assert unquoted("v=DMARC1; p=quarantine") == "v=DMARC1; p=quarantine"
+
+
+def test_a_split_value_is_joined():
+    """A long DKIM key is stored as several strings and answered as one."""
+    assert unquoted('"v=DKIM1; p=AAAA" "BBBB"') == "v=DKIM1; p=AAAABBBB"
+
+
+def test_an_escaped_quote_survives():
+    assert unquoted('"a \\"b\\" c"') == 'a "b" c'
+
+
+def test_a_value_that_merely_contains_a_quote_is_not_mangled():
+    assert unquoted('say "what"') == 'say "what"'
+
+
+def test_a_quoted_spf_record_is_visible_to_the_code_that_looks_for_policies():
+    """The bug, at the point it did damage.
+
+    `mailplan` and `merge_spf` both select policies with
+    `content.lower().startswith("v=spf1")`. A dashboard-created SPF record
+    failed that test, so `plan` offered to create a policy that was already
+    published, which is the duplicate-SPF fault this tool detects, proposed by
+    the tool itself.
+    """
+    record = Record.from_api({
+        "id": "r1", "type": "TXT", "name": "send.acme.example",
+        "content": '"v=spf1 include:amazonses.com ~all"'})
+
+    assert record.content.lower().startswith("v=spf1")
+
+
+def test_only_textual_records_are_normalised():
+    """A CNAME target is not a quoted string and must not be treated as one."""
+    record = Record.from_api({
+        "id": "r1", "type": "CNAME", "name": "www.acme.example",
+        "content": '"weird".example'})
+
+    assert record.content == '"weird".example'
+
+
+@respx.mock
+async def test_merge_sees_a_policy_that_was_added_in_the_dashboard():
+    """The worst shape of the quoting bug, and why it is fixed at the boundary
+    rather than at each comparison.
+
+    Two policies, one added through the dashboard and one through the API, is
+    exactly the state `merge_spf` exists for. Unnormalised, it saw one, left
+    the other in place, and then its own read-back guard, written for precisely
+    this failure, counted with the same blind spot and reported success. The
+    domain would have been left with two policies and a log line saying one.
+    """
+    merged = "v=spf1 include:old.example include:amazonses.com ~all"
+    route = respx.get(f"{API}/zones/{ZONE}/dns_records")
+    route.side_effect = [
+        _list([_record("r1", '"v=spf1 include:old.example ~all"'),
+               _record("r2", "v=spf1 include:amazonses.com ~all")]),
+        _list([_record("r1", merged)]),
+    ]
+    gone = respx.delete(f"{API}/zones/{ZONE}/dns_records/r2").mock(
+        return_value=_one(_record("r2", "x")))
+    respx.put(f"{API}/zones/{ZONE}/dns_records/r1").mock(
+        return_value=_one(_record("r1", merged)))
+
+    _, action = await Cloudflare(_container()).merge_spf(ZONE, "acme.example", merged)
+
+    assert action == "merged"
+    assert gone.called, "the quoted policy was left behind"
+
+
+@respx.mock
+async def test_a_correct_record_stored_with_quotes_is_left_alone():
+    """`upsert` compares content to decide create, update or nothing. A record
+    that is already right, stored quoted, compared unequal and was rewritten
+    for no reason."""
+    respx.get(f"{API}/zones/{ZONE}/dns_records").mock(
+        return_value=_list([_record("r1", '"v=spf1 include:amazonses.com ~all"')]))
+    create = respx.post(f"{API}/zones/{ZONE}/dns_records")
+    update = respx.put(url__startswith=f"{API}/zones/{ZONE}/dns_records/")
+
+    _, action = await Cloudflare(_container()).upsert(
+        ZONE, type="TXT", name="acme.example",
+        content="v=spf1 include:amazonses.com ~all")
+
+    assert action == "unchanged"
+    assert not create.called and not update.called
