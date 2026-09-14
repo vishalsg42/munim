@@ -387,3 +387,43 @@ test("a finished run leaves nothing waiting", () => {
   assert.equal(state.deciding, null);
   assert.equal(state.done, true);
 });
+
+// ---- a check that did not apply is not a check that did not run ----------
+//
+// `launch.py` dropped skipped results before logging them, so the room never
+// heard about them and their chips stayed the same grey as a check still
+// pending. On a healthy domain four of sixteen cells sat grey through the whole
+// run: the three Vercel checks, which skip when no project serves the domain,
+// and `dkim_chunking`, which skips when there is no key to inspect. Grey reads
+// as hung. This is D38's fault, one level down.
+
+const checked = (check, detail = {}) => ({
+  run_id: "r", seq: 2, ts: 0, client: "Acme", stage: "verify",
+  kind: "observation", human_text: "no Vercel project serves this domain",
+  detail: { check, ...detail },
+});
+
+test("a skipped check reads as skipped, not as passed", () => {
+  const s = reduce(initialState, { type: "event", event: checked("deploy_current", { skipped: true }) });
+  assert.equal(s.checks.deploy_current, "skip");
+});
+
+test("an ordinary observation still passes", () => {
+  const s = reduce(initialState, { type: "event", event: checked("spf_single") });
+  assert.equal(s.checks.spf_single, "pass");
+});
+
+test("a skip carries the reason, so the chip can say why", () => {
+  const s = reduce(initialState, { type: "event", event: checked("env_scoped", { skipped: true }) });
+  assert.equal(s.why.env_scoped, "no Vercel project serves this domain");
+});
+
+test("a check that passes leaves no stale reason behind it", () => {
+  let s = reduce(initialState, { type: "event", event: checked("spf_single") });
+  assert.equal(s.why.spf_single, undefined);
+});
+
+test("a skip does not count as a failure", () => {
+  const s = reduce(initialState, { type: "event", event: checked("deploy_current", { skipped: true }) });
+  assert.equal(s.finding, null);
+});

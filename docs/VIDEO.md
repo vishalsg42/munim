@@ -157,13 +157,14 @@ with no narration.*
 *On screen:* the control room. The stage rail lights `verify`, then the chip grid appears
 **all at once**, greyed, and lights up in place. No scrolling, no insertion.
 
-> "Then the checks. Sixteen of them, and none are difficult.
-> That is the point. Nobody runs sixteen checks by hand
+> "Then the checks. Fifteen of them, and none are difficult.
+> That is the point. Nobody runs fifteen checks by hand
 > on every domain for every client, so nobody runs them at all."
 
-*Sixteen, not thirteen: thirteen about DNS, three about hosting, plus one per connected
-provider asking whether that account is still reachable. The live run on 2026-09-13 read
-`16 of 16 checks passed`. Count what is on screen and say that number.*
+*Count what is on screen and say that number. The run on the filmed domain reads `13 of 15
+checks passed`, and the grid shows sixteen cells: ten green, two red, and four dashed for
+checks that do not apply to this domain. Nothing is left grey, which is the point of the
+dashed state.*
 
 ### 2:30–2:52  The moment.
 
@@ -224,11 +225,10 @@ dig +short TXT resend._domainkey.<domain> @1.1.1.1
 
 *Say the constraint out loud here, and say whichever of these is true:*
 
-> "This is a real client's domain, filmed with their permission."
+> "This is a real client's domain. It is on screen, so you can check the record yourself."
 
-*or*
-
-> "This is a domain I own. No client's real account is in this video."
+*Do not claim permission in the narration unless you have it in writing. The line above is
+true either way and makes the same point: the evidence is checkable by the viewer.*
 
 *Eight seconds, and it turns the biggest credibility liability into a credibility signal.
 Do not claim the first one unless it happened.*
