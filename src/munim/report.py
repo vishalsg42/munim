@@ -41,6 +41,9 @@ h2 { font-size:13px; letter-spacing:.06em; text-transform:uppercase;
 ul.checks { list-style:none; margin:0; padding:0; column-count:2; column-gap:28px; }
 ul.checks li { font-size:14px; color:#5f6368; padding:5px 0; break-inside:avoid; }
 ul.checks li::before { content:"✓"; color:#3f9c5b; font-weight:700; margin-right:9px; }
+ul.skipped { list-style:none; padding:0; margin:0; color:#8a8a80; }
+ul.skipped li { margin:0 0 7px; font-size:14px; }
+ul.skipped li::before { content:"–"; color:#b8b8ae; font-weight:700; margin-right:9px; }
 ul.checks li.no::before { content:"!"; color:#c0504d; }
 footer { margin-top:56px; padding-top:20px; border-top:1px solid #e7e3db;
   color:#8a8578; font-size:12px; }
@@ -64,7 +67,14 @@ def render(log: RunLog, *, domain: str, business: str) -> str:
     resolved_text = {e.detail.get("check"): e.human_text
                      for e in events if e.kind == "resolved"}
     resolved = set(resolved_text)
-    passed = [e for e in events if e.kind == "observation" and e.detail.get("check")]
+    # A skip arrives as an observation carrying `skipped`, since `Kind` is
+    # closed. Ticking it green says "we checked this and it was fine" about
+    # something nobody could check: the owner read "No DKIM record to inspect"
+    # under a green tick on a domain whose mail is unsigned.
+    passed = [e for e in events if e.kind == "observation"
+              and e.detail.get("check") and not e.detail.get("skipped")]
+    skipped = [e for e in events if e.kind == "observation"
+               and e.detail.get("check") and e.detail.get("skipped")]
 
     outstanding = [e for e in findings if e.detail.get("check") not in resolved]
     fixed = [e for e in findings if e.detail.get("check") in resolved]
@@ -113,6 +123,10 @@ def render(log: RunLog, *, domain: str, business: str) -> str:
     for e in outstanding:
         items.append(f'<li class="no">{_e(e.human_text)}</li>')
 
+    # Last, and marked as what they are: questions nobody could answer for this
+    # domain. Counting them as checks would inflate "we checked N things".
+    aside = [f'<li>{_e(e.human_text)}</li>' for e in skipped]
+
     # The report used to look identical whether the agent explained the
     # findings or never ran, because its cards are built from the deterministic
     # check text either way. With agents off by default that silence would be
@@ -136,6 +150,7 @@ def render(log: RunLog, *, domain: str, business: str) -> str:
   {note}
   {"".join(cards) if cards else ""}
   {f'<h2>Everything we looked at</h2><ul class="checks">{"".join(items)}</ul>' if items else ""}
+  {f'<h2>Did not apply</h2><ul class="skipped">{"".join(aside)}</ul>' if aside else ""}
   <footer>
     Checked automatically for {_e(business)} &middot; <code>{_e(domain)}</code><br>
     Run {_e(log.run_id)}. Every result here came from a live lookup, not a guess.
