@@ -6,6 +6,19 @@ Entries describe what changed for somebody using munim. The reasoning behind
 each decision lives in [docs/DECISIONS.md](docs/DECISIONS.md), and the numbered
 references below point at it.
 
+## 0.5.1
+
+### Fixed
+
+- **`munim connect <client> gmail` refused an application that was already
+  registered.** `munim config` listed the Gmail client id on one line while
+  `connect` told you to go and register one, in the same minute. Both were
+  reading the truth: the values live in `~/.munim/.env`, `connect` loaded that
+  file and `connect_via_mcp`, which is the path Gmail actually takes, did not.
+  The file is now read once at the entry point, so every command sees the same
+  configuration. This is the third time two commands disagreed about the same
+  fact for this reason; the previous pair was `doctor` against `config list`.
+
 ## 0.5.0
 
 The release where the agent stopped explaining and started repairing, and where

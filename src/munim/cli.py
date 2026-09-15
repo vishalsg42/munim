@@ -675,13 +675,7 @@ def config(action: str, provider: str | None, client_id: str | None) -> int:
     """
     from munim.appcreds import forget as forget_app
     from munim.appcreds import remember, stored
-    from munim.env import load as load_env
     from munim.remote.servers import SERVERS
-
-    # doctor loads this and config did not, so `config list` said "not set" for
-    # a provider `doctor` reported as configured. Two commands disagreeing about
-    # the same fact is worse than either answer alone.
-    load_env()
 
     needs_one = sorted(n for n, srv in SERVERS.items() if srv.auth == "app")
 
@@ -1094,9 +1088,7 @@ def _missing_hosts() -> list[str]:
 def _show_ai() -> int:
     """What is on, on what, and where each answer came from. Never a key."""
     from munim import settings
-    from munim.env import load as load_env
 
-    load_env()
     state = settings.ai()
     chosen = state.chosen()
 
@@ -1401,7 +1393,6 @@ def rename(old: str, new: str) -> int:
 
 
 def connect(client: str, provider: str) -> int:
-    load_env()
     registry = _registry()
     try:
         registry.get(client)
@@ -1464,6 +1455,21 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _run(argv: list[str] | None = None) -> int:
+    # Once, here, rather than in whichever command remembered to.
+    #
+    # This is the third time two commands have disagreed about the same fact
+    # because only one of them had read the file. `doctor` loaded it and
+    # `config list` did not, so one reported a provider configured while the
+    # other said "not set". Then `connect` loaded it and `connect_via_mcp` did
+    # not, so `munim config` listed a registered Gmail application while
+    # `munim connect <client> gmail` told the operator to register the
+    # application they had already registered. Both were reading the truth: the
+    # values live in `~/.munim/.env` and only one path had loaded it.
+    #
+    # `load` uses `setdefault`, so an exported value still wins and calling it
+    # early changes nothing else.
+    load_env()
+
     parser = argparse.ArgumentParser(
         prog="munim", description=DESCRIPTION,
         formatter_class=argparse.RawDescriptionHelpFormatter)
