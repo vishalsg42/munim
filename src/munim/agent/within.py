@@ -42,12 +42,12 @@ Be brief. No preamble."""
 def connected_providers(client_id: str, keyring=None) -> list[str]:
     """Providers this client has a session with. Nothing else is reachable.
 
-    Token **or** endpoint: a URL-authenticated provider like Zoho stores an
-    endpoint and no tokens, so asking only about tokens makes it invisible.
+    Token **or** endpoint, which is what `has_session` is: a provider whose
+    address is per installation stores an endpoint and, until the login
+    finishes, no tokens, so asking only about tokens makes it invisible.
     """
     return [p for p in sorted(SERVERS)
-            if KeychainTokenStorage(client_id, p, keyring)._read("tokens")
-            or KeychainTokenStorage(client_id, p, keyring).endpoint()]
+            if KeychainTokenStorage(client_id, p, keyring).has_session()]
 
 
 async def work_on(client_id: str, label: str, request: str, log: RunLog, *,

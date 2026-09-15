@@ -37,10 +37,10 @@ def migrate(registry: Registry, backend=None, keyring_module=None) -> list[str]:
 
         for provider in sorted(SERVERS):
             under_id = KeychainTokenStorage(record.id, provider, keyring_module)
-            if under_id._read("tokens") is not None:
+            if under_id.has_session():
                 continue
             under_name = KeychainTokenStorage(record.name, provider, keyring_module)
-            if under_name._read("tokens") is not None:
+            if under_name.has_session():
                 under_name.move_to(record.id)
                 moved.append(f"{record.name}: {provider} session")
 

@@ -344,3 +344,53 @@ def test_no_google_credential_is_committed():
         assert "GOCSPX-" not in text, f"a Google client secret in {path.name}"
         assert ".apps.googleusercontent.com" not in text, \
             f"a Google client id in {path.name}"
+
+
+def test_a_session_is_tokens_or_an_endpoint():
+    """The predicate seven callers were writing out by hand, three correctly.
+
+    A provider whose address is per installation stores that address and, until
+    the login finishes, nothing else. Asking only about tokens reported such a
+    client as holding nothing, which cost `munim clients forget` a credential
+    it could not put back.
+    """
+    from munim.remote.storage import KeychainTokenStorage
+
+    ring = FakeKeyring()
+    empty = KeychainTokenStorage("c_empty", "zoho", ring)
+    assert not empty.has_session()
+
+    by_endpoint = KeychainTokenStorage("c_url", "zoho", ring)
+    by_endpoint.remember_endpoint("https://example.test/mcp/x")
+    assert by_endpoint.has_session()
+
+    by_token = KeychainTokenStorage("c_tok", "zoho", ring)
+    ring.set_password(by_token._service("tokens"), "c_tok",
+                      '{"access_token": "t", "token_type": "Bearer"}')
+    assert by_token.has_session()
+
+    both = KeychainTokenStorage("c_both", "zoho", ring)
+    both.remember_endpoint("https://example.test/mcp/y")
+    ring.set_password(both._service("tokens"), "c_both",
+                      '{"access_token": "t", "token_type": "Bearer"}')
+    assert both.has_session()
+
+
+def test_an_endpoint_only_client_is_visible_to_a_question():
+    """`ask_across_clients` decided who was connected by tokens alone, so a
+    client connected by endpoint was not asked and did not appear in the
+    answer. The other three callers already asked both questions."""
+    from munim.agent.across import connected_clients
+    from munim.remote.storage import KeychainTokenStorage
+
+    class Client:
+        def __init__(self, id): self.id = id
+
+    ring = FakeKeyring()
+    KeychainTokenStorage("c_url", "zoho", ring).remember_endpoint(
+        "https://example.test/mcp/x")
+
+    seen = connected_clients([Client("c_url"), Client("c_none")], "zoho",
+                             keyring=ring)
+
+    assert [c.id for c in seen] == ["c_url"]
