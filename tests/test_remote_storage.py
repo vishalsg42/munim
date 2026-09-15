@@ -283,8 +283,12 @@ def test_a_provider_needing_an_application_says_so_before_opening_a_browser():
     with pytest.raises(NoRemoteServer) as caught:
         auth_for("X", "gmail", keyring=FakeKeyring())
     said = str(caught.value)
-    assert "registered by hand" in said
-    assert "GMAIL_OAUTH_CLIENT_ID" in said
+    # What it must convey, rather than the sentence it used to use. The old
+    # wording led with "registered by hand", which was read as "go and register
+    # one" by an operator who already had: the client id was in a .env the
+    # search never reached from where they stood.
+    assert "No gmail application is configured" in said
+    assert "munim config app set gmail" in said, "no way out was offered"
     assert host_of(said) == "console.cloud.google.com", \
         "a fix with no address is a complaint"
 

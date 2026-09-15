@@ -114,6 +114,55 @@ def _registered_application(provider: str) -> tuple[str, str] | None:
     return resolve(provider)
 
 
+
+def _no_application(provider: str, server) -> str:
+    """Why this provider has no application, from here.
+
+    The old message recited the setup instructions whatever the cause, so an
+    operator who had already registered an application was told to go and
+    register one. The actual report: run from the repository it worked, run from
+    the home directory it did not, because the client id lived in the
+    repository's `.env` and the search walks up from the current directory. The
+    instructions were correct and answered a question nobody had asked.
+
+    So say which file was read and what was in the keychain, and let the two
+    facts pick the sentence.
+    """
+    from munim.env import CONFIG_HOME, load
+
+    read = load()
+    lines = [f"No {provider} application is configured, so there is nothing to "
+             f"log in with.", ""]
+    lines.append(f"  config file   {read}" if read
+                 else "  config file   none on the path from this directory")
+    lines.append(f"  keychain      nothing stored for {provider}")
+    lines.append("")
+
+    if read is not None:
+        # A file was read and did not carry it. Either it is the wrong file or
+        # the value is not in it, and both are worth saying out loud.
+        lines.append(f"That file was read and has no "
+                     f"{provider.upper()}_OAUTH_CLIENT_ID in it.")
+    else:
+        # The common one, and the one the old message could not tell apart: the
+        # application exists in a `.env` somewhere else. The search starts at
+        # the current directory and walks up, so it depends where you stand.
+        lines.append("If you have already registered one, it is in a .env that "
+                     "is not on the search path from here. The search starts at "
+                     "the current directory and walks up, so it can work in one "
+                     "directory and not another.")
+    lines += [
+        "",
+        "The keychain has no directory, so it works from anywhere:",
+        f"    munim config app set {provider} --client-id <id>",
+        "",
+        f"Or put it where every directory can see it: {CONFIG_HOME}",
+    ]
+    if server.register_at:
+        lines += ["",
+                  f"Not registered one yet? {server.register_at}"]
+    return "\n".join(lines)
+
 def _apply_sep_2207() -> None:
     """Teach the pinned SDK to ask for offline_access.
 
@@ -514,16 +563,7 @@ def auth_for(client: str, provider: str, *, keyring=None,
         # trying to register and failing at an endpoint that is not there.
         registered = _registered_application(provider)
         if registered is None:
-            raise NoRemoteServer(
-                f"{provider} will not register a client on demand, so it needs "
-                f"an application registered by hand"
-                + (f" at {server.register_at}" if server.register_at else "")
-                + f". Then: munim config set {provider}"
-                f"  (it prompts, and stores in your keychain rather than a "
-                f"file, so it works from any directory). "
-                f"{provider.upper()}_OAUTH_CLIENT_ID and _CLIENT_SECRET in the "
-                f"environment also work. `munim servers` says which providers "
-                f"need this.")
+            raise NoRemoteServer(_no_application(provider, server))
         storage.seed_client_info(*registered, redirect_uri())
 
     return _RemembersExpiry(

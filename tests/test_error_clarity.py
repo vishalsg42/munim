@@ -211,3 +211,56 @@ def test_a_container_with_no_keyring_still_refuses_cleanly():
 
     with pytest.raises(UnknownCredential, match="no resend credential"):
         Container("c_1", Backend()).http("resend")
+
+
+# ---- why the application was not found, rather than how to make one --------
+#
+# Reported: `munim connect personal gmail` from the home directory answered with
+# the setup instructions for registering an OAuth application. One had been
+# registered. Its client id was in the repository's `.env`, the search walks up
+# from the current directory, and from `~` it never reaches the repository. The
+# instructions were correct and answered a question nobody had asked.
+#
+# "we should have very clear message instead of this text."
+
+def test_it_says_the_file_was_not_found_rather_than_go_and_register_one(tmp_path, monkeypatch):
+    from munim.remote.servers import server_for
+    from munim.remote.session import _no_application
+
+    # A path with no config file anywhere above it.
+    monkeypatch.setenv("MUNIM_ENV", str(tmp_path / "nothing-here.env"))
+    said = _no_application("gmail", server_for("gmail"))
+
+    assert "none on the path from this directory" in said
+    assert "not on the search path from here" in said
+    assert "munim config app set gmail" in said, "no way out was offered"
+
+
+def test_a_file_that_was_read_and_lacked_it_says_so(tmp_path, monkeypatch):
+    """A different cause needs a different sentence: this one is not about
+    where you are standing."""
+    from munim.remote.servers import server_for
+    from munim.remote.session import _no_application
+
+    named = tmp_path / "config.env"
+    named.write_text("SOMETHING=else\n")
+    monkeypatch.setenv("MUNIM_ENV", str(named))
+    said = _no_application("gmail", server_for("gmail"))
+
+    assert str(named) in said, "did not name the file it read"
+    assert "has no GMAIL_OAUTH_CLIENT_ID in it" in said
+    assert "not on the search path" not in said, "blamed the wrong thing"
+
+
+def test_it_does_not_lead_with_registration_when_one_may_exist(tmp_path, monkeypatch):
+    """Registering is the last line, not the first. Most people hitting this
+    have already done it."""
+    from munim.remote.servers import server_for
+    from munim.remote.session import _no_application
+
+    monkeypatch.setenv("MUNIM_ENV", str(tmp_path / "nothing-here.env"))
+    said = _no_application("gmail", server_for("gmail"))
+
+    first = said.strip().splitlines()[0]
+    assert "registered by hand" not in first
+    assert said.index("munim config app set") < said.index("Not registered one yet")
