@@ -336,9 +336,13 @@ def merge(source: str, target: str) -> int:
     backend = KeychainBackend()
     clash = [p for p in ("cloudflare", "vercel", "resend")
              if backend.get(a.id, p) and backend.get(b.id, p)]
+    # `has_session`, not tokens, on both sides. Two clients each holding a
+    # per-installation endpoint for the same provider are two installations,
+    # and a tokens-only test called them mergeable: the carry below would then
+    # overwrite one endpoint with the other and there is no way back to it.
     clash += [p for p in sorted(SERVERS)
-              if KeychainTokenStorage(a.id, p)._read("tokens")
-              and KeychainTokenStorage(b.id, p)._read("tokens")]
+              if KeychainTokenStorage(a.id, p).has_session()
+              and KeychainTokenStorage(b.id, p).has_session()]
     if clash:
         print(f"both hold {', '.join(sorted(set(clash)))}, so these are two "
               f"accounts rather than one client twice. Disconnect one side "
@@ -353,7 +357,7 @@ def merge(source: str, target: str) -> int:
             carried.append(provider)
     for provider in sorted(SERVERS):
         store = KeychainTokenStorage(a.id, provider)
-        if store._read("tokens") is not None:
+        if store.has_session():
             store.move_to(b.id)
             carried.append(f"{provider} (mcp)")
 
@@ -384,8 +388,11 @@ def forget(client: str) -> int:
 
     backend = KeychainBackend()
     held = [p for p in ("cloudflare", "vercel", "resend") if backend.get(record.id, p)]
+    # `has_session`, not tokens. A client holding only an endpoint read as
+    # holding nothing, so this removed the registry row and left the endpoint
+    # in the keychain filed under an id no command could name any more.
     held += [f"{p} (mcp)" for p in sorted(SERVERS)
-             if KeychainTokenStorage(record.id, p)._read("tokens")]
+             if KeychainTokenStorage(record.id, p).has_session()]
     if held:
         print(f"{record.name!r} still holds {', '.join(held)}. Merge it into "
               f"another client, or disconnect it first.", file=sys.stderr)
@@ -1455,8 +1462,13 @@ def rename(old: str, new: str) -> int:
 
     moved = []
     for provider in sorted(SERVERS):
+        # Keyed on the label, so this only ever finds a session filed before
+        # identity and name were split; `registry.rename` keeps the id, so a
+        # modern session needs no move. `has_session` rather than tokens all
+        # the same, because a legacy client can hold an endpoint and nothing
+        # else and there is no second chance to find it after the rename.
         store = KeychainTokenStorage(old, provider)
-        if store._read("tokens") is not None:
+        if store.has_session():
             store.move_to(new)
             moved.append(f"{provider} (mcp)")
 

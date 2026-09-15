@@ -200,6 +200,22 @@ class KeychainTokenStorage(TokenStorage):
                 return []
         return found
 
+    def has_session(self) -> bool:
+        """Whether this client is connected to this provider at all.
+
+        Tokens first, then the endpoint. A provider whose address is per
+        installation stores that address and, until the login finishes, nothing
+        else, so a tokens-only test reports a client that holds a credential as
+        holding nothing. Four places asked the narrow question and three asked
+        the broad one; this is the one answer they all share now.
+
+        Deliberately not `holds()`, which reads all four kinds. This runs once
+        per client per provider on every listing, so it is one keychain read in
+        the common case and two otherwise. Using `holds()` for it took the suite
+        from 47 seconds to 177.
+        """
+        return self._read("tokens") is not None or bool(self.endpoint())
+
     def forget(self) -> list[str]:
         """Remove this client's session with this provider. Returns what went.
 

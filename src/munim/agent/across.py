@@ -69,7 +69,7 @@ def connected_clients(clients, provider: str, keyring=None) -> list:
         key = getattr(client, "id", client)
         store = (KeychainTokenStorage(key, provider, keyring) if keyring
                  else KeychainTokenStorage(key, provider))
-        return store._read("tokens") is not None
+        return store.has_session()
 
     return [c for c in clients if has_session(c)]
 

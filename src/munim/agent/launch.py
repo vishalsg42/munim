@@ -99,7 +99,7 @@ def _connected_toolsets(client_id: str, label: str, log: RunLog) -> list:
     for provider in sorted(SERVERS):
         try:
             store = KeychainTokenStorage(client_id, provider)
-            if store._read("tokens") is None and not store.endpoint():
+            if not store.has_session():
                 continue
             ready.append(toolset_for(client_id, provider, label=label,
                                      read_only=True))
