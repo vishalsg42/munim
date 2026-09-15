@@ -190,21 +190,42 @@ class _Vault(FakeKeyring):
         self._key = secret
 
 
-def test_a_url_authenticated_provider_uses_its_own_endpoint(made):
-    """Zoho's address carries the credential, so it is per client and lives in
-    the store. Its entry in the provider table has no URL at all."""
-    from munim.remote.servers import server_for
+def test_a_per_installation_provider_uses_its_own_endpoint(made):
+    """Zoho's address is per client and lives in the store, so its entry in the
+    provider table has no URL at all. It also wants a login.
 
-    assert server_for("zoho").url == "", \
+    Both halves matter. The OAuth branch used to read `server.url` straight out
+    of the table, which is empty here, so a provider that was per installation
+    *and* authenticated pointed an agent at nothing."""
+    from munim.remote.servers import SERVERS
+
+    server = SERVERS["zoho"]
+    assert server.per_client_url and server.url == "", \
         "this test is about a provider whose table entry has no URL"
+    assert server.auth == "registers", \
+        "and which wants a login, which is the half that used to be lost"
 
     endpoint = "https://books-acme.zohomcp.in/mcp/" + "a" * 32
     toolset_for("c_1", "zoho", keyring=_Vault(endpoint=endpoint))
 
     assert made.last["url"] == endpoint, \
         "the agent was pointed at the provider table's empty URL"
-    assert made.last.get("auth_provider") is None, \
-        "a URL-authenticated provider was also given an OAuth client"
+    assert made.last.get("auth_provider") is not None, \
+        "a provider that answers 401 was given no OAuth client"
+
+
+def test_the_oauth_client_is_built_against_the_clients_own_endpoint(made):
+    """The one that broke `connect` rather than only the agent path.
+
+    The SDK discovers protected-resource and authorization-server metadata from
+    the URL the OAuth client was built with. Zoho's authorization server is
+    itself per installation, so the table's empty address finds nothing."""
+    endpoint = "https://books-acme.zohomcp.in/mcp/" + "b" * 32
+    toolset_for("c_1", "zoho", keyring=_Vault(endpoint=endpoint))
+
+    auth = made.last["auth_provider"]
+    assert auth.context.server_url == endpoint, \
+        "the OAuth client was pointed at the provider table's empty URL"
 
 
 def test_a_header_authenticated_provider_gets_its_header(made):

@@ -41,7 +41,7 @@ munim servers add acme https://mcp.acme.com/mcp
 ```bash
 munim connect cloudflare                     # pick a client, or let the account name a new one
 munim connect "Ivy & Fern" cloudflare        # attach to one you named
-munim connect "Ivy & Fern" zoho --url https://…   # Zoho: the URL is the credential
+munim connect "Ivy & Fern" zoho --url https://…   # Zoho: the endpoint is per installation
 munim connect "Ivy & Fern" stitch --token    # Stitch: an API key in a header
 munim disconnect "Ivy & Fern" cloudflare
 munim disconnect --all                       # every client, every provider. Lists them and asks first

@@ -1,36 +1,55 @@
 # Zoho
 
-confirmed: per-installation endpoint of the shape https://<service>-<org>.zohomcp.in/mcp/<32 hex>/message, which answers a tool call with no credentials because the path is the credential
+Confirmed 2026-09-15: a per-installation endpoint of the shape
+`https://<service>-<org>.zohomcp.in/mcp/<32 hex>/message` answers `tools/list`
+with 401 and a `Bearer` challenge. Its protected resource metadata names a
+per-installation authorization server under `mcp.zoho.in/baas/`, which
+advertises a registration endpoint and accepts `token_endpoint_auth_method`
+`none`.
 
-- Endpoint: `per installation, see below`
-- Registers a client on demand: **no**
+- Endpoint: **per installation**, so you supply it
+- Registers a client on demand: **yes**, at that installation's own
+  authorization server
 
 ## Setup
 
-Zoho gives each installation its own endpoint, and **the path is the
-credential**. There is no OAuth and no browser step: the address is the secret,
-so it goes to your keychain rather than into any file in this repository.
+Nothing to register and no application to create. Zoho gives each installation
+its own address, so the only thing munim cannot work out for itself is which
+address is yours.
 
 ```bash
 munim connect "<client>" zoho --url https://<service>-<org>.zohomcp.in/mcp/<32 hex>/message
 ```
 
-Get that URL from your own Zoho MCP installation.
+Get that URL from your own Zoho MCP installation. Munim records it in your
+keychain, then opens the browser for the login that address asks for.
+
+Two clients can hold two different installations, including in different
+regions: the authorization server is discovered from the address, so a `.in`
+installation and a `.com` one authenticate against their own.
 
 ## What you are granting
 
-Whatever the endpoint grants. Munim has no say: there is no scope parameter and
-no consent screen, because there is no authorization flow.
+Whatever the consent screen names when the browser opens. Munim requests no
+scopes of its own here: the installation's authorization server decides what
+the token carries.
 
 ## Gotchas
 
-**Anyone holding the URL holds the access.** That is why `munim connect` puts it
-in the keychain and why `munim clients` and error messages redact it. Treat the
-URL the way you would treat a password.
+**The address is worth protecting even though it is not the whole credential.**
+An earlier reading of this provider concluded the path *was* the credential,
+because one tool call answered without one. It was a measurement of a single
+tool rather than of the server. Munim still keeps the URL in the keychain and
+still redacts it in `munim clients` and in error messages, and that is the right
+default for an address nobody else needs to see.
 
-**There is no account to verify.** Every other provider is asked which account a
-session belongs to, so connecting the wrong one is caught. A URL cannot be
-asked, so `munim connect --url` prompts for which client it belongs to instead.
+**Connecting needs the address first.** `munim connect "<client>" zoho` without
+`--url` has nothing to connect to and says so, naming the flag. There is no
+shared address to fall back on.
+
+**There is no account check.** Every provider munim can ask is asked which
+account a session belongs to, so connecting the wrong one is caught. Zoho is not
+asked, so the client you name is the client it is filed under.
 
 ## Check it
 
