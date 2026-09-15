@@ -115,15 +115,24 @@ def test_every_recorded_server_says_whether_it_needs_a_secret():
     for provider, server in SERVERS.items():
         assert isinstance(server.public_client, bool), provider
         assert server.note, f"{provider} records no evidence for its entry"
-        if server.auth == "url":
-            # No single address: each installation gets its own and the path
-            # carries the credential, so the URL is per client and lives in the
-            # keychain rather than in this table.
+        if server.per_client_url:
+            # No single address: each installation gets its own, so the URL is
+            # per client and lives in the keychain rather than in this table.
+            #
+            # Keyed on `per_client_url` and not on `auth == "url"`, which is
+            # what it used to ask. That conflated a per-installation address
+            # with an address that is itself the credential, and a provider can
+            # be the first without being the second.
             assert server.url == "", (
                 f"{provider} identifies clients by their own endpoint, so a "
                 f"shared URL here would be one client's secret in the source")
         else:
             assert server.url.startswith("https://"), provider
+
+        if server.auth == "url":
+            assert server.per_client_url, (
+                f"{provider} says the URL is the credential, which only means "
+                f"anything if the URL is per client")
 
 
 def test_the_consent_screen_names_the_client():

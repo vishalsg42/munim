@@ -98,14 +98,31 @@ class RemoteServer:
     # credential rather than a bad header name.
     header: str = ""
 
+    # Whether each installation has its own address, so `url` above is empty
+    # and the real one lives in the keychain per client.
+    #
+    # Independent of `auth`, which is the mistake this field exists to undo.
+    # `auth="url"` used to mean both "the address is per installation" and
+    # "the address is the credential, so there is no login", and Zoho is the
+    # case where those come apart: its endpoint is per installation *and* it
+    # answers 401 with a Bearer challenge. Conflating them left no route in at
+    # all, because `--url` refused anything the probe did not call `url` and
+    # everything else read the empty address out of this table.
+    per_client_url: bool = False
+
     def __post_init__(self):
         if self.auth not in AUTH_KINDS:
             raise ValueError(f"{self.provider}: unknown auth kind {self.auth!r}")
 
     @property
     def ready(self) -> bool:
-        """Whether connecting needs nothing set up first."""
-        return self.auth == "registers"
+        """Whether connecting needs nothing set up first.
+
+        A per-installation address is something the operator has to supply, so
+        it is setup even when the authorization server registers clients on
+        demand.
+        """
+        return self.auth == "registers" and not self.per_client_url
 
 
 SERVERS: dict[str, RemoteServer] = {
@@ -159,18 +176,27 @@ SERVERS: dict[str, RemoteServer] = {
         # long lived session into a one hour one without saying so.
         scopes=("openid", "offline_access"),
     ),
-    # No single address: each installation gets its own, and the path carries
-    # the credential. The URL is therefore per client and lives in the keychain,
-    # not here. `munim connect "<client>" zoho --url <their URL>`.
+    # No single address: each installation gets its own, so the URL is per
+    # client and lives in the keychain, not here.
+    # `munim connect "<client>" zoho --url <their URL>`.
+    #
+    # It also wants a login, which is the pair of facts this row used to be
+    # unable to hold. An earlier note here said the path was the credential,
+    # measured from one tool call answering without one; a second measurement
+    # says otherwise and is the one to believe, because a challenge is a
+    # positive answer and silence is not.
     "zoho": RemoteServer(
         provider="zoho",
         url="",
-        public_client=False,
-        auth="url",
-        note="confirmed: per-installation endpoint of the shape "
-             "https://<service>-<org>.zohomcp.in/mcp/<32 hex>/message, which "
-             "answers a tool call with no credentials because the path is the "
-             "credential",
+        public_client=True,
+        auth="registers",
+        per_client_url=True,
+        note="confirmed 2026-09-15: a per-installation endpoint of the shape "
+             "https://<service>-<org>.zohomcp.in/mcp/<32 hex>/message answers "
+             "tools/list with 401 and a Bearer challenge. Its protected "
+             "resource metadata names a per-installation authorization server "
+             "under mcp.zoho.in/baas/, which advertises a registration "
+             "endpoint and accepts token_endpoint_auth_method none",
     ),
     # These four needed no code. Cloudflare has an adapter because it came
     # first, before there was a way to ask a server how it wants to be

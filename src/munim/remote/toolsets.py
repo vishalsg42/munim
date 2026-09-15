@@ -20,7 +20,7 @@ import re
 from strands.tools.mcp import MCPClient
 
 from munim.remote.servers import server_for
-from munim.remote.session import NoRemoteServer, auth_for
+from munim.remote.session import NoRemoteServer, auth_for, endpoint_for
 
 
 def prefix_for(client: str) -> str:
@@ -77,8 +77,6 @@ def toolset_for(client: str, provider: str, *, keyring=None,
     # flow it has no use for. Latent until the token-or-endpoint rule made a
     # URL-authenticated provider reachable from an agent at all.
     if server.auth == "url":
-        from munim.remote.session import endpoint_for
-
         return MCPClient(
             url=endpoint_for(client, provider, keyring=keyring),
             prefix=prefix_for(f"{label or client} {provider}"),
@@ -92,14 +90,18 @@ def toolset_for(client: str, provider: str, *, keyring=None,
         # stored, and that refusal is better than any second one written here.
         headers = headers_for(client, provider, keys=keyring)
         return MCPClient(
-            url=server.url,
+            url=endpoint_for(client, provider, keyring=keyring),
             headers=headers,
             prefix=prefix_for(f"{label or client} {provider}"),
             tool_filters={"allowed": [_is_read_only]} if read_only else None,
         )
 
     return MCPClient(
-        url=server.url,
+        # Through `endpoint_for` like the other two branches, not `server.url`.
+        # A provider can be per-installation *and* want a login, and this was
+        # the branch such a provider lands on, so it was the one still pointing
+        # an agent at the table's empty address.
+        url=endpoint_for(client, provider, keyring=keyring),
         # `allow_login=False`, and not as a parameter, because every caller of
         # this module is an agent path. A question that opens a browser and
         # blocks for five minutes waiting for a callback nobody is there to

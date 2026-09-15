@@ -1127,17 +1127,31 @@ def _show_ai() -> int:
 
 
 def connect_by_url(client: str, provider: str, url: str) -> int:
-    """Connect a provider that identifies a client by their own endpoint.
+    """Connect a provider whose address is per installation.
 
-    There is no OAuth here and nothing to open a browser for: the address is
-    the credential. It is stored per client in the keychain rather than in
-    servers.json, because that file lists servers and this is one client's
-    secret.
+    Two facts, not one. The address is per client either way and is stored in
+    the keychain rather than servers.json, because that file lists servers and
+    this is one client's. Whether the address is *also* the credential is a
+    separate question, and this used to refuse every answer but one: an
+    endpoint that asked for a login was told to connect without `--url`, which
+    then had no address to connect to. Zoho is both at once, so it had no route
+    in at all.
+
+    Now the probe decides. Record the address first either way, because the
+    login that may follow is what needs it.
     """
     import asyncio
 
     from munim.remote.discover import NotAnMcpServer, probe
+    from munim.remote.servers import server_for
     from munim.remote.storage import KeychainTokenStorage
+
+    server = server_for(provider)
+    if server is not None and not server.per_client_url:
+        print(f"{provider} has one address for everybody, so there is nothing "
+              f"to supply. Connect it with: munim connect {client!r} "
+              f"{provider}", file=sys.stderr)
+        return 2
 
     registry = _registry()
     try:
@@ -1153,13 +1167,16 @@ def connect_by_url(client: str, provider: str, url: str) -> int:
         print(str(exc), file=sys.stderr)
         return 2
 
-    if found.auth != "url":
-        print(f"{_redacted(url)} wants {found.auth} authentication, not a "
-              f"credential in the URL. Connect it with: munim connect "
-              f"{client!r} {provider}", file=sys.stderr)
-        return 2
-
     KeychainTokenStorage(record.id, provider).remember_endpoint(url)
+
+    if found.auth != "url":
+        # It wants a login, and now there is an address to log in against.
+        # `connect_via_mcp` re-resolves the same record and reads the endpoint
+        # back through `endpoint_for`, which is why this is written first.
+        print(f"Recorded {record.name}'s {provider} endpoint. It answered "
+              f"{found.auth!r}, so a login follows.", file=sys.stderr)
+        return connect_via_mcp(record.name, provider)
+
     print(f"Connected {provider} for {record.name} at {_redacted(url)}",
           file=sys.stderr)
     print("  The path carries the credential, so it is in your keychain and "

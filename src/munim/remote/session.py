@@ -569,7 +569,14 @@ def auth_for(client: str, provider: str, *, keyring=None,
         storage.seed_client_info(*registered, redirect_uri())
 
     return _RemembersExpiry(
-        server_url=server.url,
+        # The client's own endpoint, not the table's. For a per-installation
+        # provider the table has no address at all, and the SDK drives
+        # protected-resource and authorization-server discovery off this: with
+        # the empty string the transport reached the right place and the OAuth
+        # client reached nowhere. Zoho's authorization server is itself per
+        # installation, under mcp.zoho.in/baas/, so there is nothing shared to
+        # fall back on. `endpoint_for` returns `server.url` for everyone else.
+        server_url=endpoint_for(client, provider, keyring),
         client_metadata=meta,
         storage=storage,
         redirect_handler=redirect,
@@ -649,16 +656,27 @@ def endpoint_for(client: str, provider: str, keyring=None) -> str:
     server = server_for(provider)
     if server is None:
         raise NoRemoteServer(f"{provider} runs no MCP server")
-    if server.auth != "url":
+
+    # A stored endpoint wins, whatever the provider's auth kind.
+    #
+    # This used to be consulted only for `url` providers, on the assumption
+    # that a per-installation address and a credential-in-the-path are the same
+    # thing. Zoho is the counter-example: its endpoint is per installation
+    # *and* it answers 401 with a Bearer challenge, so it is per-client and
+    # OAuth at once. Under the old rule there was no route for it at all:
+    # `--url` refused because the probe said `registers`, and without `--url`
+    # this returned `server.url`, which is empty for a provider that has no one
+    # address.
+    stored = KeychainTokenStorage(client, provider, keyring).endpoint()
+    if stored:
+        return stored
+    if server.url:
         return server.url
 
-    stored = KeychainTokenStorage(client, provider, keyring).endpoint()
-    if not stored:
-        raise NoRemoteServer(
-            f"{provider} identifies a client by their own endpoint URL, and "
-            f"none is stored for this one. Add it with: "
-            f"munim connect \"<client>\" {provider} --url <their URL>")
-    return stored
+    raise NoRemoteServer(
+        f"{provider} identifies a client by their own endpoint URL, and "
+        f"none is stored for this one. Add it with: "
+        f"munim connect \"<client>\" {provider} --url <their URL>")
 
 
 class WrongAccount(Exception):

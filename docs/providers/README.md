@@ -29,7 +29,7 @@ the same as knowing.
 |---|---|
 | [Gmail](gmail.md) | An application registered by hand, once. About ten minutes |
 | [Stitch](stitch.md) | An API key in a header. No Google Cloud project needed |
-| [Zoho](zoho.md) | No registration: the endpoint URL is the credential |
+| [Zoho](zoho.md) | Registers on demand, but the endpoint is per installation: supply it with `--url` |
 
 ## Anything else
 
@@ -67,8 +67,8 @@ munim servers                       # what Munim knows about, and what each need
 
 Built in: Cloudflare, Vercel, Resend, Netlify, Linear, Notion, Sentry, Supabase
 (all zero setup, via dynamic client registration), Gmail (needs an application registered
-by hand), Stitch (an API key in a header), Zoho (the endpoint URL is the
-credential).
+by hand), Stitch (an API key in a header), Zoho (registers on demand, but each
+installation has its own endpoint, so you supply it).
 
 ### Setting one up
 
@@ -79,7 +79,7 @@ steps and what connecting grants:
 |---|---|
 | [Gmail](docs/providers/gmail.md) | An application registered by hand, once. About ten minutes, then `munim config set gmail --client-id ...` |
 | [Stitch](docs/providers/stitch.md) | An API key in a header, pasted with `--token` |
-| [Zoho](docs/providers/zoho.md) | No registration: the endpoint URL is the credential |
+| [Zoho](docs/providers/zoho.md) | Registers on demand, but the endpoint is per installation: supply it with `--url` |
 
 **[docs/providers/](docs/providers/README.md) has a page for every provider**,
 including which have been connected live and which are only probed.

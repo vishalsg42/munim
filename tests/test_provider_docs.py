@@ -35,15 +35,30 @@ def test_the_index_links_every_page():
 
 
 def test_providers_needing_setup_say_so_on_their_page():
-    """The whole reason these pages exist. A provider that cannot register a
-    client on demand needs one registered by hand, and the page has to say it
-    rather than leaving somebody to discover it at a failed connect."""
+    """The whole reason these pages exist. A provider that is not ready to
+    connect needs something supplied by hand, and the page has to say what
+    rather than leaving somebody to discover it at a failed connect.
+
+    Two different things can be missing, so the page has to name the right one.
+    A provider that cannot register a client on demand needs an application. A
+    provider whose address is per installation needs the address, and telling
+    its reader to go and register an application would be a wrong instruction
+    rather than a missing one.
+    """
     for name, server in SERVERS.items():
         if server.ready:
             continue
         page = (DOCS / f"{name}.md").read_text().lower()
-        assert "registers a client on demand: **no**" in page, (
-            f"{name} needs setup and its page does not say so")
+        if server.per_client_url:
+            assert "endpoint: **per installation**" in page, (
+                f"{name} has no shared address and its page does not say so")
+            assert "--url" in page, (
+                f"{name} needs an address supplied and its page does not show "
+                f"how")
+        if server.auth != "registers":
+            assert "registers a client on demand: **no**" in page, (
+                f"{name} needs an application registered and its page does "
+                f"not say so")
 
 
 def test_a_page_that_claims_a_live_connection_is_in_the_index_as_one():

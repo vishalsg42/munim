@@ -10,6 +10,26 @@ references below point at it.
 
 ### Fixed
 
+- **`munim connect <client> zoho --url <endpoint>` now connects.** It was
+  refused outright. Zoho gives each installation its own address *and* asks for
+  a login, and munim's provider table could only record one of those two facts:
+  `auth="url"` meant both "the address is per installation" and "the address is
+  the credential, so there is no login". So `--url` refused an endpoint that
+  wanted a login, and connecting without `--url` had no address to use. Those
+  are two fields now, the probe decides, and `--url` records the address and
+  then opens the browser if the address asks for one. Two clients can hold two
+  installations in different regions (D43).
+- **A client holding only an endpoint is no longer treated as holding nothing.**
+  Four places asked whether a session had tokens rather than whether it had
+  tokens *or* an address. `munim clients forget` was the expensive one: it
+  removed the registry row and left the address in the keychain under an id no
+  command could name again. `merge` neither refused two clients holding two
+  installations nor carried one that held only an address, and
+  `ask_across_clients` could not see such a client at all (D43).
+- **The Zoho provider page said the path was the credential.** It is not: the
+  endpoint answers a tool listing with a 401 and a Bearer challenge. The
+  original note was measured from a single tool call that answered without
+  credentials, which says something about that tool and not about the server.
 - **`munim connect <client> gmail` now actually connects.** It opens Google's
   consent screen and stores a token. Gmail answers a tool listing without asking
   who you are, and the OAuth flow only starts when a request comes back 401, so

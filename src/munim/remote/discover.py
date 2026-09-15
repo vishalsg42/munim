@@ -155,16 +155,38 @@ async def probe(url: str, name: str = "") -> RemoteServer:
                      f"{challenge[:80]}")
 
         meta_url = challenge.split('resource_metadata="')[1].split('"')[0]
-        prm = (await http.get(meta_url)).json()
-        issuer = prm.get("authorization_servers", [""])[0]
+
+        # Everything below is somebody else's document. It was written when
+        # this ran only for a provider being added by hand, where a traceback
+        # is a fair answer; `connect --url` now reaches it on the ordinary path
+        # and an operator supplying their own endpoint should be told what was
+        # wrong with it rather than shown a stack.
+        issuer = ""
+        try:
+            prm = (await http.get(meta_url)).json()
+            servers = prm.get("authorization_servers") or [""]
+            issuer = servers[0] if isinstance(servers, list) else ""
+        except (httpx.HTTPError, ValueError, AttributeError):
+            issuer = ""
+
+        if not issuer:
+            return RemoteServer(
+                provider=provider, url=url, public_client=False, auth="app",
+                note=f"challenged and pointed at {meta_url} for the details, "
+                     f"which did not answer with usable protected resource "
+                     f"metadata. Check the server's own documentation for how "
+                     f"it wants to be authenticated")
 
         metadata = {}
         for path in ("/.well-known/oauth-authorization-server",
                      "/.well-known/openid-configuration"):
-            answer = await http.get(issuer.rstrip("/") + path)
-            if answer.status_code == 200:
-                metadata = answer.json()
-                break
+            try:
+                answer = await http.get(issuer.rstrip("/") + path)
+                if answer.status_code == 200:
+                    metadata = answer.json()
+                    break
+            except (httpx.HTTPError, ValueError):
+                continue
 
         registers = bool(metadata.get("registration_endpoint"))
         methods = metadata.get("token_endpoint_auth_methods_supported", [])

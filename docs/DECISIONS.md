@@ -1549,3 +1549,74 @@ along. The test that covers cancelling patched `connect_and_identify` to raise
 directly, which never passes through a task group and so could not see it, the
 same blind spot `passthrough.call_tool` already carries a comment about: a fake
 session is not a task group.
+
+## D43: A per-installation address and a login are two facts
+
+Zoho could not be connected at all. Adding a client and pointing it at a Zoho
+MCP endpoint left a registered client holding nothing, and the clients screen
+reported "nothing connected", correctly.
+
+The cause was one field carrying two meanings. `auth="url"` meant both **"each
+installation has its own address"** and **"the address is the credential, so
+there is no login"**. Those arrived together in the first provider that had
+either, and nothing since had pulled them apart.
+
+Zoho is both halves of the first and neither of the second. Measured
+2026-09-15 against a live installation:
+
+```
+POST https://<service>-<org>.zohomcp.in/mcp/<32 hex>/message   tools/list, no auth
+-> 401  www-authenticate: Bearer resource_metadata="…/.well-known/oauth-protected-resource"
+
+that metadata names an authorization server under mcp.zoho.in/baas/…
+which advertises  registration_endpoint  and  token_endpoint_auth_method: none
+```
+
+So it is per installation **and** it registers a client on demand. Under the old
+model there was no route in: `munim connect --url` refused anything the probe
+did not call `url`, and `munim connect` without `--url` read the address out of
+the provider table, which is empty for a provider that has no one address.
+
+**The fix is a second field, `per_client_url`, not a second kind.** The
+alternative considered was recording the auth kind per client beside the stored
+endpoint, on the reasoning that two installations might authenticate
+differently. That was an assertion. Measurement says the kind is a property of
+Zoho, because every installation's authorization server is reached the same way,
+while the *address* is already per client and always was. One flag on the row
+left every existing `server.auth` branch correct with no change; the per-client
+version would have rewritten nine of them and added a keychain record shape that
+has to stay readable as a bare string forever.
+
+### The part that was nearly missed
+
+`toolset_for` built an agent's client against `server.url`, which is the obvious
+place to look. `auth_for` did the same thing one layer down, and that one is
+worse: the SDK discovers protected-resource and authorization-server metadata
+from the URL the OAuth client was built with, so the transport reached the right
+address while the OAuth client reached the empty string. Fixing only the visible
+one would have produced a connect that appeared to work and an agent that never
+did.
+
+It is also what makes two regions work. Zoho's authorization server is itself
+per installation, so there is nothing shared to fall back on: a `.in`
+installation and a `.com` one each authenticate against their own, discovered
+from the address the client supplied.
+
+### An earlier measurement that was wrong
+
+The provider table used to say the path was the credential, "confirmed". It was
+confirmed from one tool call that answered without credentials. That is a fact
+about that tool, not about the server, and `discover.probe` still says so in the
+note it writes: *"either the server needs none, the URL carries the credential,
+or that one tool is public while the rest are not: only using it will say
+which."* The note was right and the conclusion drawn from it was not. A
+challenge is a positive answer; silence is not.
+
+### What it cost next door
+
+Four places decided whether a client was connected by asking whether it had
+tokens. A client whose whole session is an address has none, so it read as
+empty. `munim clients forget` removed the registry row and left the address in
+the keychain filed under an id nothing could name again, which is the one of the
+four that lost something rather than merely failing to carry it. The predicate
+is now a single method on the store, so there is one place to be wrong about it.
