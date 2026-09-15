@@ -79,3 +79,52 @@ writes to, add it there too.
 Describe what was broken, how you know, and what would have caught it. Long is
 fine. The pull requests in this repository read like short incident reports and
 that has been useful more than once.
+
+## Stacked pull requests
+
+A change that needs three reviews in a row should be three pull requests, not
+one with three headings. `gh stack` does the bookkeeping, so the second branch
+is based on the first rather than on `main`, and GitHub shows them as a chain.
+
+```
+gh stack init <branch>          # adopt the branch you are on
+gh stack add <next-branch>      # start the next one on top of it
+gh stack submit                 # push them all and open or update the PRs
+gh stack sync                   # after one merges, rebase the rest
+gh stack view                   # what is stacked on what
+```
+
+Split where a reviewer could reasonably approve one part and reject the next.
+A dependency ceiling and the policy that produced it are two decisions, so they
+are two pull requests. A rename across forty files is one.
+
+The bottom of the stack merges first. `gh stack sync` then rebases what is left,
+and each PR's base moves to `main` on its own.
+
+## Releasing
+
+**Release on merge, not in batches.** 0.5.0 exists because ten pull requests
+accumulated while nothing was published, and a release that large is one nobody
+can review, roll back, or write an honest changelog for. Ship each merge.
+
+This is a `0.x` project, so the shape is `0.MINOR.PATCH`:
+
+| | |
+|---|---|
+| **patch** (`0.5.0` to `0.5.1`) | a fix, a docs change, a dependency bump. Nothing a caller has to read about. |
+| **minor** (`0.5.1` to `0.6.0`) | a new tool or CLI verb, a behaviour change, anything that changes what a caller can rely on. |
+
+Every release needs a `CHANGELOG.md` entry written for somebody using munim
+rather than reading it: what changed for them, and a pointer to the decision that
+explains why.
+
+**The tag is the publish, and it cannot be undone.** `publish.yml` fires on
+`v*`, and a version on PyPI can never be reused or withdrawn. So tagging is a
+separate, deliberate step:
+
+```
+# on main, with the version already bumped and the changelog written
+git tag v0.5.1 && git push origin v0.5.1
+```
+
+Merging never publishes. That is on purpose.
