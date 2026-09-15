@@ -31,6 +31,6 @@ say that too, and how you found it instead.
 - [ ] A test fails without this change, and I have said so above
 - [ ] No real client name, domain, email or credential anywhere in the diff
 - [ ] `docs/DECISIONS.md` has an entry, if this makes a call worth recording
-- [ ] `README.md` and `docs/SUBMISSION.md` are still true, if this changed what
+- [ ] `README.md` is still true, if this changed what
       the project can do
 - [ ] No em dashes

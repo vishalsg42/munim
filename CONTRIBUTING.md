@@ -54,7 +54,7 @@ Code comments cite them by number, `(D5)`, `(D31)`. Keep that.
 
 ## Claims discipline
 
-`docs/SUBMISSION.md` and `README.md` make claims about what works. If a change
+`README.md` makes claims about what works. If a change
 makes one of them wrong, fix the sentence in the same commit. This has cut both
 ways already: a section once said two functions were tested when one had no
 test, and a section once disclaimed a capability that had since been built.

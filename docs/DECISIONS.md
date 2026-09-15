@@ -4,8 +4,11 @@ Why this project is shaped the way it is. Each entry records the decision, what 
 what it costs, including the ones that were wrong first time. Reversals are kept rather than
 tidied away, because the reasoning is the useful part.
 
-Contest facts and the competitive scan live in `docs/HACKATHON.md`. The design lives in
-`docs/superpowers/specs/2026-09-03-multi-client-mcp-design.md`.
+This project began as an entry for a hackathon with a 2026-09-14 deadline, which it
+missed. Some early entries reason about contest criteria, judges and a competitive scan,
+and those references are left as written. The decisions they justify are still the
+decisions in the code, and a log edited to look like it was always something else is a
+log nobody should trust. Where a decision no longer applies, it is marked, not deleted.
 
 ---
 
@@ -331,7 +334,7 @@ This vindicates D4 and removes the AgentCore Runtime quota from the critical pat
 
 **This is the most consequential finding in the whole analysis.** Every criterion, including
 Technological Implementation, is scored from the video, the description, the architecture
-diagram, and a repo skim. `docs/HACKATHON.md` treated the video as one criterion worth 20%.
+diagram, and a repo skim. The contest analysis treated the video as one criterion worth 20%.
 It is in fact the entire evaluation surface. Consequences:
 
 - The video is the deliverable; the code is what makes it truthful. It is not a last-week task.

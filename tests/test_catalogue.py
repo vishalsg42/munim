@@ -35,7 +35,7 @@ def test_a_check_reports_under_its_own_name(name):
 
 
 def test_the_catalogue_is_thirteen_checks_with_no_duplicates():
-    """The count is quoted in the README, the video script and to judges."""
+    """The count is quoted in the README and in the docs."""
     results = checks.run_all(PLATFORM) + checks.run_reachability(PLATFORM)
     names = [r.check for r in results]
     assert len(names) == len(set(names)), f"duplicated: {sorted(names)}"

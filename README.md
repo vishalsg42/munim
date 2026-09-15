@@ -156,7 +156,7 @@ their affairs without being asked each time.*
 
 ## Disclosure
 
-Built with AI assistance (Claude Code), which the hackathon rules permit. No
+Built with AI assistance. No
 pre-existing code was incorporated; the repository was created during the
 submission period.
 
