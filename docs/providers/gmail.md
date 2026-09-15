@@ -124,6 +124,21 @@ munim connect "<client>" gmail
 munim doctor
 ```
 
+**Connecting calls one Gmail tool, and says so first.** Gmail answers a tool
+listing with 200 and no challenge, and the OAuth flow only starts when a request
+comes back 401. Measured on 2026-09-15:
+
+```
+tools/list                     200  no challenge
+tools/call list_labels         401  www-authenticate: Bearer ...
+tools/call <no such tool>      200  JSON-RPC error
+```
+
+The third line is why a made-up name is no use: Gmail checks authorisation after
+dispatching the tool. So connect calls `list_labels`, which Gmail marks
+read-only and which takes no arguments, purely to make it ask you to sign in.
+The result is thrown away. No other provider here needs this.
+
 ## What you are granting
 
 Read the consent screen. It will ask for, among others,

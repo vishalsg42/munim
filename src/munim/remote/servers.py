@@ -8,7 +8,8 @@ possible without anyone registering an application first (D25).
 """
 
 import json
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from typing import Any
 from pathlib import Path
 
 
@@ -55,6 +56,26 @@ class RemoteServer:
     # False by default, so a provider that has not been measured behaves as
     # though the two credentials are separate, which they usually are.
     rest_takes_session: bool = False
+    # One tool to call so this provider asks for credentials.
+    #
+    # The SDK begins the OAuth flow when a request comes back 401 with a
+    # WWW-Authenticate challenge. A provider that answers a tool listing without
+    # one is never asked to authenticate, so connecting opens no browser and
+    # stores no token. Measured against Gmail on 2026-09-15:
+    #
+    #     tools/list                     200  no challenge
+    #     tools/call list_labels         401  www-authenticate: Bearer ...
+    #     tools/call <no such tool>      200  JSON-RPC error
+    #     resources/list                 404
+    #
+    # The third line is the one worth keeping: authorisation is checked after
+    # the tool is dispatched, so a made-up name provokes nothing. Only calling a
+    # real tool works, which is why this names one rather than inventing a probe.
+    #
+    # Empty by default, so a provider nobody has measured calls nothing. The
+    # named tool is still checked against the live listing before it is called:
+    # present, marked read-only by the provider, and needing no arguments.
+    probe_tool: str = ""
     # What to ask this provider for, on the routes where the ask is ours to
     # make. That is the application route in connect/oauth.py, which builds its
     # own authorize URL.
@@ -217,6 +238,11 @@ _GOOGLE = {
         provider="gmail", url="https://gmailmcp.googleapis.com/mcp/v1",
         public_client=False, auth="app",
         register_at="https://console.cloud.google.com/apis/credentials",
+        # Gmail answers tools/list without asking who you are, so connecting
+        # never reached a login. `list_labels` is the quietest of the three
+        # tools it marks read-only that take no arguments: label names, not
+        # drafts and not message subjects.
+        probe_tool="list_labels",
         note="confirmed by probing: 23 tools, 6 annotated readOnlyHint, which is better than "
              "Cloudflare manages. accounts.google.com advertises no "
              "registration_endpoint and only client_secret_post and "
@@ -288,7 +314,13 @@ def _user_servers() -> dict[str, RemoteServer]:
     out = {}
     for name, entry in raw.items():
         try:
-            out[name] = RemoteServer(provider=name, **entry)
+            # JSON has no tuples, and `scopes` is declared as one. Annotated so
+            # the spread below stays as loose as `json.loads` left it: narrowing
+            # the value type here makes every bool field a type error.
+            fields: dict[str, Any] = dict(entry)
+            if isinstance(fields.get("scopes"), list):
+                fields["scopes"] = tuple(fields["scopes"])
+            out[name] = RemoteServer(provider=name, **fields)
         except (TypeError, ValueError):
             continue
     return out
@@ -308,11 +340,14 @@ def remember(server: RemoteServer) -> None:
             existing = json.loads(USER_SERVERS.read_text())
         except (OSError, ValueError):
             existing = {}
-    existing[server.provider] = {
-        "url": server.url, "public_client": server.public_client,
-        "auth": server.auth, "note": server.note,
-        "register_at": server.register_at,
-    }
+    # Every field, rather than the five somebody remembered. This hand-wrote a
+    # list and had already lost three: `rest_takes_session`, `scopes` and
+    # `header` were dropped from an operator's own server every time this ran,
+    # silently, and `probe_tool` would have been the fourth. A field that only
+    # survives if someone remembers to add it here is a field that will not.
+    existing[server.provider] = {name: value
+                                 for name, value in asdict(server).items()
+                                 if name != "provider"}
     USER_SERVERS.write_text(json.dumps(existing, indent=2, sort_keys=True))
 
 

@@ -817,10 +817,21 @@ async def session_for(client: str, provider: str, *, keyring=None, keys=None,
     except BaseExceptionGroup as group:
         # The transport runs inside an anyio task group, so anything raised in
         # here comes back wrapped. A caller cannot catch these through a group,
-        # and they are the two a caller most needs: the wrong account, and a
-        # session that would have to prompt for a login.
+        # and they are the three a caller most needs: the wrong account, a
+        # session that would have to prompt for a login, and somebody pressing
+        # Ctrl+C.
+        #
+        # The last one was already broken and nothing noticed. The browser wait
+        # happens inside this group, so cancelling a login came back as a group
+        # and `cli.connect` fell past `except KeyboardInterrupt` into a
+        # traceback. `test_reconnect.py` covers the cancel by patching
+        # `connect_and_identify` to raise directly, which never passes through
+        # a task group and so could not see it. Same blind spot
+        # `passthrough.call_tool` already has a comment about: a fake session
+        # is not a task group.
         surfaced = [e for e in _flatten(group)
-                    if isinstance(e, (WrongAccount, NeedsLogin))]
+                    if isinstance(e, (WrongAccount, NeedsLogin,
+                                      KeyboardInterrupt))]
         if surfaced:
             raise surfaced[0] from None
         raise
@@ -840,6 +851,55 @@ async def tools_for(client: str, provider: str, **kwargs) -> list[str]:
         return [t.name for t in (await session.list_tools()).tools]
 
 
+
+async def _ask_for_credentials(session, provider: str, tools) -> None:
+    """Call one declared tool, so a provider that never asks has to ask.
+
+    The SDK logs in when a request comes back 401 with a challenge. A provider
+    that answers a tool listing without one is never asked to authenticate, so
+    connecting opened no browser and stored no token. Gmail is like this, and a
+    made-up tool name does not help: it checks authorisation after dispatch, so
+    only a real call produces the challenge.
+
+    The tool is declared on the provider (`RemoteServer.probe_tool`), never
+    guessed, and it is checked against the live listing before it is called:
+    present, marked read-only by the provider itself, and needing no arguments.
+    `_read_only` is three-valued and `None` means the provider said nothing, so
+    this compares against `True` rather than truthiness. Silence is not
+    permission.
+
+    The result is thrown away. An error result is not a failure either: the
+    token is the artifact, and whether labels came back is none of this
+    function's business.
+    """
+    server = server_for(provider)
+    wanted = getattr(server, "probe_tool", "") if server else ""
+    if not wanted:
+        return
+
+    from munim.remote.passthrough import _missing, _read_only
+
+    chosen = next((t for t in tools if t.name == wanted), None)
+    if chosen is None or _read_only(chosen) is not True or _missing(chosen, {}):
+        # Say which, because the three reasons need different fixes and the
+        # caller only sees "nothing was stored".
+        why = ("is not in its tool list" if chosen is None
+               else "is not marked read-only" if _read_only(chosen) is not True
+               else "needs arguments")
+        print(f"  {provider} declares {wanted} as its sign-in probe and it "
+              f"{why}, so nothing was called.", file=sys.stderr)
+        return
+
+    try:
+        await session.call_tool(wanted, {})
+    except Exception as exc:
+        # Printed, not swallowed. When Google refuses because the account is
+        # not a test user, this line is the only account of why the login did
+        # not happen, and the caller's "nothing was stored" cannot say it.
+        # `auth_for` already prints the sign-in URL from here, so stderr from
+        # this layer is established.
+        print(f"  {provider}.{wanted} did not complete: {exc}", file=sys.stderr)
+
 async def connect_and_identify(client: str, provider: str, *,
                                label: str | None = None,
                                **kwargs) -> tuple[list[str], str | None]:
@@ -858,5 +918,7 @@ async def connect_and_identify(client: str, provider: str, *,
     # is what every later session is then checked against.
     async with session_for(client, provider, verify=False, label=label,
                            **kwargs) as session:
-        tools = [t.name for t in (await session.list_tools()).tools]
+        listing = await session.list_tools()
+        tools = [t.name for t in listing.tools]
+        await _ask_for_credentials(session, provider, listing.tools)
         return tools, await identity_of(session, provider)

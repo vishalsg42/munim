@@ -1484,3 +1484,68 @@ byte. See `RESULTS.md`.
 anything else returns 501 naming `--token`, because pretending otherwise would
 fail deeper in. And this has proved a *plan*. Nothing has yet been written to a
 zone through it.
+
+---
+
+## D42: A provider that will not ask gets asked
+
+`munim connect <client> gmail` never worked. It printed "Opening your browser",
+opened none, stored no token, and reported success. Three separate fixes went in
+before the cause was found, and each was real: the config file was not read by
+every command, a tool listing was being taken as proof of a session, and the
+refusal explained how to register an application to somebody who had.
+
+The cause is one line of someone else's behaviour. The MCP SDK begins an OAuth
+flow when a request comes back `401` with a `WWW-Authenticate` challenge, and
+connecting only ever listed tools. Measured against Gmail on 2026-09-15:
+
+```
+tools/list                     200  no challenge
+tools/call list_labels         401  www-authenticate: Bearer ...
+tools/call <no such tool>      200  JSON-RPC error
+resources/list                 404
+```
+
+**The third line is the one that decided the design.** Authorisation is checked
+after the tool is dispatched, so a made-up name provokes nothing. There is no
+harmless synthetic probe. Connecting has to call a real tool or Gmail will never
+ask who you are.
+
+**Declared, not guessed.** `RemoteServer.probe_tool` names one tool, set on
+Gmail alone, following `rest_takes_session`: a measured fact with its
+measurement written beside it. Empty everywhere else, so every other provider
+calls nothing and behaves exactly as before.
+
+**A first draft had a fallback** that would pick any tool the provider marked
+read-only when none was declared. It was dropped for two reasons. It contradicts
+saying which tool will be called before calling it, because connect would
+announce `list_labels` and then call something else. And it would call an
+unnamed tool on an unmeasured provider on the strength of that provider's own
+hint. If Google renames the tool, refusing with "gmail no longer has
+list_labels" is a better outcome than quietly calling `search_threads` instead.
+
+**Silence is not permission.** `_read_only` is three-valued and `None` means the
+provider said nothing, so the check is `is True` rather than truthiness. A
+provider that annotates nothing gets no call.
+
+**The result is discarded, and an error result is not a failure.** The token is
+the artifact. A future reader will otherwise "fix" this by checking what came
+back.
+
+### Two things found while building it
+
+**Presence of a token is not evidence that a login happened.** The guard added
+the day before asked whether a token was stored. `SessionNeedingLogin` hides the
+token from the SDK and deletes nothing, so on a reconnect the real store still
+holds the old one: cancel the consent screen and the check passed on a token
+from last week. It compares the stored token before and after now. Changed, not
+present.
+
+**Cancelling a login was already not a clean cancel.** The browser wait happens
+inside an anyio task group, and `session_for` surfaced only `WrongAccount` and
+`NeedsLogin`, so Ctrl+C came back wrapped and fell past the CLI's
+`except KeyboardInterrupt` into a traceback. It had been true for Cloudflare all
+along. The test that covers cancelling patched `connect_and_identify` to raise
+directly, which never passes through a task group and so could not see it, the
+same blind spot `passthrough.call_tool` already carries a comment about: a fake
+session is not a task group.

@@ -1229,6 +1229,15 @@ def connect_via_mcp(client: str | None, provider: str) -> int:
         print(f"The consent screen will name the application "
               f"\"Munim ({client})\".", file=sys.stderr)
 
+    # Said before it happens, not explained afterwards. Connecting normally
+    # only lists what a provider offers; for one that will not ask for
+    # credentials on a listing, it has to call something, and which something
+    # is the operator's business before the call rather than after.
+    if getattr(server, "probe_tool", ""):
+        print(f"{provider} does not ask for credentials when listing its "
+              f"tools, so this calls one read-only tool ({server.probe_tool}) "
+              f"to make it ask. Nothing is written.", file=sys.stderr)
+
     # Make this actually be a login, without removing anything first.
     #
     # Opening a session is not authenticating: the SDK runs the browser flow
@@ -1243,9 +1252,19 @@ def connect_via_mcp(client: str | None, provider: str) -> int:
     # session exactly where it was. The first version of this deleted the token
     # up front and put it back on failure, which removed an operator's account
     # from their list the moment they cancelled.
-    from munim.remote.storage import SessionNeedingLogin
+    from munim.remote.storage import KeychainTokenStorage, SessionNeedingLogin
 
     fresh = SessionNeedingLogin(working_key, provider) if record else None
+
+    # What was stored before, so afterwards we can ask whether a login actually
+    # happened rather than whether a token exists.
+    #
+    # Presence is not evidence here, and this is the trap: `SessionNeedingLogin`
+    # *hides* the token from the SDK and deletes nothing, so the real store
+    # still holds last week's. Reconnect, cancel the consent screen, and a
+    # presence check passes on a token nobody just authorised. That is exactly
+    # the path this change makes routine.
+    before = KeychainTokenStorage(working_key, provider)._read("tokens")
 
     try:
         tools, account = asyncio.run(
@@ -1262,11 +1281,37 @@ def connect_via_mcp(client: str | None, provider: str) -> int:
               file=sys.stderr)
         return CANCELLED
 
+    # Did a login actually happen? Asked here, before anything else, because
+    # everything below assumes one did: `holder_of` dedupes a session,
+    # `adopt_provisional` asks an operator which client owns it, and `move_to`
+    # files it. Run after those, a failed connect asks somebody to name the
+    # owner of a session that does not exist and then reports success.
+    #
+    # Keyed on `working_key`, which is the record id or PROVISIONAL, so the one
+    # check covers the named path and the no-name path. The previous version
+    # was gated on `current_id is not None` and skipped the no-name path
+    # entirely.
+    #
+    # Changed, not merely present. See `before` above.
+    if server.auth in ("registers", "app"):
+        after = KeychainTokenStorage(working_key, provider)._read("tokens")
+        if after is None or after == before:
+            print(f"No {provider} session was stored, so nothing is connected.",
+                  file=sys.stderr)
+            if getattr(server, "probe_tool", ""):
+                print(f"  {provider} does not ask for credentials when listing "
+                      f"its tools, so this called {server.probe_tool} to make "
+                      f"it ask, and no new token came back.", file=sys.stderr)
+            print(f"  The consent screen was not completed. Run it again and "
+                  f"finish it. If no browser opened, check that this account "
+                  f"is a test user on the application: munim servers",
+                  file=sys.stderr)
+            return 2
+
     # Remember which account this turned out to be. Without it, connecting the
     # same account under a second label makes a second client and nothing can
     # tell: the sessions look different because the labels are.
     from munim.remote.accounts import holder_of
-    from munim.remote.storage import KeychainTokenStorage
 
     current_id = record.id if record else None
 
@@ -1340,33 +1385,6 @@ def connect_via_mcp(client: str | None, provider: str) -> int:
             # accident that brought them here.
             print(f"  This client was previously connected as {was!r}. "
                   f"It is now {account!r}.", file=sys.stderr)
-
-    # A tool listing is not a session.
-    #
-    # Gmail's MCP server answers tools/list with 200 and no authentication, so
-    # a connect that never logged in listed 23 tools and reported success while
-    # storing no token. `munim clients` then said "nothing connected" about the
-    # client the previous line had just called connected, and the operator had
-    # no way to tell which was lying.
-    #
-    # The token is the artifact. Nothing else is evidence that a login happened.
-    # `holds()` and not `_read("tokens")`, and "tokens" specifically: the
-    # registration is stored before the browser opens, so a failed connect
-    # leaves `client` behind and a truthiness test on the whole list passes.
-    # This is the `connect_via_mcp` path, where a token is always the outcome;
-    # Zoho, which stores an endpoint and no tokens, connects through
-    # `connect_by_url` and never reaches here.
-    if current_id is not None and "tokens" not in KeychainTokenStorage(
-            current_id, provider).holds():
-        print(f"No {provider} session was stored for {client}, so nothing is "
-              f"connected.\n"
-              f"  The browser flow did not complete. {provider} answers a tool "
-              f"listing without authenticating, which is why this got as far as "
-              f"it did.\n"
-              f"  Run it again and finish the consent screen. If it never "
-              f"opened, check that this account is a test user on the "
-              f"application: munim servers", file=sys.stderr)
-        return 2
 
     where = f"\n  account: {account}" if account and not naming else ""
     print(f"Connected {provider} for {client}: {len(tools)} tools.{where}",
