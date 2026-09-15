@@ -125,3 +125,56 @@ def test_munim_env_is_exclusive(tmp_path, monkeypatch):
 
     assert load() is None
     assert "A_TEST_KEY" not in os.environ
+
+
+# ---- the config file reaches every command, not just the ones that asked ----
+#
+# Three times now two commands have disagreed about the same fact because only
+# one of them had loaded `~/.munim/.env`. `doctor` against `config list`, then
+# `config` against `connect`: the second pair told an operator to register a
+# Gmail application they had already registered, while `munim config` listed it
+# on the line above. Loading happens once, at the entry point, so a new command
+# cannot reintroduce this by forgetting.
+
+def test_every_command_sees_the_config_file(tmp_path, monkeypatch):
+    from munim import cli
+
+    named = tmp_path / "config.env"
+    named.write_text("GMAIL_OAUTH_CLIENT_ID=from-the-file\n"
+                     "GMAIL_OAUTH_CLIENT_SECRET=also-from-the-file\n")
+    monkeypatch.setenv("MUNIM_ENV", str(named))
+    monkeypatch.delenv("GMAIL_OAUTH_CLIENT_ID", raising=False)
+    monkeypatch.delenv("GMAIL_OAUTH_CLIENT_SECRET", raising=False)
+
+    seen = {}
+
+    def fake(client, provider):
+        from munim.appcreds import resolve
+        seen["resolved"] = resolve(provider)
+        return 0
+
+    # The path Gmail actually takes. It never loaded the file itself, which is
+    # the whole bug.
+    monkeypatch.setattr(cli, "connect_via_mcp", fake)
+    cli._run(["connect", "personal", "gmail"])
+
+    assert seen.get("resolved") == ("from-the-file", "also-from-the-file"), \
+        "the command ran before the config file was read"
+
+
+def test_an_exported_value_still_wins_over_the_file(tmp_path, monkeypatch):
+    """`load` sets rather than overrides, and moving the call must not change
+    that: CI exports these deliberately."""
+    from munim import cli
+
+    named = tmp_path / "config.env"
+    named.write_text("GMAIL_OAUTH_CLIENT_ID=from-the-file\n")
+    monkeypatch.setenv("MUNIM_ENV", str(named))
+    monkeypatch.setenv("GMAIL_OAUTH_CLIENT_ID", "exported")
+
+    seen = {}
+    monkeypatch.setattr(cli, "connect_via_mcp",
+                        lambda c, p: seen.update(id=os.environ["GMAIL_OAUTH_CLIENT_ID"]) or 0)
+    cli._run(["connect", "personal", "gmail"])
+
+    assert seen["id"] == "exported"
