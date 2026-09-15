@@ -140,3 +140,48 @@ lists what it will remove and asks. `clients forget` destroys and `clients merge
 moves credentials between identities, and neither confirms nor takes `--yes`.
 Either they should, or the flag is a patch rather than a rule.
 
+
+## Getting found
+
+Not code, and listed here because it is the work that decides whether any of the
+above matters to anyone else.
+
+Munim is useful to people for whom two things are true at once: they drive a
+coding agent every day, and they look after more than one client's cloud
+accounts. Most coding-agent users have a single account of their own and never
+meet the problem. Most people juggling a dozen clients are not driving a coding
+agent yet. The overlap is small today, so reach is worth less than precision:
+fifty people inside it beat fifty thousand outside it.
+
+**Directory listings**, which are the passive half and mostly a form each:
+
+| | |
+|---|---|
+| [Glama](https://glama.ai/mcp/servers/vishalsg42/munim) | listed, scoring 100% |
+| [punkpeye/awesome-mcp-servers](https://github.com/punkpeye/awesome-mcp-servers) | merged |
+| mcp.so | not submitted |
+| PulseMCP | not submitted |
+| Smithery | not submitted |
+| mcpservers.org | not submitted |
+| Cline marketplace | not submitted |
+| Continue marketplace | not submitted |
+
+**The demo video** is the asset that converts, and the README asked people to
+imagine it for as long as it went unpublished:
+https://youtu.be/-9xnJVLzO18
+
+**Where to talk about it, and how.** Not "an MCP server with per-client
+credential isolation". The pain, in the words somebody would use for it: you log
+out of one client's Cloudflare to log into another's, several times a day, and
+the things that break are the silent ones. The architecture is the proof, not
+the pitch.
+
+**What not to lead with.** This project's own day-zero scan of the field found
+"evidence-first" and "human approval" to be the two most crowded framings in
+agent tooling. Both are true here and neither is distinguishing. The thing
+nobody else does is hold several accounts live at once in one process.
+
+**The barrier is trust, not features.** This holds other people's credentials,
+so `SECURITY.md` and the keychain design belong on the first screen rather than
+three clicks in. So does what the name means: a munim is a bookkeeper, which is
+the job this does, and the README has never said so.

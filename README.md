@@ -111,14 +111,21 @@ each gap. Start there whenever something is unclear.
 
 | | |
 |---|---|
+| **Demo video** | https://youtu.be/-9xnJVLzO18 |
 | **Repository** | https://github.com/vishalsg42/munim |
 | **Package** | https://pypi.org/project/munim/ |
 | **Listing** | https://glama.ai/mcp/servers/vishalsg42/munim |
 
-See it run without installing anything: `scripts/check_client.py` runs the check
-catalogue against one client and writes the report, and `scripts/fix_client.py`
-runs the repair graph. Both use the same code paths as the `check` and `fix` MCP
-tools, with no agent in front of them.
+The video is a real run against a real client's domain: fifteen deterministic
+checks find two faults, a Strands agent explains them in the owner's language,
+and the repair stops at an edge condition because that client is not connected to
+the provider a repair would need. Nothing in it is staged, which is also why
+there is no repair on camera.
+
+To run it yourself without installing anything: `scripts/check_client.py` runs
+the check catalogue against one client and writes the report, and
+`scripts/fix_client.py` runs the repair graph. Both use the same code paths as
+the `check` and `fix` MCP tools, with no agent in front of them.
 
 ## Documentation
 
