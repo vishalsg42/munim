@@ -119,6 +119,13 @@
         border-color: var(--rose-400); background: var(--rose-50); color: var(--rose-950);
         box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
       }
+      /* Did not apply, rather than did not run. Dashed for the same reason the
+         stage rail uses dashed for a step nobody asked for: solid-but-empty
+         reads as pending, and a viewer counting grey cells counts a hang. */
+      .chip.skip {
+        border-style: dashed; border-color: var(--stone-200);
+        background: #fff; color: var(--stone-400);
+      }
 
       section.card {
         margin-top: 32px; border-radius: 8px; padding: 24px;
@@ -308,7 +315,11 @@
             : "";
         }
         for (const check of CHECKS) {
-          chipEls[check].className = "chip " + (state.checks[check] || "idle");
+          const how = state.checks[check] || "idle";
+          chipEls[check].className = "chip " + how;
+          // The reason, on hover, for the one state whose meaning is not
+          // obvious from its colour.
+          chipEls[check].title = how === "skip" ? text(state.why[check]) : "";
         }
 
         renderAcross(state);

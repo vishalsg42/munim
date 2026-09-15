@@ -160,14 +160,22 @@ async def run_checks(domain: str, client: str, log: RunLog,
             client_id, client, connected_providers(client_id, keyring),
             keyring=keyring)
     for r in results:
-        if r.status == "skip":
-            continue
+        # A skip used to be dropped here, and the room heard nothing about it.
+        # Its chip then stayed the same grey as a check that had not run, which
+        # is the fault D38 removed from the stage rail still alive in the chip
+        # grid: four of sixteen cells sat grey through a healthy run, and grey
+        # reads as hung. A check that does not apply is a result, and saying so
+        # is the difference between "we could not answer this" and "we did not
+        # get there". Same `observation` kind; the news is in `detail`, because
+        # `Kind` is closed.
         log.append(
             client=client, stage="verify",
-            kind="observation" if r.status == "pass" else "finding",
+            kind="observation" if r.status != "fail" else "finding",
             human_text=r.human_text or r.operator_text,
             detail={"check": r.check, "operator_text": r.operator_text,
-                    "evidence": r.evidence, "resolver": r.resolver, **r.detail},
+                    "evidence": r.evidence, "resolver": r.resolver,
+                    **({"skipped": True} if r.status == "skip" else {}),
+                    **r.detail},
         )
     log.append(client=client, stage="verify", kind="stage_done",
                human_text=f"{sum(r.status == 'pass' for r in results)} of "

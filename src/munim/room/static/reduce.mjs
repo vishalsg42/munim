@@ -120,6 +120,9 @@ export const initialState = {
   runId: null,
   client: null, stage: null, stagesDone: [], stagesSeen: [], stagesOff: [],
   checks: {},
+  // Why a check was skipped, keyed by check, so the chip can say so on hover
+  // rather than leaving the viewer to guess what pale means.
+  why: {},
   finding: null, awaitingConfirm: null, escalated: null,
   // A cross-client answer has one finding per client, so one slot cannot hold
   // it: five clients used to render as one heading and one card, whichever
@@ -165,7 +168,17 @@ export function reduce(state, action) {
       next.stagesDone = [...new Set([...state.stagesDone, e.stage])];
       break;
     case "observation":
-      if (check) next.checks = { ...state.checks, [check]: "pass" };
+      // Three states, not two. A check that could not apply to this domain is
+      // not a check that passed, and it is certainly not one still pending:
+      // the Vercel three skip whenever no project serves the domain, and
+      // `dkim_chunking` skips when there is no key to inspect.
+      if (check) {
+        next.checks = { ...state.checks,
+                        [check]: e.detail.skipped ? "skip" : "pass" };
+        if (e.detail.skipped) {
+          next.why = { ...state.why, [check]: e.human_text || "" };
+        }
+      }
       // A stage that was deliberately not run, rather than one still pending.
       // Agents are off by default now, so `diagnose` would otherwise sit grey
       // for the whole run and read as a step that hung: exactly the confusion

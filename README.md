@@ -107,6 +107,19 @@ says so plainly.
 **`munim doctor`** says what is set up, what is not, and the exact command to fix
 each gap. Start there whenever something is unclear.
 
+## Where to find it
+
+| | |
+|---|---|
+| **Repository** | https://github.com/vishalsg42/munim |
+| **Package** | https://pypi.org/project/munim/ |
+| **Listing** | https://glama.ai/mcp/servers/vishalsg42/munim |
+
+See it run without installing anything: `scripts/check_client.py` runs the check
+catalogue against one client and writes the report, and `scripts/fix_client.py`
+runs the repair graph. Both use the same code paths as the `check` and `fix` MCP
+tools, with no agent in front of them.
+
 ## Documentation
 
 | | |
