@@ -19,17 +19,6 @@ references below point at it.
   are two fields now, the probe decides, and `--url` records the address and
   then opens the browser if the address asks for one. Two clients can hold two
   installations in different regions (D43).
-- **A client holding only an endpoint is no longer treated as holding nothing.**
-  Four places asked whether a session had tokens rather than whether it had
-  tokens *or* an address. `munim clients forget` was the expensive one: it
-  removed the registry row and left the address in the keychain under an id no
-  command could name again. `merge` neither refused two clients holding two
-  installations nor carried one that held only an address, and
-  `ask_across_clients` could not see such a client at all (D43).
-- **The Zoho provider page said the path was the credential.** It is not: the
-  endpoint answers a tool listing with a 401 and a Bearer challenge. The
-  original note was measured from a single tool call that answered without
-  credentials, which says something about that tool and not about the server.
 - **`munim connect <client> gmail` now actually connects.** It opens Google's
   consent screen and stores a token. Gmail answers a tool listing without asking
   who you are, and the OAuth flow only starts when a request comes back 401, so
@@ -57,6 +46,30 @@ references below point at it.
 - **A server you defined yourself keeps all of its settings.** Saving one wrote
   five fields by hand and silently dropped `rest_takes_session`, `scopes` and
   `header`.
+
+## 0.5.2
+
+### Fixed
+
+- **`munim evals` scored a DKIM answer on the word "provider".** The
+  `dkim_missing` rubric accepted any of "resend", "provider" or "dashboard",
+  and three sampled answers passed it on the phrase "helps email providers
+  confirm your emails are real", which is diagnosis rather than instruction.
+  None of the three said to go and get the record from Resend, which that
+  fixture calls the only right answer. It now scores where the value comes
+  from, and the row reads `fail 0/3` rather than `unreliable 2/3`. The verdict
+  changed because the rubric did; the advice was always this (D44).
+- **A client holding only an endpoint is no longer treated as holding nothing.**
+  Four places asked whether a session had tokens rather than whether it had
+  tokens *or* an address. `munim clients forget` was the expensive one: it
+  removed the registry row and left the address in the keychain under an id no
+  command could name again. `merge` neither refused two clients holding two
+  installations nor carried one that held only an address, and
+  `ask_across_clients` could not see such a client at all (D43).
+- **The Zoho provider page said the path was the credential.** It is not: the
+  endpoint answers a tool listing with a 401 and a Bearer challenge. The
+  original note was measured from a single tool call that answered without
+  credentials, which says something about that tool and not about the server.
 
 ## 0.5.1
 

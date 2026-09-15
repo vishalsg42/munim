@@ -1620,3 +1620,37 @@ empty. `munim clients forget` removed the registry row and left the address in
 the keychain filed under an id nothing could name again, which is the one of the
 four that lost something rather than merely failing to carry it. The predicate
 is now a single method on the store, so there is one place to be wrong about it.
+
+## D44: A rubric that can be satisfied by vocabulary agrees with the answer
+
+`tests/test_evals.py` opens with "the rubric has to score the action, not the
+vocabulary", written because the obvious version of that file scores the
+vocabulary and looks fine doing it. The fault it warns about was sitting in one
+of the fixtures the whole time.
+
+`dkim_missing` scored on `["resend", "provider", "dashboard"]`. Three sampled
+answers passed. All three passed on a clause like:
+
+> "...which helps email **providers** confirm your emails are real"
+
+That is diagnosis. The fixture's own `why` says there is no correct value to
+write here, that it comes from the mail provider, and that "the only right
+answer is to fetch it". None of the three answers said to fetch anything. The
+rubric was measuring whether a word appeared near a description of the problem.
+
+It now scores the source of the value, the way `two_spf` scores the operation
+rather than a keyword: any of the ways a model says "get it from Resend" or
+"from your provider". Checked both directions on real samples before it landed,
+because the first tightening was too narrow and rejected "Copy the DKIM record
+Resend shows in the dashboard", which is a correct answer. A rubric that rejects
+good answers is the same failure wearing the other sign.
+
+The row went from `unreliable 2/3` to `fail 0/3`. Nothing about the agent
+changed. The measurement stopped agreeing with it.
+
+**The general shape, which is why this is written down rather than just fixed:**
+a `must` list built from words that would appear in a good answer will also
+match a bad one, because bad answers discuss the same subject. A `must` list has
+to name the action, and the only way to know it does is to run both a good
+answer and a real failing one through it. There is now a test that does exactly
+that for this fixture.

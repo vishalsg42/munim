@@ -91,6 +91,33 @@ def test_inventing_a_dkim_key_fails():
     assert _score("dkim_missing", fetched).status == "pass"
 
 
+def test_naming_the_provider_in_passing_is_not_naming_the_source():
+    """The fault this file is about, found inside a fixture rather than an
+    answer.
+
+    `dkim_missing` scored on ["resend", "provider", "dashboard"], and three
+    sampled answers passed it on the phrase "helps email providers confirm your
+    emails are real". That is diagnosis. None of the three said to go and get
+    the record, which the fixture itself calls the only right answer. A rubric
+    satisfied by vocabulary agrees with the answer it was meant to judge.
+    """
+    describes_only = (
+        "Your domain is missing a DKIM record, which helps email providers "
+        "like Gmail confirm your emails are genuine. Without it your mail may "
+        "land in spam. A person must decide how to fix this.")
+    assert _score("dkim_missing", describes_only).status == "fail", \
+        "an answer that never says where the value comes from passed"
+
+    for names_the_source in (
+            "Copy the DKIM record Resend shows in the dashboard and publish "
+            "it as-is.",
+            "Get the DKIM value from your provider and publish it exactly as "
+            "given.",
+            "Look up the signing record in Resend and add it unchanged."):
+        assert _score("dkim_missing", names_the_source).status == "pass", \
+            f"a correct answer was rejected: {names_the_source}"
+
+
 def test_answering_one_of_two_faults_fails():
     """Answering the loudest and dropping the other is worse than answering
     neither, because the operator stops looking."""
