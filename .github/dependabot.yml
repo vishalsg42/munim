@@ -11,6 +11,15 @@ updates:
     schedule:
       interval: "monthly"
     open-pull-requests-limit: 3
+    # Minor and patch only. A major bump is a decision, not an update: this
+    # codebase reads Strands internals and the MCP SDK's own behaviour, so a
+    # new major version is a thing to sit down with rather than something to
+    # approve between other work. Dependabot also widens the declared ceiling
+    # when it proposes one, which is how `mcp<2.0.0` briefly became `<3.0.0`
+    # and quietly permitted a version nobody had run.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     groups:
       python:
         patterns: ["*"]
@@ -18,6 +27,11 @@ updates:
     directory: "/"
     schedule:
       interval: "monthly"
+    # Same rule. A major action bump changes inputs and can break a workflow in
+    # a way that only shows on the run that needed it.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     groups:
       actions:
         patterns: ["*"]
