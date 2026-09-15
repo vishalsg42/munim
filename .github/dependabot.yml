@@ -1,0 +1,23 @@
+# Security updates without a human remembering to look.
+#
+# Grouped and monthly on purpose: this is a small project with one maintainer,
+# and a weekly stream of single-dependency pull requests is a stream nobody
+# reads. Security advisories are not grouped or delayed by this file; GitHub
+# raises those as soon as they land.
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 3
+    groups:
+      python:
+        patterns: ["*"]
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    groups:
+      actions:
+        patterns: ["*"]
