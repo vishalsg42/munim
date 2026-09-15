@@ -56,12 +56,18 @@ nothing to do.
 
 **Two APIs, and the second is the one that matters.** `gmail.googleapis.com` is
 the Gmail API. `gmailmcp.googleapis.com` is the MCP server, a separate product
-with its own switch, and it is the endpoint Munim talks to. Enabling only the
-first gets you a completed browser login and then `403` on every call:
+with its own switch, and it is the endpoint Munim talks to. Without it you get a
+completed browser login and then `403` on every call:
 
 ```
 Gmail MCP API has not been used in project <n> before or it is disabled.
 ```
+
+Google's own advice on that message is worth repeating, because it was true here
+and cost an hour: *"If you enabled this API recently, wait a few minutes for the
+action to propagate to our systems and retry."* An enabled API can answer 403
+for a while, so the console showing **Enabled** and the call failing are not a
+contradiction.
 
 The helper enables both. Without `gcloud`, enable them by hand:
 
