@@ -22,7 +22,7 @@ classifiers = [
 
 dependencies = [
     "strands-agents==1.55.1",
-    "mcp>=1.23.0,<2.0.0",
+    "mcp>=1.23.0,<3.0.0",
     "keyring>=25.7.0",
     "httpx>=0.28.1",
     "dnspython>=2.7.0",
