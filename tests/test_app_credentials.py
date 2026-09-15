@@ -123,12 +123,17 @@ def test_the_session_uses_it(monkeypatch):
 
 def test_the_refusal_names_the_command_that_fixes_it(monkeypatch):
     """Telling somebody to set an environment variable is half an answer once
-    the values can live in the keychain."""
+    the values can live in the keychain.
+
+    The command moved, and the old message had it wrong: it said `munim config
+    set gmail` where the verb is `munim config app set`. A refusal naming a
+    command that does not exist is worse than one naming none.
+    """
     from munim.remote.session import NoRemoteServer, auth_for
 
     monkeypatch.setattr("munim.appcreds.default_backend", lambda: Backend())
 
-    with pytest.raises(NoRemoteServer, match="munim config set"):
+    with pytest.raises(NoRemoteServer, match="munim config app set"):
         auth_for("c_x", "gmail", label="Acme", keyring=Ring())
 
 

@@ -10,6 +10,15 @@ references below point at it.
 
 ### Fixed
 
+- **The refusal for a missing OAuth application explained how to register one,
+  whatever the cause.** Run from the repository it worked; run from the home
+  directory the same command said the provider "needs an application registered
+  by hand", to somebody who had registered one. The client id was in a `.env`,
+  the search walks up from the current directory, and from `~` it never reached
+  it. The message now names the file that was read and the keychain that was
+  checked, and says which of the two situations you are in. It also named a
+  command that does not exist: the verb is `munim config app set`.
+
 - **`munim connect <client> gmail` reported success without connecting
   anything.** It printed "Connected gmail for personal: 23 tools" while
   `munim clients` said nothing was connected, and `munim clients` was right.
