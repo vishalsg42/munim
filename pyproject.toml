@@ -21,8 +21,8 @@ classifiers = [
 ]
 
 dependencies = [
-    "strands-agents==1.54.0",
-    "mcp>=1.23.0,<2.0.0",
+    "strands-agents==1.55.1",
+    "mcp>=1.23.0,<3.0.0",
     "keyring>=25.7.0",
     "httpx>=0.28.1",
     "dnspython>=2.7.0",
@@ -35,8 +35,8 @@ dependencies = [
 # strands.models.gemini on disk with no `google` package underneath it. Until
 # these existed, build_model raised ModuleNotFoundError for two of the three
 # hosts this project documents, while doctor reported them as fine.
-gemini = ["strands-agents[gemini]==1.54.0"]
-anthropic = ["strands-agents[anthropic]==1.54.0"]
+gemini = ["strands-agents[gemini]==1.55.1"]
+anthropic = ["strands-agents[anthropic]==1.55.1"]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "respx>=0.22"]
 
 [project.scripts]
