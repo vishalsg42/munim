@@ -2,7 +2,7 @@
 
 **What this is not.** It is not evidence that the advice is good. This repository
 argues in `DECISIONS.md` that fixtures would not have found the bugs real client
-infrastructure found in an afternoon, and `SUBMISSION.md` says nothing shown is a
+infrastructure found in an afternoon, and nothing this repository shows is a
 fixture. Both stand. This is regression pinning: fixed inputs, a real model, and
 a table that says whether the answer drifted. The evidence of capability is still
 the live findings.

@@ -70,7 +70,7 @@ you need is what makes people decline an install.
 ### Feature Media (1–8 images, 16:9, **minimum 1920x1080**)
 
 `docs/stills/feature-01-the-finding.png` is ready and correctly sized. Reuse the
-rest of the gallery stills, see `docs/stills/README.md`:
+rest of the screenshots, see `docs/stills/README.md`:
 
 1. The launch mid-flight, check grid lighting up
 2. The SPF finding, with raw resolver output and timestamp

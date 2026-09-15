@@ -1,19 +1,19 @@
-# Devpost gallery stills
+# Screenshots
 
-Five images, scored under Presentation, and the only thing a judge sees before
-pressing play. They are the same frames as the video beats, so composing them
-costs nothing extra if the room is built with them in mind.
+Images for listings, README embeds and anywhere munim needs a picture rather
+than a paragraph. The same frames as the demo video, so composing them costs
+nothing extra.
 
-| # | Frame | Beat | Status |
-|---|---|---|---|
-| 1 | The estate at rest: client cards, varied providers and ages | 0:14 | needs 8–12 clients registered |
-| 2 | A launch mid-flight, the check grid lighting up | 2:20 | ready |
-| 3 | The SPF finding, with raw resolver output and timestamp | 2:56 | ✅ `03-the-finding.jpg` |
-| 4 | Received email headers: `spf=pass dkim=pass dmarc=pass` | 3:48 | needs a real send |
-| 5 | The launch report, written for the business owner | 4:16 | ready |
+| # | Frame | Status |
+|---|---|---|
+| 1 | The estate at rest: every client and what each is connected to | `munim clients` |
+| 2 | The control room mid-check, the grid lighting up | ready |
+| 3 | A finding, with the raw resolver output and a timestamp | `03-the-finding.jpg` |
+| 4 | The report, written for the business owner | ready |
 
-**Not terminal screenshots.** Text renders badly as a thumbnail and tells a judge
-nothing they cannot read in the README.
+**Not terminal screenshots as the lead image.** Text renders badly as a
+thumbnail and says nothing a reader cannot get from the README faster.
 
-Capture with the browser full-screened, no chrome, real favicon and title, cursor
-hidden, notifications off. `localhost:8977` must never appear in frame.
+Capture with the browser full-screened, no chrome, real favicon and title,
+cursor hidden, notifications off. `localhost:8977` must never appear in frame,
+and neither must a client's name unless they have agreed to it.

@@ -1,9 +1,11 @@
 """Day-one gate: does a Strands agent reach a model and use a tool?
 
 Tries Bedrock first, then falls back to a direct provider. The fallback exists
-because Bedrock access is blocked account-wide for some entrants, and Devpost
-confirmed on 2026-08-25 that a submission "stays eligible if you build it with
-Strands Agents and a different model host". See docs/DECISIONS.md D16.
+because Bedrock access can be blocked account-wide and stay blocked: an Indian
+AWS account is billed through AISPL, and AWS Marketplace does not accept its
+stored cards, so model access fails with INVALID_PAYMENT_INSTRUMENT no matter
+what IAM says. Strands is model-portable, so the whole thing moves hosts with
+one environment variable. See docs/DECISIONS.md D16.
 """
 
 import os
