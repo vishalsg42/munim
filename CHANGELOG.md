@@ -6,6 +6,38 @@ Entries describe what changed for somebody using munim. The reasoning behind
 each decision lives in [docs/DECISIONS.md](docs/DECISIONS.md), and the numbered
 references below point at it.
 
+## 0.6.0
+
+### Fixed
+
+- **`munim connect <client> gmail` now actually connects.** It opens Google's
+  consent screen and stores a token. Gmail answers a tool listing without asking
+  who you are, and the OAuth flow only starts when a request comes back 401, so
+  connecting never reached a login. It now calls one tool Gmail itself marks
+  read-only, `list_labels`, purely to make it ask; connect says which tool
+  before it runs and throws the result away. No other provider calls anything
+  (D42).
+- **The Gmail setup never enabled the API munim talks to.**
+  `gmailmcp.googleapis.com` is a separate product from `gmail.googleapis.com`
+  with its own switch, and `scripts/setup_google_oauth.py` only ever enabled the
+  second. Anyone following the setup page had to find the first for themselves.
+  It enables both now, and the provider page says why there are two.
+- **A provider that refuses now says why instead of raising a traceback.** The
+  transport calls `raise_for_status`, so a 4xx came back wrapped in an anyio
+  group and printed sixty frames. Google puts its reason in the response body,
+  which was the one thing those frames did not contain.
+- **A cancelled reconnect no longer reports success.** Reconnecting hides the
+  stored token rather than deleting it, so a check for "is there a token"
+  passed on the previous one after somebody closed the consent screen. Connect
+  compares the token before and after.
+- **Ctrl+C during a browser login is a clean cancel again.** The wait happens
+  inside a task group that wraps everything, so a cancel arrived as a group and
+  ended in a traceback rather than "Cancelled. Your existing session is
+  untouched." This had been true for every provider with a browser login.
+- **A server you defined yourself keeps all of its settings.** Saving one wrote
+  five fields by hand and silently dropped `rest_takes_session`, `scopes` and
+  `header`.
+
 ## 0.5.1
 
 ### Fixed

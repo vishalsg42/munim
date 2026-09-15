@@ -243,8 +243,12 @@ def test_no_issuer_in_the_response_still_proceeds(monkeypatch):
 #
 # Gmail's MCP server answers tools/list with 200 and no authentication, so a
 # connect where the browser flow never completed still listed twenty-three
-# tools and took that as success. The registration is seeded before the browser
-# opens, so a token was the only thing missing and nothing looked at it.
+# tools and took that as success.
+#
+# The guard asks whether the stored token *changed*, not whether one exists.
+# Presence is not evidence: `SessionNeedingLogin` hides the token from the SDK
+# and deletes nothing, so on a reconnect the real store still holds the old one
+# and a presence check passes on a token nobody just authorised.
 
 def _registry_with(tmp_path, name="personal"):
     from munim.registry import ClientRecord, Registry
@@ -253,31 +257,51 @@ def _registry_with(tmp_path, name="personal"):
     return registry
 
 
-def test_a_connect_that_stored_no_token_is_not_a_connection(tmp_path, monkeypatch, capsys):
-    from munim import cli
+def _storage_holding(tokens_by_call):
+    """A storage double whose stored token changes, or does not, between reads.
 
-    registry = _registry_with(tmp_path)
-    monkeypatch.setattr(cli, "_registry", lambda: registry)
+    `tokens_by_call` is read in order: the first value is what was there before
+    the connect, the second is what is there after.
+    """
+    class Storage:
+        reads = list(tokens_by_call)
 
-    async def listed_tools_but_never_logged_in(client, provider, **kwargs):
-        return ["one"] * 23, None
+        def __init__(self, client, provider, keyring=None):
+            pass
 
-    from munim.remote import session as session_mod
-    monkeypatch.setattr(session_mod, "connect_and_identify",
-                        listed_tools_but_never_logged_in)
+        def _read(self, kind):
+            if kind != "tokens":
+                return {"seeded": True}
+            return Storage.reads.pop(0) if Storage.reads else None
 
-    class OnlyTheRegistration:
-        def __init__(self, client, provider, keyring=None): pass
-        def holds(self): return ["client"]          # seeded before the browser
+        def holds(self): return ["client"]
         def account(self): return None
         def remember_account(self, account): pass
         def forget(self): return []
         def move_to(self, other): pass
 
-    from munim.remote import storage as storage_mod
-    monkeypatch.setattr(storage_mod, "KeychainTokenStorage", OnlyTheRegistration)
+    return Storage
 
-    code = cli.connect_via_mcp("personal", "gmail")
+
+def _run_connect(monkeypatch, tmp_path, storage, tools=23, name="personal"):
+    from munim import cli
+    from munim.remote import session as session_mod
+    from munim.remote import storage as storage_mod
+
+    registry = _registry_with(tmp_path, name)
+    monkeypatch.setattr(cli, "_registry", lambda: registry)
+
+    async def listed(client, provider, **kwargs):
+        return ["one"] * tools, None
+
+    monkeypatch.setattr(session_mod, "connect_and_identify", listed)
+    monkeypatch.setattr(storage_mod, "KeychainTokenStorage", storage)
+    return cli.connect_via_mcp(name, "gmail")
+
+
+def test_a_connect_that_stored_no_token_is_not_a_connection(
+        tmp_path, monkeypatch, capsys):
+    code = _run_connect(monkeypatch, tmp_path, _storage_holding([None, None]))
     said = capsys.readouterr().err
 
     assert code == 2, "reported success with no token stored"
@@ -285,32 +309,36 @@ def test_a_connect_that_stored_no_token_is_not_a_connection(tmp_path, monkeypatc
     assert "23 tools" not in said, "counted tools it could read without logging in"
 
 
-def test_a_connect_that_stored_a_token_still_succeeds(tmp_path, monkeypatch, capsys):
-    """The guard must not refuse a real login."""
-    from munim import cli
+def test_a_cancelled_reconnect_is_not_a_connection(tmp_path, monkeypatch, capsys):
+    """The one a presence check gets wrong.
 
-    registry = _registry_with(tmp_path)
-    monkeypatch.setattr(cli, "_registry", lambda: registry)
+    Reconnecting hides the old token from the SDK rather than deleting it, so
+    after a cancelled consent screen the store still holds it. Asking "is there
+    a token" answers yes about a token from last week.
+    """
+    old = {"access_token": "from-last-week"}
+    code = _run_connect(monkeypatch, tmp_path, _storage_holding([old, old]))
+    said = capsys.readouterr().err
 
-    async def logged_in(client, provider, **kwargs):
-        return ["one"] * 23, None
+    assert code == 2, "an unchanged token was read as a fresh login"
+    assert "nothing is connected" in said
 
-    from munim.remote import session as session_mod
-    monkeypatch.setattr(session_mod, "connect_and_identify", logged_in)
 
-    class ARealSession:
-        def __init__(self, client, provider, keyring=None): pass
-        def holds(self): return ["client", "tokens"]
-        def account(self): return None
-        def remember_account(self, account): pass
-        def forget(self): return []
-        def move_to(self, other): pass
-
-    from munim.remote import storage as storage_mod
-    monkeypatch.setattr(storage_mod, "KeychainTokenStorage", ARealSession)
-
-    code = cli.connect_via_mcp("personal", "gmail")
+def test_a_real_login_succeeds(tmp_path, monkeypatch, capsys):
+    """The guard must not refuse a login that happened."""
+    code = _run_connect(
+        monkeypatch, tmp_path,
+        _storage_holding([{"access_token": "old"}, {"access_token": "new"}]))
     said = capsys.readouterr().err
 
     assert code == 0
     assert "23 tools" in said
+
+
+def test_a_first_connect_succeeds(tmp_path, monkeypatch, capsys):
+    """Nothing before, something after."""
+    code = _run_connect(monkeypatch, tmp_path,
+                        _storage_holding([None, {"access_token": "new"}]))
+
+    assert code == 0
+    assert "23 tools" in capsys.readouterr().err

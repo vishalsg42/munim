@@ -54,7 +54,24 @@ because project ids are global and a script that makes one per run leaves a
 trail behind. Rerunning it is safe: a client id already in `.env` means there is
 nothing to do.
 
-If you do not have `gcloud`, enable the Gmail API here instead:
+**Two APIs, and the second is the one that matters.** `gmail.googleapis.com` is
+the Gmail API. `gmailmcp.googleapis.com` is the MCP server, a separate product
+with its own switch, and it is the endpoint Munim talks to. Without it you get a
+completed browser login and then `403` on every call:
+
+```
+Gmail MCP API has not been used in project <n> before or it is disabled.
+```
+
+Google's own advice on that message is worth repeating, because it was true here
+and cost an hour: *"If you enabled this API recently, wait a few minutes for the
+action to propagate to our systems and retry."* An enabled API can answer 403
+for a while, so the console showing **Enabled** and the call failing are not a
+contradiction.
+
+The helper enables both. Without `gcloud`, enable them by hand:
+
+`https://console.cloud.google.com/apis/library/gmailmcp.googleapis.com`
 `https://console.cloud.google.com/apis/library/gmail.googleapis.com`
 
 ### 3. Configure the consent screen, once per project
@@ -123,6 +140,21 @@ still count against the cap.
 munim connect "<client>" gmail
 munim doctor
 ```
+
+**Connecting calls one Gmail tool, and says so first.** Gmail answers a tool
+listing with 200 and no challenge, and the OAuth flow only starts when a request
+comes back 401. Measured on 2026-09-15:
+
+```
+tools/list                     200  no challenge
+tools/call list_labels         401  www-authenticate: Bearer ...
+tools/call <no such tool>      200  JSON-RPC error
+```
+
+The third line is why a made-up name is no use: Gmail checks authorisation after
+dispatching the tool. So connect calls `list_labels`, which Gmail marks
+read-only and which takes no arguments, purely to make it ask you to sign in.
+The result is thrown away. No other provider here needs this.
 
 ## What you are granting
 

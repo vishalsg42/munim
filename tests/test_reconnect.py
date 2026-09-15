@@ -23,6 +23,7 @@ whether to log in, and every other read and every write goes to the real store.
 A login that completes overwrites it; one that does not writes nothing.
 """
 
+import asyncio
 import json
 
 import pytest
@@ -231,3 +232,56 @@ def test_cancelling_is_not_a_traceback(monkeypatch, capsys):
 
     assert code == cli.CANCELLED
     assert "Cancelled" in capsys.readouterr().err
+
+
+# ---- cancelling a login is still a cancel --------------------------------
+#
+# The browser wait happens inside `session_for`'s anyio task group, and that
+# group wraps everything, including BaseException. `session_for` surfaced only
+# WrongAccount and NeedsLogin, so Ctrl+C at a consent screen came back as a
+# BaseExceptionGroup, fell past `except KeyboardInterrupt` in the CLI, and
+# ended in a traceback instead of "Cancelled. Your existing session is
+# untouched."
+#
+# The test above covers the cancel by patching `connect_and_identify` to raise
+# directly, which never passes through a task group and so could never see
+# this. Same blind spot `passthrough.call_tool` has a comment about: a fake
+# session is not a task group.
+
+def test_a_cancel_inside_the_transport_escapes_the_group(monkeypatch):
+    """Raised inside the task group, caught outside it as itself.
+
+    Exercised through the real `session_for`, with only the transport faked,
+    because the wrapping is the whole subject: a double that raises before the
+    group exists cannot show it.
+    """
+    from contextlib import asynccontextmanager
+
+    from munim.remote import session as session_mod
+
+    @asynccontextmanager
+    async def cancelled_transport(url, auth=None, **kwargs):
+        raise BaseExceptionGroup("", [KeyboardInterrupt()])
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(session_mod, "streamablehttp_client", cancelled_transport)
+    monkeypatch.setattr(session_mod, "auth_for", lambda *a, **k: None)
+
+    async def run():
+        async with session_mod.session_for("c_1", "cloudflare",
+                                           keyring=Ring(), verify=False):
+            pass  # pragma: no cover
+
+    with pytest.raises(KeyboardInterrupt):
+        asyncio.run(run())
+
+
+def test_session_for_surfaces_a_cancel_out_of_the_group():
+    """The fix, at the layer that knows about the wrapping."""
+    import inspect
+
+    from munim.remote.session import session_for
+
+    source = inspect.getsource(session_for)
+    assert "KeyboardInterrupt" in source, \
+        "a cancel inside the transport still comes back as a group"

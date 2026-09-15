@@ -57,6 +57,17 @@ Claude Code's own `~/.claude/.credentials.json` make. It is recorded in D30 with
 what it costs, including that a backup or a disk image holds it in the clear.
 Encrypting it with a key stored beside it would be theatre.
 
+**Connecting Gmail calls one of its tools.** Gmail answers a tool listing
+without asking who you are and only challenges on a real tool call, so
+connecting has to call something or no login ever happens. It calls the tool the
+provider is declared with, `list_labels`, and only after checking against the
+live listing that Gmail itself marks it read-only and that it needs no
+arguments. The tool is named on screen before it runs, its result is discarded,
+and it is the only provider that does this. A provider that annotates nothing
+gets no call and a refusal instead, because an unannotated tool is never
+assumed safe. One consequence worth stating: this call does not go through
+`passthrough` and so is not in the run log.
+
 **`call_provider_api` can send any HTTP request to a provider's API.** It is
 deliberately powerful and deliberately narrow: a path and never a URL, one named
 client's credential, the provider's host asserted before the request is sent,
