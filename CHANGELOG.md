@@ -10,6 +10,15 @@ references below point at it.
 
 ### Fixed
 
+- **`munim connect <client> gmail` reported success without connecting
+  anything.** It printed "Connected gmail for personal: 23 tools" while
+  `munim clients` said nothing was connected, and `munim clients` was right.
+  Gmail's MCP server answers a tool listing with HTTP 200 and no
+  authentication, so a connect whose browser flow never completed still got
+  twenty-three tools back and took that as proof of a session. The token is the
+  only artifact that says a login happened, and now nothing claims success
+  without one.
+
 - **`munim connect <client> gmail` refused an application that was already
   registered.** `munim config` listed the Gmail client id on one line while
   `connect` told you to go and register one, in the same minute. Both were
