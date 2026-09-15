@@ -157,3 +157,62 @@ def test_remember_round_trips_every_field(tmp_path, monkeypatch):
     assert back.rest_takes_session is True
     assert back.scopes == ("a", "b"), "JSON has no tuples and the field is one"
     assert back.header == "X-Key"
+
+
+# ---- a provider that refuses says why, and it is not a traceback ----------
+#
+# Connecting Gmail completed the browser login and then answered 403 on every
+# call. The operator got sixty lines of anyio and httpx frames. Google had
+# written the reason in the response body:
+#
+#     Gmail MCP API has not been used in project <n> before or it is disabled.
+#
+# which is the whole answer: gmailmcp.googleapis.com is a different product from
+# gmail.googleapis.com and the setup helper only ever enabled the second.
+
+class Response:
+    def __init__(self, status, payload=None, text=""):
+        self.status_code = status
+        self._payload = payload
+        self.text = text
+
+    def json(self):
+        if self._payload is None:
+            raise ValueError("not json")
+        return self._payload
+
+
+def test_the_reason_is_dug_out_of_a_jsonrpc_result():
+    """Google returns 403 with a JSON-RPC *result*, not an error, and puts the
+    sentence in content[0].text."""
+    from munim.cli import _provider_said
+
+    said = _provider_said(Response(403, {
+        "jsonrpc": "2.0", "id": 1,
+        "result": {"content": [{"text": "Gmail MCP API has not been used in "
+                                        "project 1 before or it is disabled."}]}}))
+
+    assert "has not been used in project" in said
+
+
+def test_a_plain_jsonrpc_error_is_read_too():
+    from munim.cli import _provider_said
+
+    said = _provider_said(Response(403, {"error": {"message": "permission denied"}}))
+    assert said == "permission denied"
+
+
+def test_a_body_that_is_not_json_still_says_something():
+    from munim.cli import _provider_said
+
+    assert _provider_said(Response(500, None, "upstream exploded")) == "upstream exploded"
+
+
+def test_an_http_error_escapes_the_task_group_rather_than_the_group():
+    """`session_for` surfaces it un-grouped, the same as the other three, so the
+    CLI can catch it and print one line."""
+    import inspect
+
+    from munim.remote.session import session_for
+
+    assert "HTTPStatusError" in inspect.getsource(session_for)

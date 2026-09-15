@@ -54,7 +54,18 @@ because project ids are global and a script that makes one per run leaves a
 trail behind. Rerunning it is safe: a client id already in `.env` means there is
 nothing to do.
 
-If you do not have `gcloud`, enable the Gmail API here instead:
+**Two APIs, and the second is the one that matters.** `gmail.googleapis.com` is
+the Gmail API. `gmailmcp.googleapis.com` is the MCP server, a separate product
+with its own switch, and it is the endpoint Munim talks to. Enabling only the
+first gets you a completed browser login and then `403` on every call:
+
+```
+Gmail MCP API has not been used in project <n> before or it is disabled.
+```
+
+The helper enables both. Without `gcloud`, enable them by hand:
+
+`https://console.cloud.google.com/apis/library/gmailmcp.googleapis.com`
 `https://console.cloud.google.com/apis/library/gmail.googleapis.com`
 
 ### 3. Configure the consent screen, once per project

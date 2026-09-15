@@ -18,6 +18,8 @@ from munim.connect.token import TokenConnector
 from munim.container import KEY_PROVIDERS, KeychainBackend
 from munim.env import load as load_env
 from munim.pick import BACK, choose
+from httpx import HTTPStatusError
+
 from munim.registry import ClientRecord, Registry, UnknownClient
 from munim import words
 
@@ -1158,6 +1160,31 @@ def connect_by_url(client: str, provider: str, url: str) -> int:
     return 0
 
 
+
+def _provider_said(response) -> str:
+    """The provider's own explanation, out of whatever shape it used.
+
+    Google answers a refused MCP call with HTTP 403 and a JSON-RPC *result*
+    whose content carries the sentence that actually helps, in this case that
+    the Gmail MCP API is a separate product from the Gmail API and was never
+    enabled. Worth digging for: it names the fix and a URL.
+    """
+    try:
+        body = response.json()
+    except Exception:
+        return (response.text or "").strip()[:400]
+
+    if isinstance(body, dict):
+        for chunk in (body.get("result") or {}).get("content") or []:
+            text = (chunk or {}).get("text")
+            if text:
+                return " ".join(str(text).split())[:400]
+        error = body.get("error")
+        if isinstance(error, dict) and error.get("message"):
+            return str(error["message"])[:400]
+    return (response.text or "").strip()[:400]
+
+
 def connect_via_mcp(client: str | None, provider: str) -> int:
     """Connect through the provider's own MCP server.
 
@@ -1273,6 +1300,16 @@ def connect_via_mcp(client: str | None, provider: str) -> int:
                                  **({"keyring": fresh} if fresh else {})))
     except NoRemoteServer as exc:
         print(str(exc), file=sys.stderr)
+        return 2
+    except HTTPStatusError as exc:
+        # The provider answered, and said why. Google returns 403 with the
+        # reason in the body, and before this the operator got sixty lines of
+        # anyio and httpx frames with that sentence nowhere in them.
+        print(f"{provider} refused the request: HTTP "
+              f"{exc.response.status_code}.", file=sys.stderr)
+        said = _provider_said(exc.response)
+        if said:
+            print(f"  {said}", file=sys.stderr)
         return 2
     except KeyboardInterrupt:
         # Closing the browser and pressing Ctrl+C is the most likely way this

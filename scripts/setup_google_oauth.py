@@ -37,7 +37,18 @@ import sys
 from pathlib import Path
 
 ENV = Path(".env")
-API = {"gmail": "gmail.googleapis.com", "stitch": "stitch.googleapis.com"}
+# Two APIs for Gmail, and the second is the one that matters.
+#
+# `gmail.googleapis.com` is the Gmail API. `gmailmcp.googleapis.com` is the MCP
+# server, a separate product with its own switch, and it is the endpoint munim
+# talks to. Enabling only the first got as far as a completed browser login and
+# then 403 on every call, with the reason in a body the transport threw away:
+#
+#     Gmail MCP API has not been used in project <n> before or it is disabled.
+#
+# Both, because the MCP server reaches Gmail on your behalf.
+API = {"gmail": ("gmailmcp.googleapis.com", "gmail.googleapis.com"),
+       "stitch": ("stitch.googleapis.com",)}
 REDIRECT = "http://localhost:8976/oauth/callback"
 
 
@@ -107,17 +118,19 @@ def main() -> int:
 
     print(f"Project: {project}")
 
-    api = API[provider]
-    code, out = _run(["gcloud", "services", "enable", api, "--project", project],
+    apis = API[provider]
+    code, out = _run(["gcloud", "services", "enable", *apis, "--project", project],
                      timeout=180.0)
     if code != 0:
-        print(f"\nCould not enable {api}: {out}", file=sys.stderr)
+        print(f"\nCould not enable {', '.join(apis)}: {out}", file=sys.stderr)
         print("You may not have permission on that project, or billing may not "
-              "be linked. Enabling it by hand does the same job:", file=sys.stderr)
-        print(f"  https://console.cloud.google.com/apis/library/{api}?project={project}",
-              file=sys.stderr)
+              "be linked. Enabling them by hand does the same job:", file=sys.stderr)
+        for api in apis:
+            print(f"  https://console.cloud.google.com/apis/library/{api}?project={project}",
+                  file=sys.stderr)
         return 1
-    print(f"Enabled {api}. (Already enabled is a no-op, so this is safe to rerun.)")
+    print(f"Enabled {', '.join(apis)}. "
+          f"(Already enabled is a no-op, so this is safe to rerun.)")
 
     # The one step Google does not expose. gcloud's only OAuth command creates
     # Identity-Aware Proxy clients and says so.

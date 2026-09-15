@@ -19,6 +19,8 @@ import time
 import urllib.parse
 from contextlib import asynccontextmanager, contextmanager
 
+from httpx import HTTPStatusError
+
 from mcp import ClientSession
 from mcp.client.auth import OAuthClientProvider
 from mcp.client.streamable_http import streamablehttp_client
@@ -829,9 +831,14 @@ async def session_for(client: str, provider: str, *, keyring=None, keys=None,
         # a task group and so could not see it. Same blind spot
         # `passthrough.call_tool` already has a comment about: a fake session
         # is not a task group.
+        # httpx.HTTPStatusError joins them for the same reason. The transport
+        # calls raise_for_status on the POST, so a provider answering 4xx comes
+        # back as a group and the operator gets sixty lines of anyio and httpx
+        # frames. Google returns 403 with the reason written plainly in the
+        # body, and that body was the one thing the traceback did not show.
         surfaced = [e for e in _flatten(group)
                     if isinstance(e, (WrongAccount, NeedsLogin,
-                                      KeyboardInterrupt))]
+                                      KeyboardInterrupt, HTTPStatusError))]
         if surfaced:
             raise surfaced[0] from None
         raise

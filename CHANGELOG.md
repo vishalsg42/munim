@@ -17,6 +17,15 @@ references below point at it.
   read-only, `list_labels`, purely to make it ask; connect says which tool
   before it runs and throws the result away. No other provider calls anything
   (D42).
+- **The Gmail setup enabled the wrong API.** `gmailmcp.googleapis.com` is a
+  separate product from `gmail.googleapis.com`, and only the second was ever
+  switched on, so a completed login was followed by `403` on every call.
+  `scripts/setup_google_oauth.py` enables both, and the provider page says why
+  there are two.
+- **A provider that refuses now says why instead of raising a traceback.** The
+  transport calls `raise_for_status`, so a 4xx came back wrapped in an anyio
+  group and printed sixty frames. Google puts its reason in the response body,
+  which was the one thing those frames did not contain.
 - **A cancelled reconnect no longer reports success.** Reconnecting hides the
   stored token rather than deleting it, so a check for "is there a token"
   passed on the previous one after somebody closed the consent screen. Connect
