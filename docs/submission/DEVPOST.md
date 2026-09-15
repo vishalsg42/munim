@@ -1,11 +1,12 @@
-# Devpost entry: copy, paste, submit
+# The project, written out
 
-Fill the form in one sitting. Each step ticks only when every required field on
-it is filled, and it lets you navigate away without warning. Submit as soon as
-the steps tick: you can keep editing afterwards, you cannot submit late.
+Drafted as a hackathon entry for the 2026-09-14 deadline, which passed unfiled.
+Kept because it is the clearest statement of what this is and why it is built
+the way it is, and because the next time it needs describing, to a judge, a user
+or an employer, the answers are already here.
 
-Watch for browser autofill putting a company name into **Organization name** on
-a personal entry. That is an eligibility question.
+The two that matter most are under **How we built it**: why this is a graph and
+not a swarm, and why the tools that write take no arguments.
 
 ---
 
@@ -110,7 +111,6 @@ the repair path exercised against more than one zone.
 - Repository: https://github.com/vishalsg42/munim
 - Package: https://pypi.org/project/munim/
 - Listing: https://glama.ai/mcp/servers/vishalsg42/munim
-- Video: VIDEO_URL
 
 Every link is public and needs no credentials.
 

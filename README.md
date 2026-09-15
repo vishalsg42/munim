@@ -107,22 +107,18 @@ says so plainly.
 **`munim doctor`** says what is set up, what is not, and the exact command to fix
 each gap. Start there whenever something is unclear.
 
-## The demo
+## Where to find it
 
 | | |
 |---|---|
-| **Video** | `VIDEO_URL` |
-| **Devpost entry** | `DEVPOST_URL` |
 | **Repository** | https://github.com/vishalsg42/munim |
 | **Package** | https://pypi.org/project/munim/ |
 | **Listing** | https://glama.ai/mcp/servers/vishalsg42/munim |
 
-The video is a single run against a real client's domain with their operator
-driving it: the check catalogue finding two faults, a Strands triage agent
-explaining them in the owner's language, the repair edge refusing because that
-client is not connected to the provider a repair would need, and the report the
-client receives. Nothing in it is staged, which is also why there is no repair
-on camera.
+See it run without installing anything: `scripts/check_client.py` runs the check
+catalogue against one client and writes the report, and `scripts/fix_client.py`
+runs the repair graph. Both use the same code paths as the `check` and `fix` MCP
+tools, with no agent in front of them.
 
 ## Documentation
 
