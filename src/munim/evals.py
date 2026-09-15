@@ -135,7 +135,19 @@ FIXTURES = [
             "the mail provider. The only right answer is to fetch it, and the "
             "wrong one is to invent a key.",
         failures=[_dkim_missing()],
-        must=[["resend", "provider", "dashboard"]],
+        # Where the value comes from, not the word "provider". The first
+        # version of this list was ["resend", "provider", "dashboard"], and
+        # three sampled answers passed it on the phrase "email providers
+        # confirm your emails are real", which is diagnosis rather than
+        # instruction: none of the three said to go and fetch the record.
+        # A rubric that can be satisfied by vocabulary agrees with the answer
+        # it was meant to judge, which is the fault `tests/test_evals.py`
+        # exists to catch and which had gone unnoticed inside a fixture.
+        must=[["from resend", "resend shows", "resend provides", "ask resend",
+               "resend's dashboard", "resend dashboard", "in the dashboard",
+               "from your provider", "from the provider",
+               "provider's dashboard", "copy the", "fetch", "look up",
+               "obtain"]],
         must_not=[["v=dkim1; k=rsa; p=mii", "p=miibijanbgkq"]],
     ),
     Fixture(
