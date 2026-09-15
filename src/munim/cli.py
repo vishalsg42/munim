@@ -1341,6 +1341,33 @@ def connect_via_mcp(client: str | None, provider: str) -> int:
             print(f"  This client was previously connected as {was!r}. "
                   f"It is now {account!r}.", file=sys.stderr)
 
+    # A tool listing is not a session.
+    #
+    # Gmail's MCP server answers tools/list with 200 and no authentication, so
+    # a connect that never logged in listed 23 tools and reported success while
+    # storing no token. `munim clients` then said "nothing connected" about the
+    # client the previous line had just called connected, and the operator had
+    # no way to tell which was lying.
+    #
+    # The token is the artifact. Nothing else is evidence that a login happened.
+    # `holds()` and not `_read("tokens")`, and "tokens" specifically: the
+    # registration is stored before the browser opens, so a failed connect
+    # leaves `client` behind and a truthiness test on the whole list passes.
+    # This is the `connect_via_mcp` path, where a token is always the outcome;
+    # Zoho, which stores an endpoint and no tokens, connects through
+    # `connect_by_url` and never reaches here.
+    if current_id is not None and "tokens" not in KeychainTokenStorage(
+            current_id, provider).holds():
+        print(f"No {provider} session was stored for {client}, so nothing is "
+              f"connected.\n"
+              f"  The browser flow did not complete. {provider} answers a tool "
+              f"listing without authenticating, which is why this got as far as "
+              f"it did.\n"
+              f"  Run it again and finish the consent screen. If it never "
+              f"opened, check that this account is a test user on the "
+              f"application: munim servers", file=sys.stderr)
+        return 2
+
     where = f"\n  account: {account}" if account and not naming else ""
     print(f"Connected {provider} for {client}: {len(tools)} tools.{where}",
           file=sys.stderr)
