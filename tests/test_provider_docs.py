@@ -22,7 +22,10 @@ def test_every_provider_has_a_page():
 def test_every_page_names_a_provider_that_exists():
     """A page for a provider that was removed is worse than no page: it is
     instructions for something that cannot be connected."""
-    pages = {p.stem for p in DOCS.glob("*.md")} - {"README"}
+    # TEMPLATE is the shape a new page is copied from, so it names no
+    # provider on purpose. Everything else without a row is an orphan: a page
+    # for something that cannot be connected, which is worse than no page.
+    pages = {p.stem for p in DOCS.glob("*.md")} - {"README", "TEMPLATE"}
     orphans = sorted(pages - set(SERVERS))
     assert not orphans, f"pages for providers not in the table: {orphans}"
 

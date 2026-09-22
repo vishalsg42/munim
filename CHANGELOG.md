@@ -8,6 +8,17 @@ references below point at it.
 
 ## 0.6.0
 
+### Added
+
+- **`munim servers export <name>`, so a provider you worked out can be handed
+  to somebody else.** `munim servers add` probes any MCP server and derives how
+  it authenticates, then writes the answer to `~/.munim/servers.json`, where it
+  stayed. Export prints that row as source, quoted and wrapped the way
+  `servers.py` is, ready to paste into a pull request. It refuses any provider
+  whose URL is itself the credential, because the destination is public. The
+  provider lane in CONTRIBUTING.md has the three files it takes, and
+  `docs/providers/TEMPLATE.md` is the page to copy (D45).
+
 ### Fixed
 
 - **`munim connect <client> zoho --url <endpoint>` now connects.** It was

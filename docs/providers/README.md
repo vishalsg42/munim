@@ -37,9 +37,22 @@ Munim is not limited to this list. Point it at any MCP server and it works out
 how that server authenticates:
 
 ```bash
-munim add-server acme https://mcp.acme.com/mcp
+munim servers add acme https://mcp.acme.com/mcp
 munim connect "Acme Ltd" acme
 ```
+
+**And you can send it back.** A provider here is a row in a table, not code, so
+a server you got working is three files and a measurement rather than a
+feature:
+
+```bash
+munim servers export acme     # the row, ready to paste into a pull request
+```
+
+The provider lane in [CONTRIBUTING.md](../../CONTRIBUTING.md) has the steps,
+[TEMPLATE.md](TEMPLATE.md) is the page to copy, and no failing test is asked
+for. If `export` refuses, that server's URL is itself the credential and the
+refusal is the right answer.
 
 ## What connecting grants
 

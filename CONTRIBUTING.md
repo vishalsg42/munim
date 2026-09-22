@@ -43,6 +43,54 @@ a live path, drive it against something real before saying it works.
 **No em dashes**, and no `(s)` plurals. Both read as machine-written and the rest
 of the prose does not.
 
+## Two lanes
+
+Everything above describes the lane for `src/munim/`, and it is not going to be
+relaxed. It is why the code is worth contributing to.
+
+There is a second lane, and it asks for less on purpose.
+
+**Adding a provider is data, not code.** A provider in this project is a row in
+a table. `munim servers add <name> <url>` works out how that server
+authenticates by doing what a client does, calling it with no credentials and
+reading the challenge back, and `munim servers export <name>` prints the row it
+derived. Eleven providers ship and only the first needed any Python.
+
+So a provider contribution is three files and a measurement:
+
+```bash
+munim servers add acme https://mcp.acme.com/mcp   # it works out the rest
+munim servers export acme                         # the row, ready to paste
+```
+
+1. The row into `SERVERS` in `src/munim/remote/servers.py`
+2. `docs/providers/<name>.md`, copied from `docs/providers/TEMPLATE.md`
+3. A line in `docs/providers/README.md`
+
+`tests/test_provider_docs.py` fails when a row arrives without a page, when a
+page names no row, and when the index does not link it, so the check is already
+written and you do not have to add one. **This lane does not ask for a failing
+test or a `docs/DECISIONS.md` entry.** Use
+[the provider pull request template](.github/PULL_REQUEST_TEMPLATE/provider.md).
+
+The one thing it does ask for is the **measurement**. The row's `note` says
+what you sent, what came back, and when. Every note in that table is a
+measurement and several of them record an earlier note being wrong. A note that
+repeats what the product says about itself is the one kind of contribution that
+makes this table worse, because the next reader cannot tell it from the ones
+that were checked.
+
+If the export refuses your row, it is because that server's URL is itself the
+credential. That is the correct answer and not a bug: contribute it as an issue
+instead, with the address redacted.
+
+## How quickly this gets looked at
+
+A first pull request going quiet is worse than a first pull request being
+turned down. Provider contributions get a reply within **three days**, and if
+the answer is no it comes with the reason. If it has been longer, comment on
+the thread and it will be a bookkeeping failure rather than a decision.
+
 ## Decisions
 
 `docs/DECISIONS.md` is a numbered log, currently through D33. If a change makes
