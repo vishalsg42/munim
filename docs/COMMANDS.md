@@ -34,6 +34,7 @@ so does redirecting the output.
 ```bash
 munim servers                                # what Munim knows, and what each needs
 munim servers add acme https://mcp.acme.com/mcp
+munim servers export acme                    # the row it worked out, ready for a pull request
 ```
 
 **Connecting, which joins the two**

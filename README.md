@@ -171,6 +171,14 @@ like here, which is mostly about writing down why. `docs/DECISIONS.md` is the
 numbered log those reasons live in, and several of its entries reverse an
 earlier one.
 
+**Adding a provider needs no Python.** Eleven ship and only the first needed
+any: a provider here is a row in a table, and `munim servers add <name> <url>`
+works out how that server authenticates by asking it. `munim servers export
+<name>` then prints the row for a pull request. That lane asks for the row, a
+page copied from `docs/providers/TEMPLATE.md`, and the measurement you took. It
+does not ask for a failing test, because `tests/test_provider_docs.py` already
+fails when a row arrives without a page.
+
 Security issues go in a [private advisory][advisory] rather than an issue.
 `SECURITY.md` says what is in scope, and lists what is already known and
 deliberate so a report can skip it.

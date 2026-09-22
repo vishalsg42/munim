@@ -1654,3 +1654,49 @@ match a bad one, because bad answers discuss the same subject. A `must` list has
 to name the action, and the only way to know it does is to run both a good
 answer and a real failing one through it. There is now a test that does exactly
 that for this fixture.
+
+## D45: A provider is a row, so contributing one is a pull request and not a plugin
+
+The proposal on the table was a plugin API: a `Provider` base class, a
+`[project.entry-points."munim.providers"]` group, and third parties publishing
+`munim-provider-*` packages. The reasoning was that an ecosystem needs an
+extension point.
+
+It already has one, and the plugin would have been a worse version of it.
+`munim servers add <name> <url>` calls the server with no credentials, reads
+the `WWW-Authenticate` challenge, follows protected-resource and
+authorization-server metadata, and works out which of the four auth kinds it
+is. Eleven providers ship and only the first needed any Python. A provider here
+is a frozen dataclass row, which is the design D11 and D25 arrived at.
+
+So the plugin API would have moved the cost of adding a provider **up**, from
+writing no code to publishing a package, and added a public API to keep stable
+beside a probe that already does the job. It was aimed at a problem that is not
+the one in the way.
+
+The problem in the way is that discovery works and **sharing does not exist**.
+`remember()` writes the derived row to `~/.munim/servers.json` and there it
+stays. The next person to want that server repeats the probe, and the table
+never learns. A design whose whole point is that providers are data had no way
+to hand the data to anyone.
+
+`munim servers export <name>` is the missing half. It prints the row as source,
+in the quoting and wrapping `servers.py` uses, so the block pastes in without
+being reformatted. `shareable()` is `remember()`'s own format rather than a
+second one invented for export, so what leaves goes back in without
+translation and `tests/test_server_export.py` proves the round trip against
+all eleven rows rather than against one hand-written example.
+
+**It refuses to print a credential.** `auth="url"` means the address *is* the
+login, and the destination is a public pull request. `per_client_url` rows hold
+no address at all, so those export fine, which matters: a per-installation
+provider is exactly the kind somebody needs to contribute a row for. The one
+refused combination is `per_client_url` with a non-empty url, which the
+built-in rows never are and a hand-edited `servers.json` can be. Redacting
+silently was the option rejected: it produces a row that looks complete, passes
+review, and connects to nothing.
+
+**What this buys that the plugin would not.** A contribution lands in this
+repository rather than in somebody else's package, the contributor needs no
+Python, and `tests/test_provider_docs.py` already fails when a row arrives
+without a page, so the check was written before the lane existed.

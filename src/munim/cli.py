@@ -300,6 +300,94 @@ def add_server(name: str, url: str) -> int:
     return 0
 
 
+def _as_source(value, field: str) -> str:
+    """One field value as it would be written in `servers.py`.
+
+    `repr` is nearly right and wrong in the one place that matters: it quotes
+    with apostrophes, and every string in that file is double quoted. A block
+    that has to be reformatted before it fits is not paste-ready, which was the
+    point of printing it.
+
+    Long strings, which in practice means the note, come back as the implicit
+    concatenation the file already uses rather than as one line running off the
+    screen. The note is the most important field in the row and the one most
+    likely to be skimmed instead of read.
+    """
+    import json
+    import textwrap
+
+    if not isinstance(value, str):
+        return repr(value)
+    if len(value) + len(field) < 60:
+        return json.dumps(value)
+    # `break_on_hyphens` off: the default splits "per-installation" across two
+    # lines and the rejoined string then reads "per- installation", which is a
+    # different note from the one that was measured.
+    lines = textwrap.wrap(value, width=60, break_long_words=False,
+                          break_on_hyphens=False)
+    # A trailing space on every line but the last, so the pieces join back into
+    # the sentence they came from rather than running words together.
+    pieces = [json.dumps(line + " ") for line in lines[:-1]] + [json.dumps(lines[-1])]
+    joined = ("\n" + " " * 13).join(pieces)
+    return joined
+
+
+def export_server(name: str) -> int:
+    """Print one provider row, ready to paste into a pull request.
+
+    `add-server` already works out how any MCP server authenticates. The answer
+    lands in ~/.munim/servers.json and stops there, so the next person to want
+    that server repeats the discovery and Munim never learns. This is the half
+    that was missing: the row on its way back out.
+
+    The row goes to stdout and the guidance to stderr, the same split
+    `add_server` uses, so `munim servers export acme > row.py` is clean.
+    """
+    from dataclasses import fields as dataclass_fields
+
+    from munim.remote.servers import (CredentialInUrl, RemoteServer,
+                                      all_servers, shareable)
+
+    server = all_servers().get(name)
+    if server is None:
+        known = ", ".join(sorted(all_servers()))
+        print(f"no server called {name!r}. Known: {known}", file=sys.stderr)
+        return 2
+
+    try:
+        shareable(server)
+    except CredentialInUrl as secret:
+        print(str(secret), file=sys.stderr)
+        return 2
+
+    # Only what differs from the default. A row that restates eight defaults
+    # reads as eight decisions, and a reviewer then has to check each one
+    # against the dataclass to find the two that were actually measured.
+    defaults = {f.name: f.default for f in dataclass_fields(RemoteServer)}
+    said = []
+    for field in dataclass_fields(RemoteServer):
+        value = getattr(server, field.name)
+        keep = field.name in ("provider", "url", "public_client")
+        if not keep and value == defaults[field.name]:
+            continue
+        said.append(f"        {field.name}={_as_source(value, field.name)},")
+
+    print(f'    "{server.provider}": RemoteServer(')
+    print("\n".join(said))
+    print("    ),")
+
+    print(f"\nPaste that into SERVERS in src/munim/remote/servers.py, add "
+          f"docs/providers/{server.provider}.md from docs/providers/TEMPLATE.md, "
+          f"and link it from the index.", file=sys.stderr)
+    print("tests/test_provider_docs.py fails without the page, so the check is "
+          "already written.", file=sys.stderr)
+    if not server.note:
+        print("\nThis row has no note. The note is where the measurement goes, "
+              "and it is the part a reviewer cannot reproduce without you: what "
+              "you probed, what came back, and when.", file=sys.stderr)
+    return 0
+
+
 def list_servers() -> int:
     from munim.remote.servers import SERVERS, all_servers
 
@@ -1649,10 +1737,10 @@ def _run(argv: list[str] | None = None) -> int:
                    help="print exactly what would be removed, and stop")
 
     sv = sub.add_parser("servers", help="what a client can be connected to")
-    sv.add_argument("action", nargs="?", choices=["add"],
+    sv.add_argument("action", nargs="?", choices=["add", "export"],
                     help="omit to list them")
     sv.add_argument("names", nargs="*", metavar="ARG",
-                    help="a name and a URL, for `add`")
+                    help="a name and a URL for `add`, a name for `export`")
 
     c = sub.add_parser("config", help="settings: the agent switch and model "
                                       "host, plus the gmail and stitch "
@@ -1848,6 +1936,10 @@ def _run(argv: list[str] | None = None) -> int:
             if len(args.names) != 2:
                 parser.error("servers add takes a name and a URL")
             return add_server(*args.names)
+        if args.action == "export":
+            if len(args.names) != 1:
+                parser.error("servers export takes one name")
+            return export_server(args.names[0])
         return list_servers()
 
     if args.command == "config":

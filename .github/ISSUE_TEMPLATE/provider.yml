@@ -1,0 +1,72 @@
+name: A server Munim should know about
+description: You pointed Munim at an MCP server and it worked. Tell us which.
+labels: ["provider", "good first issue"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Munim works out how any MCP server authenticates by asking it:
+        `munim servers add <name> <url>`. The answer lands in
+        `~/.munim/servers.json` on your machine and stops there, so the next
+        person repeats the discovery.
+
+
+        This is how it gets shared. You do not need to write any Python:
+        a provider in this project is a row in a table, and `munim servers
+        export <name>` prints it for you.
+
+
+        **Redact anything private.** If the endpoint URL is itself the
+        credential, `export` will refuse the row and say so, and that is the
+        right answer rather than a bug.
+
+  - type: input
+    id: url
+    attributes:
+      label: The server's address
+      placeholder: https://mcp.example.com/mcp
+    validations:
+      required: true
+
+  - type: textarea
+    id: row
+    attributes:
+      label: What `munim servers export` printed
+      description: >-
+        Run `munim servers add <name> <url>` then `munim servers export <name>`
+        and paste the block. If `add` refused, paste what it said instead:
+        a server Munim cannot read is worth knowing about too.
+      render: python
+    validations:
+      required: true
+
+  - type: dropdown
+    id: reached
+    attributes:
+      label: How far did you get
+      options:
+        - Probed only, no login completed
+        - Connected live, tools listed
+        - Connected live, and I have called a tool through Munim
+    validations:
+      required: true
+
+  - type: textarea
+    id: gotcha
+    attributes:
+      label: Anything that cost you time
+      description: >-
+        The consent screen asking for more than expected, a region in the URL,
+        a tool that needs calling before it challenges. Leave blank if it was
+        uneventful.
+    validations:
+      required: false
+
+  - type: markdown
+    attributes:
+      value: >-
+        **Want to send it as a pull request instead?** That is faster and you
+        get the commit. See the provider lane in
+        [CONTRIBUTING.md](https://github.com/vishalsg42/munim/blob/main/CONTRIBUTING.md):
+        the row, a page copied from `docs/providers/TEMPLATE.md`, and a line in
+        the index. No test required.

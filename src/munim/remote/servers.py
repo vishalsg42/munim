@@ -358,6 +358,27 @@ def all_servers() -> dict[str, RemoteServer]:
     return {**SERVERS, **_user_servers()}
 
 
+class CredentialInUrl(ValueError):
+    """The address is the secret, so the row cannot be handed to anybody."""
+
+
+def _fields(server: RemoteServer) -> dict[str, Any]:
+    """Every field except the name, which is the key it is filed under.
+
+    Every field, rather than the five somebody remembered. This hand-wrote a
+    list and had already lost three: `rest_takes_session`, `scopes` and
+    `header` were dropped from an operator's own server every time `remember`
+    ran, silently, and `probe_tool` would have been the fourth. A field that
+    only survives if someone remembers to add it here is a field that will not.
+
+    Shared by `remember` and `shareable` so the file written and the row
+    exported cannot drift into two shapes, which is the same mistake one level
+    up.
+    """
+    return {name: value for name, value in asdict(server).items()
+            if name != "provider"}
+
+
 def remember(server: RemoteServer) -> None:
     USER_SERVERS.parent.mkdir(parents=True, exist_ok=True)
     existing = {}
@@ -366,15 +387,48 @@ def remember(server: RemoteServer) -> None:
             existing = json.loads(USER_SERVERS.read_text())
         except (OSError, ValueError):
             existing = {}
-    # Every field, rather than the five somebody remembered. This hand-wrote a
-    # list and had already lost three: `rest_takes_session`, `scopes` and
-    # `header` were dropped from an operator's own server every time this ran,
-    # silently, and `probe_tool` would have been the fourth. A field that only
-    # survives if someone remembers to add it here is a field that will not.
-    existing[server.provider] = {name: value
-                                 for name, value in asdict(server).items()
-                                 if name != "provider"}
+    existing[server.provider] = _fields(server)
     USER_SERVERS.write_text(json.dumps(existing, indent=2, sort_keys=True))
+
+
+def shareable(server: RemoteServer) -> dict[str, Any]:
+    """One provider row in the shape `_user_servers` reads back.
+
+    `add-server` works out how any MCP server authenticates and writes the
+    answer to `~/.munim/servers.json`, where it stays. Nobody else benefits,
+    and the next person repeats the discovery. This is the row on its way out
+    again, to be pasted into a pull request.
+
+    Deliberately `remember`'s own format rather than a second one invented for
+    export. A row that leaves here goes back in without translation, and a test
+    can prove the round trip instead of asserting a field list typed twice.
+
+    Refuses when the address carries the credential:
+
+      auth="url"        the URL *is* the login, so the row is the secret.
+      per_client_url    the table holds no address for these, so there is
+                        nothing to leak. Refused anyway when `url` is not
+                        empty, which the built-in rows never are: that
+                        combination can only come from a hand-edited
+                        servers.json, and guessing which half to believe is
+                        worse than declining.
+
+    Redacting silently would be the worse failure. It produces a row that looks
+    complete, passes review, and connects to nothing.
+    """
+    if server.auth == "url":
+        raise CredentialInUrl(
+            f"{server.provider}: the URL is the credential for this one, so "
+            f"the row cannot be shared. A provider whose address is per "
+            f"installation belongs in the table with an empty url and "
+            f"per_client_url set, and each operator supplies their own "
+            f"with --url.")
+    if server.per_client_url and server.url:
+        raise CredentialInUrl(
+            f"{server.provider}: per_client_url is set and url is not empty, "
+            f"so one of the two is wrong and the url may be somebody's own "
+            f"installation. Refusing rather than choosing.")
+    return _fields(server)
 
 
 def server_for(provider: str) -> RemoteServer | None:
