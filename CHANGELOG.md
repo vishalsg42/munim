@@ -57,11 +57,6 @@ references below point at it.
 - **A server you defined yourself keeps all of its settings.** Saving one wrote
   five fields by hand and silently dropped `rest_takes_session`, `scopes` and
   `header`.
-
-## 0.5.2
-
-### Fixed
-
 - **`munim evals` scored a DKIM answer on the word "provider".** The
   `dkim_missing` rubric accepted any of "resend", "provider" or "dashboard",
   and three sampled answers passed it on the phrase "helps email providers
