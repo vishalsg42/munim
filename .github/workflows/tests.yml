@@ -21,14 +21,25 @@ concurrency:
 permissions:
   contents: read
 
+# Every action below is pinned to a commit, with the tag it was at kept beside
+# it as a comment. A tag is a name and names move: `v7` is whatever that
+# repository last pointed it at, so a workflow that trusts one is trusting
+# whoever can push a tag there, including after review. The comment is not
+# decoration either, because a bare forty character digest is a thing nobody
+# can read and therefore a thing nobody updates. Dependabot reads both halves
+# and bumps them together.
+#
+# Same pins in publish.yml and pages.yml. publish.yml is the one that matters
+# most: it is the job holding the trusted publishing identity.
+
 jobs:
   python:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v10.1.0
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
 
       - name: Install
         run: uv sync --extra dev
@@ -61,8 +72,8 @@ jobs:
   room:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
         with:
           node-version: '22'
       # No npm install and no build step: the control room is one HTML page
