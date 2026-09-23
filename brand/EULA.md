@@ -13,8 +13,8 @@ your explicit approval, changes DNS records and provider configuration in
 accounts you connect to it. You are responsible for what you approve.
 
 **It holds credentials you give it.** They are stored in your operating system's
-machine, in a file readable only by your user account, and are never transmitted anywhere except to the
-provider they belong to. No credential is sent to the author, and none is logged.
+keychain, and are never transmitted anywhere except to the provider they belong
+to. No credential is sent to the author, and none is logged.
 
 **No support is promised.** Issues and pull requests are welcome at
 https://github.com/vishalsg42/munim and are answered when time allows.

@@ -24,6 +24,13 @@ references below point at it.
   URL redirects to a login. The hint names the call that turns it off, because
   Vercel's own two tools for it mark `teamId` required and therefore cannot
   succeed on this credential.
+- **`llms-install.md`, for a coding agent installing Munim on somebody's
+  behalf.** Says what the README does not need to: that `munim connect` opens a
+  browser the agent cannot complete and is the point to stop and hand back, that
+  eight of eleven providers need no setup so there is no key to hunt for, and
+  that `munim doctor` reporting almost nothing is the success case rather than a
+  check that did not run. Written against the measured output of a fresh
+  install, not from the README.
 
 ### Fixed
 
@@ -36,6 +43,9 @@ references below point at it.
   a feature waiting to be wired up and was the opposite: supplying it would have
   put `teamId` on every call in the hosting checks and emptied all of them,
   returning 200 each time.
+- **`brand/EULA.md` said credentials are stored "in your operating system's
+  machine".** The sentence had lost the word keychain at some point and read as
+  nonsense in the one paragraph about where credentials go.
 
 ## 0.6.0
 
