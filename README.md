@@ -1,5 +1,9 @@
 # Munim
 
+<!-- mcp-name: io.github.vishalsg42/munim -->
+<!-- The line above is how the MCP Registry verifies that this package is ours: it
+     looks for it in the PyPI long description, which is this file. Do not remove it. -->
+
 [![PyPI](https://img.shields.io/pypi/v/munim)](https://pypi.org/project/munim/)
 [![Python](https://img.shields.io/pypi/pyversions/munim)](https://pypi.org/project/munim/)
 [![Tests](https://github.com/vishalsg42/munim/actions/workflows/tests.yml/badge.svg)](https://github.com/vishalsg42/munim/actions/workflows/tests.yml)

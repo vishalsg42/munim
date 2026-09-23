@@ -6,6 +6,21 @@ Entries describe what changed for somebody using munim. The reasoning behind
 each decision lives in [docs/DECISIONS.md](docs/DECISIONS.md), and the numbered
 references below point at it.
 
+## 0.7.2
+
+### Added
+
+- **Munim is published to the official [MCP Registry](https://registry.modelcontextprotocol.io/).**
+  The list of third-party servers in `modelcontextprotocol/servers` has been
+  retired in favour of the registry, so that is where a client looking for MCP
+  servers now looks. `server.json` carries the listing and a job in
+  `publish.yml` publishes it on every tag, authenticating with
+  `mcp-publisher login github-oidc`: a token minted for the occasion, no secret
+  to leak and none to rotate, the same shape as the PyPI trusted publishing
+  beside it. The registry verifies ownership by finding `mcp-name:` in the PyPI
+  long description, which is `README.md`, so the marker lives there with a
+  comment saying why.
+
 ## 0.7.1
 
 ### Added
