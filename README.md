@@ -40,6 +40,11 @@ uv tool install munim          # or: pipx install munim, or: pip install munim
 claude mcp add munim -- munim-mcp
 ```
 
+If a coding agent is doing the install for you, point it at
+[`llms-install.md`](llms-install.md), which says the parts that are easy to get
+wrong when nobody is watching the terminal, and where it has to stop and hand
+back.
+
 ## Start
 
 ```bash
@@ -115,6 +120,7 @@ each gap. Start there whenever something is unclear.
 | **Repository** | https://github.com/vishalsg42/munim |
 | **Package** | https://pypi.org/project/munim/ |
 | **Listing** | https://glama.ai/mcp/servers/vishalsg42/munim |
+| **Listed in** | [awesome-mcp-servers](https://github.com/punkpeye/awesome-mcp-servers) |
 
 The video is a real run against a real client's domain: fifteen deterministic
 checks find two faults, a Strands agent explains them in the owner's language,
