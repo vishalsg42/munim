@@ -6,6 +6,18 @@ Entries describe what changed for somebody using munim. The reasoning behind
 each decision lives in [docs/DECISIONS.md](docs/DECISIONS.md), and the numbered
 references below point at it.
 
+## 0.7.1
+
+### Added
+
+- **A fourth builder post**, `docs/posts/04-the-quoted-record.md`, on the SPF
+  quoting bug. The third post printed the line that had it, so this one is a
+  correction as much as a write-up: Cloudflare returns a TXT value quoted or
+  bare depending on how the record was created, a resolver reports neither the
+  quotes nor the split, and a published sender policy was therefore invisible to
+  the check built to count it. The planner then offered to publish a second one,
+  which is the duplicate-SPF fault the tool exists to detect.
+
 ## 0.7.0
 
 ### Added
