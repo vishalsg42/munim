@@ -93,31 +93,65 @@ def load(plan_id: str) -> MailPlan:
     return MailPlan(**raw)
 
 
+async def _has_dkim(cloudflare: Cloudflare, zone: str) -> bool:
+    """Whether anything is publishing a signing key in this zone.
+
+    By `_domainkey` in the name rather than by a selector, because the selector
+    is the provider's choice and Munim only knows the one it assumes. A domain
+    signing through something other than Resend still signs, and a guard that
+    only recognises one selector would call that domain unsigned and refuse a
+    safe change.
+    """
+    for kind in ("TXT", "CNAME"):
+        for record in await cloudflare.records(zone, type=kind):
+            if "_domainkey" in record.name.lower():
+                return True
+    return False
+
+
 async def _dmarc_change(cloudflare: Cloudflare, zone: str,
-                        domain: str) -> list[Change]:
-    """Raise a published DMARC policy, or nothing.
+                        domain: str) -> tuple[list[Change], str]:
+    """Raise a published DMARC policy, or nothing and the reason.
 
     Derived from what is in the zone rather than from a provider, which is the
     point: no mail provider publishes a DMARC record, so this was the one fault
-    the catalogue could see and the plan could never touch.
+    the catalogue could see and the plan could never touch (D47).
 
-    Never creates one. A DMARC record needs an `rua` for the reports, nobody
-    has told Munim which mailbox that is, and publishing enforcement with
-    nowhere to send failures is worse than publishing nothing. `dmarc_present`
-    keeps reporting that as a fault, correctly, and it is a fault a person
-    resolves.
+    **Not until the mail is signed.** DMARC passes when SPF *or* DKIM aligns.
+    With no DKIM every message rests on SPF alignment alone, and the mail that
+    fails it is ordinary: forwarded messages, mailing lists, anything sent by a
+    sender who is not in the record. At `p=none` those are counted. At
+    `p=quarantine` they go to spam. So raising the policy on an unsigned domain
+    does not harden it, it breaks delivery for mail that is genuinely theirs,
+    and it does so quietly and for someone else's business.
+
+    That ordering is the whole of DMARC deployment advice and it is why this
+    reads the zone for a signing key first. It was missing from the first
+    version of this function, which would have proposed exactly that change for
+    the one real client it was written for.
+
+    Never creates a DMARC record either. Publishing enforcement needs an `rua`
+    for the failure reports and nobody has told Munim which mailbox that is.
     """
     name = f"_dmarc.{domain}"
     published = await cloudflare.records(zone, type="TXT", name=name)
     for record in published:
         raised = strengthened(record.content)
-        if raised:
-            return [Change(
-                "DMARC", "TXT", name, raised, "update", [record.content],
-                "raises the policy from monitoring to quarantine, keeping "
-                "every other tag. A person has to approve it: mail that was "
-                "failing authentication silently starts being quarantined.")]
-    return []
+        if not raised:
+            continue
+        if not await _has_dkim(cloudflare, zone):
+            return [], (
+                f"The DMARC policy on {domain} is monitoring only, and raising "
+                f"it now would quarantine mail that is genuinely theirs: "
+                f"nothing in the zone publishes a signing key, so every "
+                f"message rests on SPF alignment alone. Publish DKIM first, "
+                f"then this becomes a safe change.")
+        return [Change(
+            "DMARC", "TXT", name, raised, "update", [record.content],
+            "raises the policy from monitoring to quarantine, keeping every "
+            "other tag. A person has to approve it: mail that was failing "
+            "authentication silently starts being quarantined.")], ""
+    return [], ""
 
 
 async def plan(container: Container, domain: str, log: RunLog) -> MailPlan:
@@ -191,7 +225,10 @@ async def plan(container: Container, domain: str, log: RunLog) -> MailPlan:
         changes.append(Change(record["purpose"], record["type"], record["name"],
                               record["content"], action, contents))
 
-    changes.extend(await _dmarc_change(cloudflare, zone, domain))
+    dmarc_changes, dmarc_skipped = await _dmarc_change(cloudflare, zone, domain)
+    changes.extend(dmarc_changes)
+    if dmarc_skipped:
+        skipped.append(dmarc_skipped)
 
     if not changes and skipped:
         # Nothing to apply and a reason worth repeating where `apply` and
