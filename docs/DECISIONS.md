@@ -1758,3 +1758,60 @@ required, so there is no honest call to make. The hint names the REST route that
 works instead. That is the ceiling set by whoever wrote the provider's MCP
 server, which `rawcall.py` exists to get under, and it is the right place for
 this to stop.
+
+## D47: The plan was shaped by whichever provider supplied a row of it
+
+`dmarc_policy` had failed on a real client's domain since the check catalogue
+was written, and `fix` could not repair it. Not for that client, and not for any
+client connected to anything.
+
+`mailplan.plan` built the whole record set from one call:
+
+```python
+    sending, _ = await resend.ensure_domain(domain)
+    wanted = Resend.cloudflare_records(sending)
+```
+
+So the plan was whatever Resend says a sending domain needs: DKIM, SPF, MX.
+Resend has no opinion about DMARC, because DMARC is not a mail provider's
+record. It is the domain owner's statement about what receivers should do, and
+it is published in the same zone as everything else in that list.
+
+**The shape of a repair was being decided by which provider happened to supply
+one of its rows.** Nothing chose that. It fell out of building the plan from the
+one adapter that had the values, and it left the catalogue able to diagnose a
+fault that nothing downstream could act on, which is the specific gap `fix`
+exists to close (D34).
+
+It also made the two halves all-or-nothing on one credential. A client with
+Cloudflare and no Resend got no plan, including for the record Resend has
+nothing to do with, so a domain whose only fixable fault was its DMARC policy
+had no route at all. That is why `~/.munim/decisions` stayed empty: across the
+real clients, one had the fault and no Resend session, the other had Resend and
+nothing to repair.
+
+**Two rules now, and both come from what the record is.**
+
+**Raise, never invent.** A DMARC record needs an `rua` for the failure reports
+and nobody has told Munim which mailbox that is. Publishing `p=quarantine` with
+nowhere to send failures moves a domain from "not protected" to "protected and
+nobody is watching", which is worse and looks better. `dmarc_present` keeps
+reporting an absent record as a fault, correctly, and it stays one a person
+resolves.
+
+**Keep every other tag, in order.** `rua`, `ruf`, `pct`, `sp`, `adkim`, `aspf`
+were chosen by somebody. Rewriting the record from a template would drop the
+reporting address, which is exactly the tag that tells them whether quarantining
+was safe. The policy is replaced tag by tag rather than by a substitution over
+the whole string, because `p=` is a prefix of `pct=` and a pattern loose enough
+to find one finds the other.
+
+The change is an `update` to a record somebody published, so it waits for a
+person. That is the existing gate and it is the right one: mail that was failing
+authentication silently starts being quarantined, and that is a decision with a
+consequence rather than a missing record being filled in.
+
+**What this does not fix.** The DKIM selector is still assumed to be `resend`
+(`fix(dkim_selector="resend")`), which is the same coupling one level down, and
+a domain sending through anything else is checked against a key that was never
+going to be there. Recorded in `docs/ROADMAP.md` rather than fixed here.

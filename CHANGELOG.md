@@ -6,6 +6,35 @@ Entries describe what changed for somebody using munim. The reasoning behind
 each decision lives in [docs/DECISIONS.md](docs/DECISIONS.md), and the numbered
 references below point at it.
 
+## 0.8.0
+
+### Fixed
+
+- **A DMARC policy set to monitoring can now be repaired.** `dmarc_policy`
+  reports it as a fault and nothing could act on it, for any client, connected
+  to anything. The plan was built entirely from `Resend.cloudflare_records`,
+  Resend publishes DKIM, SPF and MX, and no mail provider has an opinion about
+  DMARC, so no DMARC record ever entered a plan. The policy is now raised from
+  the record that is published, keeping every other tag including the `rua`
+  address the reports go to. It is an update to something somebody published,
+  so it waits for a person: mail that was failing authentication silently
+  starts being quarantined (#56).
+- **A client with no Resend session gets the half of the plan that does not
+  need one.** Planning refused outright on a missing Resend credential, which
+  meant a client whose only fixable fault was their DMARC policy had no route
+  at all. The Resend half is now reported as skipped, with the command to
+  connect it, and the rest of the plan stands.
+- **That skipped message named the client by id.** `munim connect "c_0123..."
+  resend --token` is Munim's own bookkeeping appearing in an instruction
+  somebody is meant to type. Third time in this codebase.
+
+### Added
+
+- **A DMARC record is never invented, only raised.** Publishing enforcement
+  needs an `rua` address for the failure reports, and nobody has told Munim
+  which mailbox that is. A domain with no DMARC at all stays a fault a person
+  resolves rather than one Munim guesses at.
+
 ## 0.7.2
 
 ### Added

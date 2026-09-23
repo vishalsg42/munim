@@ -3,7 +3,7 @@
   "name": "io.github.vishalsg42/munim",
   "title": "Munim",
   "description": "One MCP server holding a live session with every client's account at once.",
-  "version": "0.7.2",
+  "version": "0.8.0",
   "repository": {
     "url": "https://github.com/vishalsg42/munim",
     "source": "github"
@@ -13,7 +13,7 @@
     {
       "registryType": "pypi",
       "identifier": "munim",
-      "version": "0.7.2",
+      "version": "0.8.0",
       "runtimeHint": "uvx",
       "runtimeArguments": [
         {

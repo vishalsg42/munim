@@ -26,8 +26,9 @@ from pathlib import Path
 
 from munim.adapters.cloudflare import Cloudflare
 from munim.adapters.resend import Resend
+from munim.agent.dmarc import strengthened
 from munim.agent.spf import merge_spf, within_lookup_limit
-from munim.container import Container
+from munim.container import Container, UnknownCredential
 from munim.runlog import RunLog, new_run_id
 
 PLANS_DIR = Path.home() / ".munim" / "plans"
@@ -58,6 +59,12 @@ class MailPlan:
     domain: str
     changes: list[Change]
     blocked: str = ""
+    # What could not be planned, and why, when the rest of the plan still
+    # stands. Distinct from `blocked`, which means nothing here can be applied:
+    # a client with no Resend session can still have their DMARC policy raised,
+    # and refusing the whole plan over the half that needs a credential is what
+    # left a diagnosable fault unfixable (#56).
+    skipped: list[str] = field(default_factory=list)
 
     @property
     def needs_approval(self) -> list[Change]:
@@ -86,6 +93,33 @@ def load(plan_id: str) -> MailPlan:
     return MailPlan(**raw)
 
 
+async def _dmarc_change(cloudflare: Cloudflare, zone: str,
+                        domain: str) -> list[Change]:
+    """Raise a published DMARC policy, or nothing.
+
+    Derived from what is in the zone rather than from a provider, which is the
+    point: no mail provider publishes a DMARC record, so this was the one fault
+    the catalogue could see and the plan could never touch.
+
+    Never creates one. A DMARC record needs an `rua` for the reports, nobody
+    has told Munim which mailbox that is, and publishing enforcement with
+    nowhere to send failures is worse than publishing nothing. `dmarc_present`
+    keeps reporting that as a fault, correctly, and it is a fault a person
+    resolves.
+    """
+    name = f"_dmarc.{domain}"
+    published = await cloudflare.records(zone, type="TXT", name=name)
+    for record in published:
+        raised = strengthened(record.content)
+        if raised:
+            return [Change(
+                "DMARC", "TXT", name, raised, "update", [record.content],
+                "raises the policy from monitoring to quarantine, keeping "
+                "every other tag. A person has to approve it: mail that was "
+                "failing authentication silently starts being quarantined.")]
+    return []
+
+
 async def plan(container: Container, domain: str, log: RunLog) -> MailPlan:
     """What setting up mail for this domain would change. Touches no DNS."""
     client = container.client
@@ -95,12 +129,29 @@ async def plan(container: Container, domain: str, log: RunLog) -> MailPlan:
     log.append(client=client, stage="mail", kind="stage_start",
                human_text=f"Working out what {domain} needs")
 
-    sending, _ = await resend.ensure_domain(domain)
     zone = await cloudflare.zone_id(domain)
-    wanted = Resend.cloudflare_records(sending)
 
     changes: list[Change] = []
     blocked = ""
+    skipped: list[str] = []
+
+    # Resend supplies DKIM, SPF and MX and has no opinion about DMARC, so a
+    # missing Resend session used to end the plan before the DMARC record was
+    # ever looked at. The two halves are separate now: what Resend knows, and
+    # what is already published.
+    wanted: list[dict] = []
+    try:
+        sending, _ = await resend.ensure_domain(domain)
+        wanted = Resend.cloudflare_records(sending)
+    except UnknownCredential as missing:
+        # `container.label` and not `client`, which is the id credentials are
+        # filed under. A fix line that tells somebody to type
+        # `munim connect "c_0123..."` is Munim's bookkeeping leaking into an
+        # instruction, and it is the third time that has happened here.
+        skipped.append(
+            f"{missing}. DKIM, SPF and MX come from Resend, so those are not "
+            f"in this plan. Connect it with: "
+            f"munim connect \"{container.label}\" resend --token")
 
     for record in wanted:
         existing = [r for r in await cloudflare.records(
@@ -140,8 +191,15 @@ async def plan(container: Container, domain: str, log: RunLog) -> MailPlan:
         changes.append(Change(record["purpose"], record["type"], record["name"],
                               record["content"], action, contents))
 
+    changes.extend(await _dmarc_change(cloudflare, zone, domain))
+
+    if not changes and skipped:
+        # Nothing to apply and a reason worth repeating where `apply` and
+        # `plan_repair` both already look.
+        blocked = " ".join(skipped)
+
     made = MailPlan(plan_id=new_run_id(), client=client, domain=domain,
-                    changes=changes, blocked=blocked)
+                    changes=changes, blocked=blocked, skipped=skipped)
     _save(made)
 
     log.append(client=client, stage="mail", kind="stage_done",
