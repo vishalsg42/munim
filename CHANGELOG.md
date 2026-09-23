@@ -6,6 +6,19 @@ Entries describe what changed for somebody using munim. The reasoning behind
 each decision lives in [docs/DECISIONS.md](docs/DECISIONS.md), and the numbered
 references below point at it.
 
+## 0.8.2
+
+### Fixed
+
+- **`llms-install.md` said `doctor` prints `Working.` on a fresh install.** It
+  prints `No problems found.` The earlier claim was measured in an environment
+  that still had a model key in it, so `doctor` had something to report and the
+  wording came from the wrong branch. Now quoted verbatim from a published
+  install with an empty home directory, along with `agents off`, which is also
+  correct on a fresh install and reads like a fault if nobody says so.
+- The provider section gained the `servers export` output from that same run,
+  since the file's whole purpose is to say what an agent will actually see.
+
 ## 0.8.1
 
 ### Fixed
