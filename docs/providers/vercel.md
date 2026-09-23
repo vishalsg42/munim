@@ -44,16 +44,58 @@ exactly this and permits a client to add the scope. `munim/remote/offline.py`
 does. Delete that module when `strands-agents` allows `mcp>=2.0.0`, which ships
 the same rule.
 
-## What the narrow scope costs
+## Reads come back empty, and the scope is not why
 
-The token carries `openid offline_access` and nothing else, because that is what
-the resource advertises. Deploying works. Reading does not: `list_projects`
-returns an empty list and `get_deployment` answers "Deployment not found" for a
-deployment it created seconds earlier and reported as READY.
+This section used to say the `openid offline_access` token was too narrow to
+read anything, on the evidence that `list_projects` returned an empty list and
+`get_deployment` answered "Deployment not found" for a deployment it had just
+created. The evidence was real. The explanation was wrong.
 
-So write operations succeed while reads come back empty, which is a confusing
-shape of failure. Whether more scope would fix it is untested; Vercel's resource
-advertises none to ask for.
+Measured 2026-09-17 against a live session on a hobby team:
+
+```
+GET /v9/projects                                200, 18 projects
+GET /v9/projects?teamId=team_...                200, projects: []
+GET /v9/projects/prj_...?teamId=team_...        404  not_found
+GET /v9/projects/prj_...?slug=<the team slug>   404  not_found
+GET /v9/projects/<name>                         200, the whole project
+GET /v2/user                                    200
+GET /v2/teams                                   200, role OWNER of that team
+```
+
+The credential reads the user, reads the team it owns, and reads any project in
+full. Nothing is out of scope. **Every call that fails has one thing in common:
+a `teamId` or a `slug` in it.** Drop it and the same request returns 200.
+
+The tell is the second line. Asking for the projects of a team returns none,
+and every project in the first line has `accountId` equal to that same team. A
+permission problem does not look like this. A lookup landing somewhere else
+does.
+
+Why, as far as it has been established: the token an MCP session issues is
+already bound to one account context, so naming a team asks it to resolve
+somewhere it does not map into, and Vercel answers 404 rather than 403. That
+last part is inference. The table above is not.
+
+### What it costs you
+
+**Two of Vercel's own MCP tools cannot be called successfully at all.**
+`get_project_deployment_protection` and `update_project_deployment_protection`
+both mark `teamId` **required** in their schemas, so they always send the one
+argument that breaks this credential. Neither the team id nor the team slug
+works. Use the REST route instead, with no `teamId`:
+
+```
+call_provider_api <client> vercel GET   /v9/projects/<name>
+call_provider_api <client> vercel PATCH /v9/projects/<name>  {"ssoProtection": null}
+```
+
+**A new project is created with Vercel Authentication on.** Every deployment URL
+then redirects to a login, so the site you just deployed is unreachable by
+anyone you send it to. The `PATCH` above is how to turn it off.
+
+Since 0.7.0 Munim says both of these beside the provider's own answer rather
+than leaving you to work them out. The answer itself is never altered.
 
 ## Verified
 
