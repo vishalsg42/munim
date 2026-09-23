@@ -84,10 +84,18 @@ you. Never invent a config file; `munim doctor` names the real one.
 munim doctor
 ```
 
-**`doctor` reports only what is wrong.** Checked against an empty home
-directory, a fresh install prints its version line and `Working.` Having no
-client connected is not a problem and is not listed, so an almost empty report
-is the success case rather than a sign the check did not run.
+**`doctor` reports only what is wrong.** Run from a published install with an
+empty home directory, a fresh install prints exactly this:
+
+```
+munim 0.8.1, python 3.13, agents off (local)
+
+No problems found.  Run with --verbose to see what is connected. (0.0s)
+```
+
+Having no client connected is not a problem and is not listed, so that report
+is the success case rather than a sign the check did not run. `agents off` is
+also correct on a fresh install: the model is opt in.
 
 Anything it does list comes with the fix on the next line, naming the command
 or the file. Take the fix it gives rather than inferring one: several of those
@@ -103,6 +111,19 @@ reading the challenge back:
 ```bash
 munim servers add acme https://mcp.acme.com/mcp
 munim servers export acme     # the row it derived, ready for a pull request
+```
+
+`add` prints what it worked out and what to do next, and `export` prints the row
+plus where to paste it. Run end to end from a published install against a live
+server, the export looks like this:
+
+```python
+    "acme": RemoteServer(
+        provider="acme",
+        url="https://mcp.acme.com/mcp",
+        public_client=True,
+        note="confirmed: registers clients at ..., auth methods [...]",
+    ),
 ```
 
 The second command is the one worth knowing: contributing a provider back is a
