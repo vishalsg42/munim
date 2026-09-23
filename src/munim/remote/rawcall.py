@@ -46,6 +46,7 @@ base URL and header shape are known. Inventing the others would be guessing.
 import httpx
 
 from munim.container import UnsupportedProvider, _AUTH
+from munim.remote import hints
 
 # What a body is truncated to in the log. The body is what was *sent*, which the
 # caller wrote and already has; it is recorded so a change can be traced back.
@@ -133,6 +134,14 @@ async def call(container, provider: str, path: str, *, method: str = "GET",
         out["result"] = response.json()
     except ValueError:
         out["result"] = response.text[:4000]
+
+    # Beside the answer, never instead of it. Vercel returns 404 for a project
+    # this credential can read, and an empty list for a team that owns
+    # eighteen, whenever a teamId is supplied. Both are true answers to a
+    # question the caller did not mean to ask (#46).
+    note = hints.about(provider, path, query, out)
+    if note:
+        out["hint"] = note
 
     if log is not None:
         # `mutation` whatever the method, and no response body. See the module

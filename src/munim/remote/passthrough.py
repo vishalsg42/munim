@@ -28,6 +28,7 @@ which is why every call goes in the run log.
 
 import json
 
+from munim.remote import hints
 from munim.remote.servers import all_servers, server_for
 from munim.remote.session import NeedsLogin, NoRemoteServer, session_for
 
@@ -266,8 +267,16 @@ async def call_tool(client: str, provider: str, tool: str,
     flat = _flatten(result)
     if log is not None:
         _record(log, client, provider, tool, arguments, flat, read_only, stage)
-    return {"client": client, "provider": provider, "tool": tool,
-            "read_only": read_only, **flat}
+    out = {"client": client, "provider": provider, "tool": tool,
+           "read_only": read_only, **flat}
+    # The provider's own answer is untouched; this goes beside it. Vercel's
+    # project tools mark teamId required and that is the one argument which
+    # makes a session token resolve to nothing, so both of them answer 404 for
+    # a project that is there (#46).
+    note = hints.about(provider, tool, arguments, out)
+    if note:
+        out["hint"] = note
+    return out
 
 
 def _record(log, client, provider, tool, arguments, flat, read_only, stage):

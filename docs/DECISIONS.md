@@ -1700,3 +1700,61 @@ review, and connects to nothing.
 repository rather than in somebody else's package, the contributor needs no
 Python, and `tests/test_provider_docs.py` already fails when a row arrives
 without a page, so the check was written before the lane existed.
+
+## D46: A hint goes beside the answer, and only where something was measured
+
+An operator deployed to Vercel, listed the projects, saw the new one, asked for
+it by id and got 404. By name: 404. With the team slug: 404. Through Vercel's
+own MCP tools: 404. Six calls hunting a wrong project id, a wrong team and a
+wrong slug, for a project that was there the whole time (#46).
+
+Nothing refused and nothing broke. Vercel returns 404 for a resource that is
+out of a token's reach rather than 403, so "not permitted" arrives spelled
+"you typed the wrong thing", and the caller goes looking for a mistake they did
+not make.
+
+Measured 2026-09-17 against a live session, and the answer was not the one in
+the issue or the one on this project's own Vercel page:
+
+```
+GET /v9/projects                            200, 18 projects
+GET /v9/projects?teamId=team_...            200, projects: []
+GET /v9/projects/prj_...?teamId=team_...    404
+GET /v9/projects/<name>                     200, the whole project
+GET /v2/teams                               200, role OWNER of that team
+```
+
+Not scope. The credential reads the user, the team it owns and any project in
+full. Every failing call carried `teamId` or `slug`, and every project in the
+listing has `accountId` equal to the team that reports none of them.
+
+**Three decisions came out of it.**
+
+**The hint goes beside the answer, never instead of it.** `hints.about` returns
+a sentence and the provider's own status, body and error are returned exactly
+as they arrived. A helper that rewrote a result would be a second thing to
+distrust at the moment somebody is already confused, and the whole failure here
+was a layer being confidently wrong about what a response meant.
+
+**It fires only on a measurement, never on a category.** A 404 from Cloudflare
+gets nothing, because Cloudflare was never measured this way. A 403 from Vercel
+gets nothing either: that is Vercel saying no, which is a different problem with
+a different fix, and covering it with a sentence about `teamId` would be the
+same fault this exists to remove. The module holds one provider's measured
+table with its date, the way `servers.py` does, and a hint guessed from
+documentation is worse than no hint because it sends somebody confidently in
+one direction.
+
+**The dead default was deleted rather than left alone.** `Vercel.__init__` took
+a `team_id` that nothing supplied. It read as a feature waiting to be wired up
+and was the opposite: wiring it up would have put `teamId` on every call in
+`checks/hosting.py` and silently emptied every Vercel check, with a 200 each
+time. A default argument is an invitation, and this one invited the bug.
+
+**What this does not do.** `call_provider_tool` still forwards arguments
+untouched, so Vercel's two project tools still fail. Stripping `teamId` behind
+the caller's back would make Munim lie about what it sent, and the tools mark it
+required, so there is no honest call to make. The hint names the REST route that
+works instead. That is the ceiling set by whoever wrote the provider's MCP
+server, which `rawcall.py` exists to get under, and it is the right place for
+this to stop.

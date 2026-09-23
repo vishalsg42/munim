@@ -57,15 +57,17 @@ class Vercel:
 
     name = "vercel"
 
-    def __init__(self, container: Container, team_id: str = "") -> None:
+    def __init__(self, container: Container) -> None:
         self._container = container
-        self._team = team_id
 
+    # No `teamId`. It used to be a constructor argument nothing supplied, which
+    # read as a feature waiting to be wired up and was the opposite: measured
+    # 2026-09-17, a session token with a teamId returns 404 for a project it
+    # reads fine without one, and an empty list for a team that owns eighteen.
+    # Wiring this up would have silently emptied every check here. Deleted
+    # rather than left as a default, because a default is an invitation (#46).
     def _params(self, **extra) -> dict:
-        params = {k: v for k, v in extra.items() if v not in (None, "")}
-        if self._team:
-            params["teamId"] = self._team
-        return params
+        return {k: v for k, v in extra.items() if v not in (None, "")}
 
     async def _get(self, path: str, **params):
         async with self._container.http("vercel") as http:

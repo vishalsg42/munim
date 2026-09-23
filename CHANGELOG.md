@@ -6,6 +6,37 @@ Entries describe what changed for somebody using munim. The reasoning behind
 each decision lives in [docs/DECISIONS.md](docs/DECISIONS.md), and the numbered
 references below point at it.
 
+## 0.7.0
+
+### Added
+
+- **A Vercel 404 now says to drop the `teamId`.** Vercel returns 404 for a
+  project the same credential reads fine without a team named, and a 200 with
+  an empty list for a team that owns eighteen projects, so "not permitted"
+  arrives spelled "you typed the wrong thing". Six calls went into hunting a
+  wrong project id, a wrong team and a wrong slug for a project that was there
+  the whole time. Results from `call_provider_api` and `call_provider_tool` now
+  carry a `hint` beside the provider's own answer, which is returned exactly as
+  it arrived. It fires only where something was measured: a 404 from another
+  provider, or a 403 from Vercel, gets nothing (D46).
+- **A successful `deploy_to_vercel` now warns that the site is not reachable.**
+  A new project is created with Vercel Authentication on, so every deployment
+  URL redirects to a login. The hint names the call that turns it off, because
+  Vercel's own two tools for it mark `teamId` required and therefore cannot
+  succeed on this credential.
+
+### Fixed
+
+- **The Vercel provider page blamed the wrong thing.** It said the narrow
+  `openid offline_access` scope was why reads came back empty. Measured against
+  a live session, the credential reads the user, the team it owns and any
+  project in full, and every failing call carried a `teamId` or a `slug`. The
+  observation was right and the explanation was not (D46).
+- **`Vercel.__init__` no longer takes a `team_id` nothing supplies.** It read as
+  a feature waiting to be wired up and was the opposite: supplying it would have
+  put `teamId` on every call in the hosting checks and emptied all of them,
+  returning 200 each time.
+
 ## 0.6.0
 
 ### Added
