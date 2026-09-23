@@ -1815,3 +1815,45 @@ consequence rather than a missing record being filled in.
 (`fix(dkim_selector="resend")`), which is the same coupling one level down, and
 a domain sending through anything else is checked against a key that was never
 going to be there. Recorded in `docs/ROADMAP.md` rather than fixed here.
+
+
+## D48: The repair had the right change and the wrong order
+
+D47 made a monitoring-only DMARC policy repairable. Run against the real client
+it was written for, it proposed raising that policy to `p=quarantine`. That
+client's other failing check is `dkim_present`.
+
+Those two together are the common pair, and the order between them is the whole
+of DMARC deployment advice. DMARC passes when SPF **or** DKIM aligns. With no
+signing key, every message rests on SPF alignment alone, and the mail that fails
+SPF alignment is ordinary rather than hostile: forwarded messages, mailing
+lists, anything sent by a sender who is not in the record. At `p=none` those are
+counted in a report. At `p=quarantine` they go to spam.
+
+So the change was correct in isolation and wrong in sequence. Applied, it would
+not have hardened that domain. It would have broken delivery for mail that is
+genuinely theirs, silently, in somebody else's business, and the run log would
+have recorded a successful repair.
+
+**What this says about the design, which is why it is written down rather than
+just fixed.** Every check in the catalogue is independent, deliberately: a fact
+about a domain is decided by code and never by a model (D34), and each one
+stands alone. Repairs are not independent in the same way. Two faults that are
+each individually repairable can have an order between them, and `fix` had no
+way to express that. The guard here is specific to this pair rather than a
+general mechanism, and a second instance of the same shape is the point at which
+one is worth building rather than now.
+
+It also says something about where this was caught. Every test passed. Eighteen
+of them, three mutation-checked, all agreeing with a change that would have
+damaged a live domain, because they all encoded the same missing assumption as
+the code. What caught it was running the thing against a real account and
+reading what it proposed, which is the fourth entry in CONTRIBUTING's list of
+what a good change looks like and the one easiest to skip when the tests are
+green.
+
+The key is matched on `_domainkey` rather than on the selector, because the
+selector is the provider's choice and Munim only knows the one it assumes. A
+domain signing through something else still signs, and refusing a safe change
+because the key is not where we expected is the same fault wearing the other
+sign.

@@ -104,13 +104,18 @@ def test_an_unknown_target_policy_is_refused():
 # the bug.
 
 class FakeRecord:
-    def __init__(self, content):
+    def __init__(self, content, name=""):
         self.content = content
+        self.name = name
 
 
 class FakeCloudflare:
-    def __init__(self, dmarc=""):
+    def __init__(self, dmarc="", signed=True):
         self._dmarc = dmarc
+        # Signed by default, because an unsigned domain is the refusal case and
+        # a fake that defaults to it would make every other test pass for the
+        # wrong reason.
+        self._signed = signed
         self.asked = []
 
     async def zone_id(self, domain):
@@ -119,7 +124,10 @@ class FakeCloudflare:
     async def records(self, zone, *, type=None, name=None):
         self.asked.append((type, name))
         if name and name.startswith("_dmarc.") and self._dmarc:
-            return [FakeRecord(self._dmarc)]
+            return [FakeRecord(self._dmarc, name)]
+        if not name and type == "CNAME" and self._signed:
+            return [FakeRecord("x.dkim.example",
+                               "resend._domainkey.acme.example")]
         return []
 
 
@@ -145,10 +153,10 @@ class FakeContainer:
     label = "Acme Ltd"                # what a person reads
 
 
-async def _plan_with(monkeypatch, tmp_path, dmarc):
+async def _plan_with(monkeypatch, tmp_path, dmarc, signed=True):
     from munim.agent import mailplan
 
-    cloudflare = FakeCloudflare(dmarc)
+    cloudflare = FakeCloudflare(dmarc, signed)
     monkeypatch.setattr(mailplan, "Cloudflare", lambda *a, **k: cloudflare)
     monkeypatch.setattr(mailplan, "Resend", RefusingResend)
     monkeypatch.setattr(mailplan, "PLANS_DIR", tmp_path / "plans")
@@ -213,3 +221,72 @@ async def test_a_domain_already_enforcing_adds_no_change(monkeypatch, tmp_path):
     assert [c for c in made.changes if c.purpose == "DMARC"] == []
     assert ("TXT", "_dmarc.acme.example") in cloudflare.asked, \
         "the record was never read, so the absence proves nothing"
+
+
+# ---- and not before the mail is signed -----------------------------------
+#
+# DMARC passes when SPF *or* DKIM aligns. With no DKIM every message rests on
+# SPF alignment alone, and the mail that fails it is ordinary: forwarded
+# messages, mailing lists, any sender not in the record. At p=none those are
+# counted. At p=quarantine they go to spam.
+#
+# So raising the policy on an unsigned domain does not harden it. It breaks
+# delivery for mail that is genuinely theirs, quietly, for somebody else's
+# business. This guard was missing from the first version of this change, which
+# would have proposed exactly that for the one real client it was written for:
+# DKIM failing and DMARC at p=none, together, which is the common pair.
+
+async def test_an_unsigned_domain_is_not_raised_to_quarantine(
+        monkeypatch, tmp_path):
+    made, _ = await _plan_with(
+        monkeypatch, tmp_path, "v=DMARC1; p=none", signed=False)
+
+    assert [c for c in made.changes if c.purpose == "DMARC"] == []
+
+
+async def test_and_the_refusal_says_publish_dkim_first(monkeypatch, tmp_path):
+    """A repair that declines without saying why reads as one that did not
+    notice. The next step is the actionable part."""
+    made, _ = await _plan_with(
+        monkeypatch, tmp_path, "v=DMARC1; p=none", signed=False)
+
+    said = " ".join(made.skipped).lower()
+    assert "dkim" in said and "first" in said
+    assert "spf alignment" in said, "the reason has to name the mechanism"
+
+
+async def test_a_signing_key_under_any_selector_counts(monkeypatch, tmp_path):
+    """Matched on `_domainkey`, not on the selector Munim happens to assume. A
+    domain signing through something other than Resend still signs, and calling
+    it unsigned would refuse a change that is safe."""
+    from munim.agent import mailplan
+
+    class SignedElsewhere(FakeCloudflare):
+        """A TXT key under a selector Munim does not assume."""
+
+        async def records(self, zone, *, type=None, name=None):
+            self.asked.append((type, name))
+            if name and name.startswith("_dmarc."):
+                return [FakeRecord("v=DMARC1; p=none", name)]
+            if not name and type == "TXT":
+                return [FakeRecord("v=DKIM1; k=rsa; p=MIGf...",
+                                   "mail._domainkey.acme.example")]
+            return []
+
+    cloudflare = SignedElsewhere("v=DMARC1; p=none")
+    monkeypatch.setattr(mailplan, "Cloudflare", lambda *a, **k: cloudflare)
+    monkeypatch.setattr(mailplan, "Resend", RefusingResend)
+    monkeypatch.setattr(mailplan, "PLANS_DIR", tmp_path / "plans")
+    made = await mailplan.plan(cast(Container, FakeContainer()),
+                               "acme.example", cast(RunLog, FakeLog()))
+
+    assert [c.purpose for c in made.changes] == ["DMARC"]
+
+
+async def test_the_zone_is_actually_read_for_a_key(monkeypatch, tmp_path):
+    """An absence that was never looked for proves nothing, which is the
+    mistake the first version of this made."""
+    _, cloudflare = await _plan_with(
+        monkeypatch, tmp_path, "v=DMARC1; p=none", signed=False)
+
+    assert ("TXT", None) in cloudflare.asked or ("CNAME", None) in cloudflare.asked

@@ -6,6 +6,25 @@ Entries describe what changed for somebody using munim. The reasoning behind
 each decision lives in [docs/DECISIONS.md](docs/DECISIONS.md), and the numbered
 references below point at it.
 
+## 0.8.1
+
+### Fixed
+
+- **The DMARC repair in 0.8.0 would have quarantined mail that was genuinely
+  the client's.** DMARC passes when SPF *or* DKIM aligns. On a domain that
+  publishes no signing key every message rests on SPF alignment alone, and the
+  mail that fails it is ordinary: forwarded messages, mailing lists, anything
+  from a sender not in the record. At `p=none` those are counted; at
+  `p=quarantine` they go to spam. So raising the policy on an unsigned domain
+  does not harden it, it breaks delivery, quietly and for somebody else's
+  business.
+
+  The repair now reads the zone for a signing key first, matching on
+  `_domainkey` rather than on the selector Munim assumes, and declines with the
+  order to do it in: publish DKIM, then raise the policy. Caught by running
+  0.8.0 against the real client it was written for, whose two failing checks
+  are exactly that pair.
+
 ## 0.8.0
 
 ### Fixed
