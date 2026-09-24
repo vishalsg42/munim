@@ -60,7 +60,7 @@ class FakeBackend:
 
 async def _log_in(ring, client, provider):
     await KeychainTokenStorage(client, provider, ring).set_tokens(
-        OAuthToken(access_token="live-session", token_type="Bearer")
+        OAuthToken(access_token="example-session", token_type="Bearer")
     )
 
 

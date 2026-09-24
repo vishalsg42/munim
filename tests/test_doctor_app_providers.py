@@ -46,7 +46,7 @@ def test_the_fix_names_the_helper(monkeypatch):
 def test_once_registered_it_reads_as_ready(monkeypatch):
     found = _lines(monkeypatch,
                    GMAIL_OAUTH_CLIENT_ID="an-id.example.invalid",
-                   GMAIL_OAUTH_CLIENT_SECRET="a-secret")
+                   GMAIL_OAUTH_CLIENT_SECRET="example-secret")
 
     assert found["Login: gmail"].status == "ok"
 

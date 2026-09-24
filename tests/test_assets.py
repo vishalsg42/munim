@@ -66,7 +66,7 @@ def test_dns_records_carry_their_value_in_attributes():
 def test_an_asset_cannot_carry_a_credential():
     with pytest.raises(Exception):
         Asset(client="a", provider="vercel", kind="project", identifier="x",
-              token="sk-secret")
+              token="example-token")
 
 
 def test_facets_are_independent():

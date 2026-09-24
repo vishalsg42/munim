@@ -193,7 +193,7 @@ async def test_a_non_json_answer_comes_back_as_text(monkeypatch):
 class Sessions:
     """A vault holding one MCP session and no pasted key."""
 
-    def __init__(self, provider="vercel", token="sess-token"):
+    def __init__(self, provider="vercel", token="example-token"):
         import json
         self.store = {
             (f"munim-mcp:{provider}:tokens", "c_1"): json.dumps(
@@ -221,7 +221,7 @@ def test_vercel_borrows_the_session_token_because_its_api_takes_it():
     bureaucracy, and it is the exact gap that blocked an operator."""
     box = Container("c_1", NoKeys(), keyring=Sessions())
 
-    assert box._credential("vercel") == "sess-token"
+    assert box._credential("vercel") == "example-token"
 
 
 def test_resend_does_not_borrow_it_because_its_api_refuses():
