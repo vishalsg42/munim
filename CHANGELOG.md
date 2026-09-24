@@ -11,8 +11,8 @@ references below point at it.
 ### Fixed
 
 - **Six placeholders were shaped like real Google OAuth client IDs.** Test
-  fixtures, the Gmail provider page and the setup script all used
-  `<something>.apps.googleusercontent.com`. None was a real credential and a
+  fixtures, the Gmail provider page and the setup script all used a value
+  ending in Google's OAuth client-id domain. None was a real credential and a
   scanner cannot tell, which is the point: a fixture shaped like a credential is
   indistinguishable from one until somebody looks. They are `example.invalid`
   now, and the docs name the value instead of imitating it.
