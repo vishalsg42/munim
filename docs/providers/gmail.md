@@ -105,7 +105,7 @@ Application type: **Desktop app**. Name it anything. Create.
 Store them with:
 
 ```bash
-munim config set gmail --client-id ...apps.googleusercontent.com
+munim config set gmail --client-id <the client ID Google gave you>
 ```
 
 It prompts for the secret rather than taking it as an argument, because an

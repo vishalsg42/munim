@@ -6,6 +6,25 @@ Entries describe what changed for somebody using munim. The reasoning behind
 each decision lives in [docs/DECISIONS.md](docs/DECISIONS.md), and the numbered
 references below point at it.
 
+## 0.8.3
+
+### Fixed
+
+- **Six placeholders were shaped like real Google OAuth client IDs.** Test
+  fixtures, the Gmail provider page and the setup script all used a value
+  ending in Google's OAuth client-id domain. None was a real credential and a
+  scanner cannot tell, which is the point: a fixture shaped like a credential is
+  indistinguishable from one until somebody looks. They are `example.invalid`
+  now, and the docs name the value instead of imitating it.
+- **The test that keeps Google credentials out of the repository only read
+  `src/`.** That is why the six sat in `tests/`, `docs/` and `scripts/` for
+  months while the guard passed. It now reads every tracked file, and builds
+  the pattern at run time so it can hold the rule without tripping it.
+- **A test executed the output of the function it was testing.** The export
+  round-trip used `eval` on the generated source. It parses it with `ast` now,
+  which catches the same faults and does not run whatever the generator
+  decided to print.
+
 ## 0.8.2
 
 ### Fixed

@@ -52,7 +52,7 @@ def test_the_mcp_route_sets_no_scope_and_that_is_deliberate(monkeypatch):
     """
     from munim.remote.session import auth_for
 
-    monkeypatch.setenv("GMAIL_OAUTH_CLIENT_ID", "an-id.apps.googleusercontent.com")
+    monkeypatch.setenv("GMAIL_OAUTH_CLIENT_ID", "an-id.example.invalid")
     monkeypatch.setenv("GMAIL_OAUTH_CLIENT_SECRET", "a-secret")
 
     auth = auth_for("c_x", "gmail", label="Acme", keyring=Ring())
