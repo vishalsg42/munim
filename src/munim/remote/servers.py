@@ -299,7 +299,7 @@ _GOOGLE = {
     # header instead, which is how a coding agent connects to it:
     #
     #   stitch: https://stitch.googleapis.com/mcp
-    #   Headers: X-Goog-Api-Key: AQ.Ab8RN6...
+    #   Headers: X-Goog-Api-Key: <your AI Studio key>
     #
     # So the entry sent people through ten minutes of Google Cloud, a consent
     # screen and a test user list, for a server that wanted a header. Sharing an

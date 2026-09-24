@@ -853,7 +853,7 @@ wheels = [
 
 [[package]]
 name = "munim"
-version = "0.8.3"
+version = "0.8.4"
 source = { editable = "." }
 dependencies = [
     { name = "dnspython" },

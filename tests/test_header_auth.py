@@ -6,7 +6,7 @@ credential. A fourth was in front of us the whole time. Claude Code connects to
 Google's Stitch server like this:
 
     stitch: https://stitch.googleapis.com/mcp
-    Headers: X-Goog-Api-Key: AQ.Ab8RN6...
+    Headers: X-Goog-Api-Key: <your AI Studio key>
 
 No OAuth, no consent screen, no test users, no seven day expiry. Munim's table
 described that same server as needing a registered Google Cloud OAuth

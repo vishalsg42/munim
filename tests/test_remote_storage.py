@@ -353,6 +353,10 @@ def test_no_google_credential_is_committed():
     # does not flag the test that exists to keep secrets out of it.
     CLIENT_ID = "." + "apps." + "googleusercontent.com"
     SECRET = "GOCSPX" + "-"
+    # An AI Studio key prefix. Elided to eight characters it is still the shape
+    # of a key, which a scanner reads the same way whether or not the rest is
+    # there, and so should a reader.
+    STUDIO_KEY = "AQ." + "Ab8"
 
     # Every tracked text file, not just `src`. The narrower version of this
     # passed for months while six placeholders shaped exactly like a Google
@@ -372,6 +376,7 @@ def test_no_google_credential_is_committed():
             continue          # an image or a lockfile, nothing to read
         assert SECRET not in text, f"a Google client secret in {name}"
         assert CLIENT_ID not in text, f"a Google client id in {name}"
+        assert STUDIO_KEY not in text, f"a Google AI Studio key in {name}"
 
 
 def test_a_session_is_tokens_or_an_endpoint():

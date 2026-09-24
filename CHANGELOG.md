@@ -6,6 +6,16 @@ Entries describe what changed for somebody using munim. The reasoning behind
 each decision lives in [docs/DECISIONS.md](docs/DECISIONS.md), and the numbered
 references below point at it.
 
+## 0.8.4
+
+### Fixed
+
+- **An elided Google AI Studio key prefix sat in three files.** The Stitch page,
+  a comment in the provider table and a test docstring all illustrated the
+  header with the first characters of a real key shape. Elided is still the
+  shape of a key, which is how a scanner reads it and how a reader should. It
+  names the value now. The committed-credentials guard covers that prefix too.
+
 ## 0.8.3
 
 ### Fixed
