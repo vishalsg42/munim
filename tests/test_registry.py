@@ -43,7 +43,7 @@ def test_the_registry_file_never_contains_a_secret(tmp_path):
     registry = Registry(path)
     with pytest.raises(Exception):
         registry.add(
-            ClientRecord(name="acme", token="sk-secret-value")
+            ClientRecord(name="acme", token="example-secret-value")
         )
 
     registry.add(ClientRecord(name="acme"))
