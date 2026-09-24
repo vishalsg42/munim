@@ -33,7 +33,7 @@ server:
 
 ```
 stitch: https://stitch.googleapis.com/mcp
-Headers: X-Goog-Api-Key: AQ.Ab8RN6...
+Headers: X-Goog-Api-Key: <your AI Studio key>
 ```
 
 No OAuth anywhere. **Sharing an authorization server says nothing about whether
