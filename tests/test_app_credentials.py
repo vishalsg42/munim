@@ -44,10 +44,10 @@ def _no_env(monkeypatch):
 def test_a_remembered_application_is_found_from_any_directory():
     """The whole point. No file, so no folder to be in the wrong one of."""
     backend = Backend()
-    remember("gmail", "an-id.apps.googleusercontent.com", "a-secret", backend)
+    remember("gmail", "an-id.example.invalid", "a-secret", backend)
 
     assert resolve("gmail", backend) == (
-        "an-id.apps.googleusercontent.com", "a-secret")
+        "an-id.example.invalid", "a-secret")
 
 
 def test_the_environment_beats_the_keychain(monkeypatch):
@@ -77,11 +77,11 @@ def test_stored_reports_presence_and_never_the_secret():
     """`munim config list` prints this. A config command that echoes a secret
     puts it in the scrollback of whoever asked what was configured."""
     backend = Backend()
-    remember("gmail", "an-id.apps.googleusercontent.com", "a-secret", backend)
+    remember("gmail", "an-id.example.invalid", "a-secret", backend)
 
     listed = stored(["gmail", "stitch"], backend)
 
-    assert listed["gmail"]["client_id"] == "an-id.apps.googleusercontent.com"
+    assert listed["gmail"]["client_id"] == "an-id.example.invalid"
     assert listed["gmail"]["has_secret"] is True
     assert "a-secret" not in repr(listed)
     assert listed["stitch"] is None
@@ -110,14 +110,14 @@ def test_the_session_uses_it(monkeypatch):
     from munim.remote.storage import KeychainTokenStorage
 
     backend = Backend()
-    remember("gmail", "an-id.apps.googleusercontent.com", "a-secret", backend)
+    remember("gmail", "an-id.example.invalid", "a-secret", backend)
     monkeypatch.setattr("munim.appcreds.default_backend", lambda: backend)
 
     ring = Ring()
     auth_for("c_x", "gmail", label="Acme", keyring=ring)
 
     seeded = KeychainTokenStorage("c_x", "gmail", ring)._read("client")
-    assert seeded["client_id"] == "an-id.apps.googleusercontent.com"
+    assert seeded["client_id"] == "an-id.example.invalid"
     assert seeded["client_secret"] == "a-secret"
 
 
@@ -145,14 +145,14 @@ def test_listing_what_is_configured_never_reads_the_secret():
     from munim.appcreds import client_id_of, has_secret_for
 
     backend = Backend()
-    remember("gmail", "an-id.apps.googleusercontent.com", "a-secret", backend)
+    remember("gmail", "an-id.example.invalid", "a-secret", backend)
 
     # The id comes from a call that cannot see the secret at all.
-    assert client_id_of("gmail", backend) == "an-id.apps.googleusercontent.com"
+    assert client_id_of("gmail", backend) == "an-id.example.invalid"
     assert has_secret_for("gmail", backend) is True
 
     listed = stored(["gmail"], backend)
-    assert listed["gmail"]["client_id"] == "an-id.apps.googleusercontent.com"
+    assert listed["gmail"]["client_id"] == "an-id.example.invalid"
     assert "a-secret" not in repr(listed)
 
 

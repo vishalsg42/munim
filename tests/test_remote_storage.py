@@ -340,6 +340,7 @@ def test_no_google_credential_is_committed():
     """Whether to ship one is a decision about this repository, and until it is
     made deliberately there must not be one here by accident."""
     import pathlib
+    import subprocess
 
     from munim.remote.servers import SERVERS
 
@@ -347,12 +348,30 @@ def test_no_google_credential_is_committed():
         assert "googleusercontent" not in server.note, provider
         assert "GOCSPX" not in server.note, provider
 
+    # Built at run time rather than written out, so this file can hold the
+    # rule without tripping it, and so a secret scanner reading the repository
+    # does not flag the test that exists to keep secrets out of it.
+    CLIENT_ID = "." + "apps." + "googleusercontent.com"
+    SECRET = "GOCSPX" + "-"
+
+    # Every tracked text file, not just `src`. The narrower version of this
+    # passed for months while six placeholders shaped exactly like a Google
+    # client id sat in tests, docs and a setup script. A scanner run by a
+    # catalog we submitted to found them, and it was right to: a fixture shaped
+    # like a credential is indistinguishable from one until somebody looks.
     root = pathlib.Path(__file__).parent.parent
-    for path in (root / "src").rglob("*.py"):
-        text = path.read_text()
-        assert "GOCSPX-" not in text, f"a Google client secret in {path.name}"
-        assert ".apps.googleusercontent.com" not in text, \
-            f"a Google client id in {path.name}"
+    tracked = subprocess.run(["git", "ls-files"], cwd=root, capture_output=True,
+                             text=True, check=True).stdout.split()
+    for name in tracked:
+        path = root / name
+        if path == pathlib.Path(__file__) or not path.is_file():
+            continue
+        try:
+            text = path.read_text()
+        except (UnicodeDecodeError, OSError):
+            continue          # an image or a lockfile, nothing to read
+        assert SECRET not in text, f"a Google client secret in {name}"
+        assert CLIENT_ID not in text, f"a Google client id in {name}"
 
 
 def test_a_session_is_tokens_or_an_endpoint():

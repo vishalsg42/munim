@@ -11,6 +11,7 @@ And it must never carry a credential, because the destination is a public pull
 request.
 """
 
+import ast
 import json
 
 import pytest
@@ -22,16 +23,37 @@ from munim.remote.servers import (SERVERS, CredentialInUrl, RemoteServer,
 
 # ---- the row survives the trip ------------------------------------------
 
+def _rebuilt(printed: str):
+    """The exported block, parsed back into the row it describes.
+
+    Parsed rather than evaluated. `eval` would be three lines shorter and it
+    would also mean this test executes whatever the function under test decided
+    to print, which is the one thing a test of a code generator must not do. A
+    security scanner is right to flag it and so is a reader.
+
+    Returns (name, RemoteServer).
+    """
+    entry = ast.parse(f"{{{printed.rstrip().rstrip(',')}}}", mode="eval").body
+    assert isinstance(entry, ast.Dict) and len(entry.keys) == 1
+    key, call = entry.keys[0], entry.values[0]
+    assert isinstance(key, ast.Constant), "the key is a plain provider name"
+    assert isinstance(call, ast.Call), "the value is a RemoteServer(...)"
+    assert ast.unparse(call.func) == "RemoteServer"
+    assert not call.args, "every field is named, so a reviewer can read it"
+    fields = {kw.arg: ast.literal_eval(kw.value)
+              for kw in call.keywords if kw.arg}
+    return key.value, RemoteServer(**fields)
+
+
 def test_every_built_in_row_exports_to_source_that_rebuilds_it(capsys):
     """The strongest form of the claim. Not "the fields are present" but "the
     block you paste reconstructs the row you exported", checked against all
     eleven rather than against one hand-written example."""
     for name in SERVERS:
         export_server(name)
-        printed = capsys.readouterr().out
-        # The block is a dict entry: `"name": RemoteServer(...),`
-        built = eval(f"dict({{{printed.rstrip().rstrip(',')}}})")  # noqa: S307
-        assert built[name] == SERVERS[name], f"{name} did not survive export"
+        parsed, built = _rebuilt(capsys.readouterr().out)
+        assert parsed == name
+        assert built == SERVERS[name], f"{name} did not survive export"
 
 
 def test_an_exported_row_reads_back_through_the_user_file(tmp_path, monkeypatch):
@@ -58,7 +80,9 @@ def test_the_note_is_not_reworded_by_being_wrapped():
     note = ("confirmed 2026-09-15: a per-installation endpoint answers "
             "tools/list with 401 and a Bearer challenge, and its protected "
             "resource metadata names a per-installation authorization server")
-    assert eval(f"({_as_source(note, 'note')})") == note  # noqa: S307
+    # literal_eval, not eval: implicit string concatenation is folded by the
+    # parser, so the safe reader handles exactly this and nothing else.
+    assert ast.literal_eval(f"({_as_source(note, 'note')})") == note
 
 
 def test_only_what_differs_from_the_default_is_printed(capsys):

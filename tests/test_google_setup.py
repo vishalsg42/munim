@@ -35,7 +35,7 @@ def test_it_never_creates_a_project():
 def test_an_existing_client_id_stops_it(tmp_path):
     """`.env` is the idempotence. Set means done."""
     (tmp_path / ".env").write_text(
-        "GMAIL_OAUTH_CLIENT_ID=already-there.apps.googleusercontent.com\n")
+        "GMAIL_OAUTH_CLIENT_ID=already-there.example.invalid\n")
 
     done = _run([], cwd=tmp_path)
 
@@ -65,7 +65,7 @@ def test_it_says_what_it_cannot_do(tmp_path):
 def test_stitch_is_supported_too(tmp_path):
     """The same Google story, and the table lists both."""
     (tmp_path / ".env").write_text(
-        "STITCH_OAUTH_CLIENT_ID=already-there.apps.googleusercontent.com\n")
+        "STITCH_OAUTH_CLIENT_ID=already-there.example.invalid\n")
 
     done = _run(["--provider", "stitch"], cwd=tmp_path)
 

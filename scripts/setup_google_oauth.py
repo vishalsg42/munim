@@ -154,7 +154,7 @@ The rest is by hand, because Google publishes no API for it.
      location Munim reads regardless of where you run from (a .env in the
      current directory works too):
 
-       {key}_OAUTH_CLIENT_ID=...apps.googleusercontent.com
+       {key}_OAUTH_CLIENT_ID=<the client ID from step 3>
        {key}_OAUTH_CLIENT_SECRET=...
 
   5. https://console.cloud.google.com/auth/audience?project={project}
